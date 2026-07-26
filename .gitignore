@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+.vite/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# Test / coverage
+coverage/
+
+# Local scratch / tooling
+.scratch/
+*.local
+
+# Stale Python venv (project is Node — see ADR-0005)
+backend/.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code tooling / installed skills (reproducible via skills-lock.json)
+.claude/
+.agents/

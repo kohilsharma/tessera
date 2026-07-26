@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp@latest"]
+    },
+    "parallel-search": {
+      "type": "http",
+      "url": "https://search.parallel.ai/mcp",
+      "headers": {
+        "Authorization": "Bearer eETY8eeRNgJnAgUset31PA06Ga2kK0vlQeXVx7gB"
+      }
+    }
+  }
+}
