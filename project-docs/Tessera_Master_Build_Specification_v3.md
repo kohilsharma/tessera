@@ -37,8 +37,11 @@ Build a **modular monolith with asynchronous workers**:
 - one independently running Node worker process;
 - one PostgreSQL database with pgvector;
 - one Redis instance with BullMQ;
-- one React application;
-- an optional Neo4j projection service enabled only after the relational graph module is stable.
+- one React application.
+
+> **ADR-0019 supersedes the original Neo4j plan.** The knowledge graph ships in plain
+> PostgreSQL tables traversed with recursive CTEs. Neo4j is explicitly deferred post-course;
+> it is not part of the graded build. Apache AGE remains an optional later projection.
 
 This is production-shaped without creating premature microservices.
 
@@ -54,9 +57,16 @@ Every feature is assigned to a delivery tier.
 
 ### 0.4 Explicit technology decisions
 
-**Use now:** Express, TypeORM migrations, PostgreSQL, pgvector, Redis, BullMQ Job Schedulers, React/Vite, Zod, Argon2id, OpenAI Responses API with Structured Outputs, Cytoscape.js, Docker Compose.
+**Use now:** Express, TypeORM migrations, PostgreSQL, pgvector, Redis, BullMQ Job Schedulers, React/Vite, Zod, Argon2id, OpenAI-compatible LLM (via env-configured provider), bge-m3 embeddings via TEI, Cytoscape.js, Docker Compose.
 
-**Optional derived service:** Neo4j, only for graph traversal and visualization after PostgreSQL contains validated graph facts.
+**Provider interfaces (ADR-0003):** `EmbeddingProvider` and `SynthesisProvider`, each with a deterministic Mock provider. No model ID is hardcoded in any service; the provider and model are chosen by environment variable. The OpenAI Responses API with Structured Outputs is one valid implementation of the SynthesisProvider interface, not a mandated dependency.
+
+> **ADR-0017 supersedes the original embedding plan.** Default embedding model is `bge-m3`
+> (BAAI, MIT) served locally via TEI at `vector(1024)` with HNSW cosine index. Cheap-API
+> fallbacks: `voyage-3.5-lite` or `gemini-embedding-001` behind the same interface.
+
+> **ADR-0019 supersedes the original graph plan.** The knowledge graph ships in plain
+> PostgreSQL tables; Neo4j is explicitly deferred post-course.
 
 **Do not introduce during this build:** Kafka, Kubernetes, a separate vector database, FastAPI as a primary API, unrestricted Common Crawl ingestion, a full local mirror of GDELT, mobile apps, recommendation systems, or autonomous publication of unreviewed graph relations.
 
@@ -68,11 +78,11 @@ The final system combines the strongest parts of the previous plans:
 
 1. **Master Blueprint v2 remains the application skeleton:** Express API, separate worker, PostgreSQL/pgvector, Redis/BullMQ, React, migrations, RBAC, owned Intelligence Briefs, quotas, structured AI output, and generation monitoring.
 2. **GDELT becomes a first-class discovery connector:** not a replacement for publisher content and not a local firehose mirror.
-3. **Story timelines become real domain data:** Timeline Nodes represent meaningful developments, not merely sorted article cards.
+3. **Story timelines become real domain data:** the timeline is a read view over a Story's Articles ordered over time (ADR-0020), not a generated entity. Optional `TimelineNode` materialization only if a query proves too slow.
 4. **Claims and citations become normalized evidence records:** raw model JSON is retained, but important claims are searchable, reviewable, and linked to source articles.
 5. **Story assignment becomes auditable:** `StoryArticle` replaces a bare `Article.storyId` relationship.
-6. **Tracked topics and notifications become product features:** users can monitor a topic and see new developments.
-7. **An entity/relation graph becomes a bounded P1/P2 module:** facts remain in PostgreSQL; Neo4j is an optional projection, not the source of truth.
+6. **Tracked topics and notifications are cut from the graded build** (ADR-0011, ADR-0020). The expensive "notify me what changed" change-detection + diffing + delivery system remains deferred. The Timeline *view* (showing a Story's evolution) still ships.
+7. **An entity/relation graph becomes a bounded Phase 3.5 module** (ADR-0019): facts remain in PostgreSQL traversed with recursive CTEs; no Neo4j in the graded build. Entity resolution uses a confidence threshold with Admin review; edges are co-occurrence only, each carrying its `source_article_id`.
 8. **AI quality becomes measurable:** prompt versions, evaluation cases, and evaluation runs are first-class concepts.
 
 ### 1.1 Product boundary
@@ -169,7 +179,7 @@ Tessera’s defensible differentiation is not a claim that no other news product
 | Pagination | Keyset pagination for user-facing Story/Article lists; offset pagination acceptable for small Admin tables |
 | Data integrity | Constraints, DTO validation, transactions, unique keys, rights checks |
 | Loading/error/empty states | Required components and route behavior |
-| Local demo | Docker Compose with Postgres, Redis, API, Worker, Web; optional Neo4j profile |
+| Local demo | Docker Compose with Postgres, Redis, API, Worker, Web |
 
 ---
 
@@ -199,8 +209,6 @@ Tessera’s defensible differentiation is not a claim that no other news product
 | View Student context lens | No | Yes | No |
 | View Investor implication lens | No | No | Yes |
 | Create owned Intelligence Briefs | No | Yes | Yes |
-| Track topics | No | Yes | Yes |
-| Receive notifications | No | Yes | Yes |
 | Upload Brief cover image | No | Yes | Yes |
 | Manage another user’s Brief | No | No | No |
 | View raw generation output | Yes | No | No |
@@ -230,12 +238,12 @@ Tessera’s defensible differentiation is not a claim that no other news product
    - consensus claims;
    - source-specific differences;
    - contradictions;
-   - chronological Timeline Nodes;
+   - chronological timeline (Articles + EvidenceSets ordered over time, ADR-0020);
    - expandable citations;
    - entities and source distribution;
    - Student context, background, and unresolved questions.
 6. Save an `IntelligenceBrief` with title, note, category, cover image, capacity, and selected evidence.
-7. Track the topic and receive notifications when new Story developments appear.
+7. ~~Track the topic and receive notifications when new Story developments appear.~~ **Deferred (ADR-0011, ADR-0020):** TrackedTopic and notifications are not part of the graded build.
 8. Re-open the Brief and compare its frozen generation with the latest Story generation.
 
 ### 5.2 Investor journey
@@ -250,7 +258,7 @@ Tessera’s defensible differentiation is not a claim that no other news product
    - uncertainty and caveats;
    - no trade recommendation or numeric target.
 5. Save or track the Story as an Intelligence Brief.
-6. Receive a notification when a new Timeline Node materially changes the evidence.
+6. ~~Receive a notification when a new Timeline Node materially changes the evidence.~~ **Deferred (ADR-0011, ADR-0020):** Notifications are not part of the graded build.
 
 ### 5.3 Admin journey
 
@@ -304,8 +312,11 @@ GDELT DOC discovery ──┘              │
                      │
               Student / Investor UI
 
-PostgreSQL validated graph facts ──► optional Neo4j projection ──► graph traversal UI
+PostgreSQL validated graph facts ──► graph traversal UI (Cytoscape.js)
 ```
+
+> **ADR-0019 supersedes the original Neo4j projection.** The graph ships entirely in
+> PostgreSQL tables traversed with recursive CTEs. No Neo4j in the graded build.
 
 ### 6.1 Runtime processes
 
@@ -314,13 +325,14 @@ PostgreSQL validated graph facts ──► optional Neo4j projection ──► g
 | `web` | React application |
 | `api` | Express HTTP server only; never starts workers |
 | `worker` | BullMQ workers and schedulers |
-| `postgres` | Relational truth, full-text search, vector data |
+| `postgres` | Relational truth, full-text search, vector data, graph tables |
 | `redis` | BullMQ queues, short-lived quotas, caching, locks |
-| `neo4j` optional | Derived graph projection and traversal |
+| `tei` | bge-m3 embedding service (ADR-0017) |
 
 ### 6.2 Deployment rule
 
-The baseline system must work with Neo4j disabled. If Neo4j is unavailable, graph APIs use PostgreSQL and the rest of Tessera remains fully operational.
+The system runs with the baseline Docker Compose services listed above. Graph APIs query
+PostgreSQL recursive CTEs directly — no secondary graph database is required.
 
 ### 6.3 Scalability seams
 
@@ -328,7 +340,7 @@ The baseline system must work with Neo4j disabled. If Neo4j is unavailable, grap
 |---|---|---|
 | Queue | BullMQ/Redis | Kafka/SQS only when measured throughput or cross-service event distribution requires it |
 | Vector search | pgvector | Dedicated vector system only after benchmarked limits |
-| Graph traversal | PostgreSQL adjacency queries; optional Neo4j projection | Neo4j/Aura or another graph service without changing business truth |
+| Graph traversal | PostgreSQL recursive CTEs | Neo4j/Arage or another graph service if the bounded graph outgrows CTE performance (post-course) |
 | File storage | Local persistent volume | S3/GCS through `FileStorageProvider` |
 | Generation | OpenAI Responses API | Other provider through `SynthesisProvider` |
 | Embeddings | OpenAI embedding provider | Controlled re-embedding migration through `EmbeddingProvider` |
@@ -458,7 +470,7 @@ The UI and generation prompts must use wording appropriate to the weakest mode p
 GDELT is used for:
 
 - broad article discovery through DOC API Article List results;
-- tracked-topic discovery;
+- GKG 15-minute firehose for entity/theme substrate (ADR-0018);
 - source and geographic diversity;
 - optional metadata enrichment using available GDELT fields;
 - later research and aggregate analytics through BigQuery.
@@ -780,7 +792,13 @@ This entity satisfies the course’s required owned core business entity.
 
 The backend rejects additions that exceed `articleCapacityLimit`.
 
-### 9.9 Monitoring product
+### 9.9 Monitoring product (DEFERRED — ADR-0011, ADR-0020)
+
+> **ADR-0011 and ADR-0020 cut the monitoring mini-product from the graded build.**
+> TrackedTopic, TrackedTopicRun, and Notification entities, their API routes, and their
+> queue jobs are all deferred. The Timeline *view* (showing a Story's evolution) still ships,
+> but change-detection + alerting does not. These entity definitions are retained for
+> reference; they will not be built in the eight-week course window.
 
 #### `TrackedTopic`
 
@@ -956,7 +974,6 @@ All configuration updates are validated through key-specific Zod schemas.
 - All schema changes use reviewed TypeORM migrations.
 - Destructive migrations require a backup/export step and a rollback note.
 - The pgvector extension is created by migration.
-- Optional Neo4j schema/constraints are maintained separately and may be rebuilt from PostgreSQL.
 
 ### 10.2 Important constraints
 
@@ -1036,7 +1053,10 @@ All routes are prefixed with `/api/v1`.
 | POST | `/briefs/:briefId/refresh` | Owner | Generate a new frozen version |
 | GET | `/briefs/:briefId/changes` | Owner | Compare frozen run with current Story run |
 
-### 11.4 Tracked topics and notifications
+### 11.4 Tracked topics and notifications (DEFERRED — ADR-0011, ADR-0020)
+
+> **Deferred from the graded build.** These routes will not be implemented in the eight-week
+> course window. Retained for reference.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
@@ -1088,16 +1108,14 @@ Use BullMQ Job Schedulers rather than deprecated repeatable-job APIs.
 - `story-processing`
 - `generation`
 - `entity-processing`
-- `notifications`
 - `maintenance`
 - `evaluations`
-- `graph-projection` optional
 
 ### 12.2 Jobs
 
 | Job | Trigger | Output |
 |---|---|---|
-| `run-connector` | Scheduler/Admin/tracked topic | IngestionRun + discovered candidates |
+| `run-connector` | Scheduler/Admin | IngestionRun + discovered candidates |
 | `normalize-article` | Connector result | Normalized candidate |
 | `persist-article` | Normalized candidate | Article or duplicate link |
 | `embed-article` | New/changed Article | ArticleEmbedding |
@@ -1108,11 +1126,11 @@ Use BullMQ Job Schedulers rather than deprecated repeatable-job APIs.
 | `validate-generation` | Raw response | Validated result or escalation |
 | `persist-intelligence` | Validated result | Claims, citations, timeline nodes |
 | `extract-entities` | New analysis/evidence | Entity mentions |
-| `extract-relations` | Eligible Story | Relation assertions and review tasks |
-| `run-tracked-topic` | Scheduler/manual | Topic run and discoveries |
-| `notify-story-change` | New material Timeline Node | User notifications |
 | `run-evaluation-suite` | Admin/CI | EvaluationRuns |
-| `project-graph` | Validated graph changes | Neo4j projection |
+
+> **Deferred jobs (ADR-0011, ADR-0019, ADR-0020):** `run-tracked-topic`,
+> `notify-story-change`, `extract-relations`, and `project-graph` are not part of the
+> graded build. Retained for reference.
 
 ### 12.3 Reliability requirements
 
@@ -1141,7 +1159,7 @@ Use BullMQ Job Schedulers rather than deprecated repeatable-job APIs.
 
 ### 13.2 GDELT DOC path
 
-1. User search fallback or tracked-topic scheduler creates a GDELT query.
+1. Admin-triggered or scheduled GDELT query.
 2. Adapter retrieves Article List JSON/JSONFeed results.
 3. Each result is resolved to a Publisher by domain.
 4. Unknown Publishers may be inserted as inactive/unreviewed or rejected according to config.
@@ -1258,22 +1276,37 @@ Implement:
 - deterministic Mock provider;
 - optional future Anthropic/Gemini providers.
 
-### 15.2 Current OpenAI defaults
+### 15.2 Current defaults (ADR-0003, ADR-0017)
 
-Use environment configuration, not hardcoded business logic:
+Use environment configuration, not hardcoded business logic. **No model ID is hardcoded in any service.**
 
 ```env
-OPENAI_EMBEDDING_MODEL=text-embedding-3-small
-OPENAI_HIGH_VOLUME_MODEL=gpt-5.6-luna
-OPENAI_SYNTHESIS_MODEL=gpt-5.6-terra
-OPENAI_ESCALATION_MODEL=gpt-5.6-sol
+# Embeddings (ADR-0017 supersedes the original text-embedding-3-small plan)
+EMBEDDING_PROVIDER=local                    # local | openai | voyage | gemini
+EMBEDDING_MODEL=bge-m3                      # served via TEI Docker container
+EMBEDDING_DIMENSIONS=1024                   # vector(1024) with HNSW cosine index
+
+# Synthesis — cheap OpenAI-compatible models, swappable via env
+SYNTHESIS_PROVIDER=openai-compatible        # openai-compatible | mock
+SYNTHESIS_MODEL=gpt-4.1-nano                # high-volume extraction (was "Luna")
+SYNTHESIS_MODEL_FLAGSHIP=gpt-4.1            # flagship synthesis (was "Terra")
+SYNTHESIS_MODEL_ESCALATION=gpt-5.5          # difficult/failed case escalation (was "Sol")
 ```
+
+**Embedding fallbacks (ADR-0017):** `voyage-3.5-lite` ($0.02/1M tokens) or `gemini-embedding-001`
+(Google AI Studio free tier). Both truncate cleanly to 1024 dims; exposed through the
+`EmbeddingProvider` interface — same vector space, no re-index on swap within a model family.
+
+> **Original plan (superseded):** `text-embedding-3-small` at `vector(384)` was the initial
+> embedding choice. ADR-0017 upgraded to bge-m3 @ `vector(1024)` for quality and Matryoshka
+> flexibility. The old model names (Luna/Terra/Sol) are retained as comments for reference
+> but the env vars now use generic names.
 
 Recommended policy:
 
-- Luna for high-volume extraction or inexpensive development passes;
-- Terra for Story synthesis and relation extraction;
-- Sol for deterministic escalation of difficult/failed cases;
+- cheap model for bulk extraction or inexpensive development passes;
+- flagship model for Story synthesis and relation extraction;
+- escalation model for deterministic escalation of difficult/failed cases;
 - model snapshots where reproducibility is important and available.
 
 ### 15.3 API
@@ -1376,24 +1409,36 @@ Do not use “publisher omitted X” unless the system has the full permitted re
 
 ## 17. Timeline Intelligence
 
-### 17.1 Timeline Node definition
+> **ADR-0020 supersedes the original Timeline Node generation plan.** The timeline is a
+> **read view over existing data** — a Story's Articles (and EvidenceSets/Briefs) ordered
+> on a time axis, with tone/volume overlays from GKG fields. No change-detection, no
+> diffing, no notifications. Optional `TimelineNode` materialization only if a live query
+> proves too slow; keep it a projection, not a source of truth.
 
-A Timeline Node represents a meaningful development in the real-world Story, not one Article.
+### 17.1 Timeline as a read view
 
-Examples:
+The timeline answers "how this story developed" rather than "what changed since I last looked."
+Each timeline point ties back to Articles and EvidenceSets — it is a query and a visualization
+over data that already exists, not a new extraction or change-detection engine.
 
-- announcement;
-- response;
-- policy revision;
-- legal action;
-- market reaction;
-- correction;
-- new evidence;
-- follow-up decision.
+### 17.2 Data sources for the timeline
 
-### 17.2 Generation
+- Article `seendate` / published timestamps (from ingestion, ADR-0018)
+- GKG tone and volume overlays (free from GKG fields)
+- EvidenceSet creation timestamps
+- GenerationRun timestamps (when analysis was produced)
 
-The model proposes Timeline Nodes with:
+### 17.3 Original plan (retained for reference)
+
+The original spec proposed generated Timeline Nodes as model-output entities with event time,
+headline, evidence, confidence, and chronological ordering. ADR-0020 determined that this is
+unnecessary new infrastructure — the Articles already carry timestamps and the GKG fields
+provide tone/volume. The generated-node approach may be revisited post-course if the read-view
+proves insufficient.
+
+### 17.4 Generation (original, retained for reference)
+
+The model originally proposed Timeline Nodes with:
 
 - event time;
 - headline;
@@ -1404,9 +1449,13 @@ The model proposes Timeline Nodes with:
 
 The backend validates dates against evidence metadata and stores TimelineNodeEvidence.
 
-### 17.3 “What changed”
+### 17.3 "What changed" (DEFERRED — ADR-0011, ADR-0020)
 
-When a new generation completes:
+> **ADR-0011/0020 cut change-detection and notifications from the graded build.**
+> The "what changed" comparison and notification delivery are deferred. The Timeline
+> *view* still ships, but automated comparison and alerting does not.
+
+When a new generation completes (post-course):
 
 1. compare current Evidence Set and prior active generation;
 2. classify added/removed/changed claims;
@@ -1495,9 +1544,13 @@ A wrong merge is more harmful than an unresolved duplicate. Prefer conservative 
 
 Entities and Relations are authoritative PostgreSQL rows with constraints and evidence. The application must be able to answer bounded graph queries from PostgreSQL.
 
-### 18.7 Optional Neo4j projection
+### 18.7 Optional Neo4j projection (DEFERRED — ADR-0019)
 
-Neo4j becomes useful for:
+> **ADR-0019 defers Neo4j post-course.** The knowledge graph ships in plain PostgreSQL
+> tables traversed with recursive CTEs. Neo4j is an optional post-course projection for
+> when the graph outgrows what Postgres CTEs handle comfortably.
+
+Neo4j *would* become useful for:
 
 - bounded multi-hop traversal;
 - time-filtered relationship exploration;
@@ -1505,7 +1558,7 @@ Neo4j becomes useful for:
 - path queries;
 - graph visualization and future graph algorithms.
 
-Projection rules:
+Projection rules (post-course only):
 
 - project only validated/approved entities and relations;
 - use PostgreSQL IDs as immutable graph IDs;
@@ -1527,7 +1580,13 @@ Use Cytoscape.js with:
 
 ---
 
-## 19. Tracked Topics and Notifications
+## 19. Tracked Topics and Notifications (DEFERRED — ADR-0011, ADR-0020)
+
+> **ADR-0011 and ADR-0020 cut the monitoring mini-product from the graded build.**
+> TrackedTopic, TrackedTopicRun, and Notification entities, their API routes, and their
+> queue jobs are all deferred. The Timeline *view* (showing a Story's evolution) still ships,
+> but change-detection + alerting does not. This section is retained for reference; it will
+> not be built in the eight-week course window.
 
 ### 19.1 Tracked Topic behavior
 
@@ -1651,9 +1710,7 @@ Student/Investor:
 - claims/evidence view;
 - entity graph view;
 - My Briefs;
-- Brief detail/comparison;
-- tracked topics;
-- notifications.
+- Brief detail/comparison.
 
 Admin:
 
@@ -1841,10 +1898,9 @@ Use disposable PostgreSQL/Redis services:
 
 - RSS adapter fixtures;
 - GDELT adapter fixture responses;
-- OpenAI provider mocked Responses API payloads;
+- OpenAI-compatible provider mocked payloads;
 - strict structured schema failures;
-- refusal handling;
-- graph repository parity between PostgreSQL and Neo4j for selected queries.
+- refusal handling.
 
 ### 24.4 End-to-end tests
 
@@ -1853,10 +1909,9 @@ Critical journeys:
 1. Student registers, searches, opens Story, saves Brief.
 2. Investor views implication lens and no prohibited advice appears.
 3. Admin rejects incorrect Story assignment.
-4. Tracked Topic discovers Article and generates notification.
-5. A cited claim opens the correct Article.
-6. A frozen Brief displays a newer-analysis-available state.
-7. Entity relation opens supporting evidence.
+4. A cited claim opens the correct Article.
+5. A frozen Brief displays a newer-analysis-available state.
+6. Entity graph shows co-occurrence edges with source articles.
 
 ### 24.5 Golden datasets
 
@@ -1883,11 +1938,8 @@ Baseline:
 - redis;
 - api;
 - worker;
-- web.
-
-Optional profile:
-
-- neo4j.
+- web;
+- tei (bge-m3 embedding service, ADR-0017).
 
 ### 25.2 Health endpoints
 
@@ -1994,65 +2046,78 @@ Exit criteria:
 - Student and Investor outputs are role-separated;
 - Brief ownership/capacity tests pass.
 
-### Week 5 — True timelines and change tracking (P1)
+### Week 5 — Timeline and Phase 3.5 graph (P1)
+
+> **ADR-0011/0020 cut tracked topics and notifications from the graded build.** Week 5 is
+> now the timeline read view + the knowledge graph entity resolution, not monitoring/alerting.
 
 Build:
 
-- TimelineNode and TimelineNodeEvidence;
-- timeline schema and validation;
-- “what changed” comparison;
-- Brief frozen/current comparison;
-- tracked topics;
-- topic schedulers;
-- Notification entity and UI;
-- Timeline visualization.
+- Timeline read view: a Story's Articles + EvidenceSets ordered over time;
+- GKG tone/volume overlays on the timeline;
+- frozen Brief "newer-analysis-available" comparison;
+- Entity, EntityAlias, EntityEdge (co-occurrence) tables (ADR-0019);
+- entity resolution: normalization + confidence threshold + Admin review queue;
+- bounded Cytoscape graph scoped to Story/Brief (50–200 nodes max);
+- Admin entity merge/split review.
+
+> **Original plan (retained for reference):** Week 5 originally included TimelineNode
+> generation, "what changed" comparison, tracked topics, topic schedulers, and Notification
+> entity + UI. These were cut by ADR-0011 (monitoring deferred) and superseded by ADR-0020
+> (timeline as read view, not generated entity).
 
 Exit criteria:
 
-- at least five seeded/live Stories show meaningful Timeline Nodes;
-- users receive a notification for a material new development;
-- frozen Briefs show newer-analysis status.
+- at least five seeded/live Stories show meaningful timeline evolution;
+- entity graph renders a clean bounded view for seeded Stories;
+- ambiguous merges are reviewable;
+- uncited edges cannot exist.
 
 ### Week 6 — Entity intelligence (P1)
 
+> **ADR-0019 defers typed relations (RelationAssertion/RelationEvidence) post-course.**
+> Edges are co-occurrence only, each carrying its `source_article_id`.
+
 Build:
 
-- Entity, Alias, Mention;
-- entity extraction and resolution candidates;
-- controlled relation vocabulary;
-- RelationAssertion and RelationEvidence;
-- Admin entity/relation review;
+- Entity, EntityAlias, EntityEdge (co-occurrence) tables (continuing from Week 5);
+- entity extraction from GKG surface-name strings (ADR-0018);
+- entity resolution: normalization + confidence threshold;
+- Admin entity merge/split review queue;
 - entity profile API/page;
-- evidence-backed context map.
+- evidence-backed entity context.
+
+> **Original plan (retained for reference):** Week 6 originally included a controlled
+> relation vocabulary, RelationAssertion, and RelationEvidence. ADR-0019 defers typed
+> relations post-course because GKG doesn't provide them and they require a separate
+> LLM extraction pipeline.
 
 Exit criteria:
 
 - graph facts are traceable to Articles;
 - ambiguous merges are reviewable;
-- uncited relations cannot be published.
+- uncited edges cannot exist.
 
 ### Week 7 — Graph exploration and operations (P1/P2)
 
+> **ADR-0019 defers Neo4j post-course.** The graph ships entirely in PostgreSQL tables
+> with recursive CTEs. No Neo4j in the graded build.
+
 Build:
 
-- bounded graph API;
-- Cytoscape.js visualization;
-- time/relation/confidence filters;
-- PostgreSQL graph repository;
-- optional Neo4j projection and parity tests;
+- bounded graph API (PostgreSQL recursive CTEs);
+- Cytoscape.js visualization with force-directed layout;
+- time/confidence/co-occurrence filters;
 - operations dashboard for queues/ingestion/generation/data quality;
-- near-duplicate SimHash/MinHash enhancement.
+- near-duplicate SimHash/MinHash enhancement (if time permits).
 
-Neo4j entry gate:
-
-- PostgreSQL graph APIs are working;
-- graph evidence validation is complete;
-- core P0/P1 tests are green.
+> **Original plan (retained for reference):** Week 7 originally included optional Neo4j
+> projection and parity tests. ADR-0019 supersedes this: the graph is Postgres-only.
+> Neo4j remains a post-course option (see §31 Explicit Deferrals).
 
 Exit criteria:
 
-- users can explore an evidence-backed entity neighborhood;
-- application still works with Neo4j disabled;
+- users can explore an evidence-backed entity neighborhood (bounded to 50–200 nodes);
 - Admin sees meaningful operational metrics.
 
 ### Week 8 — Evaluation, hardening, and submission (P0/P1)
@@ -2110,11 +2175,10 @@ Exit criteria:
 
 ### 27.3 Graph acceptance
 
-- Every displayed relation has RelationEvidence.
+- Every displayed edge has its `source_article_id` (ADR-0019) — uncited edges are bugs.
 - Entity merges are conservative and reviewable.
-- Graph endpoints enforce caps and filters.
-- PostgreSQL graph implementation works independently.
-- Neo4j projection, when enabled, can be rebuilt from PostgreSQL.
+- Graph endpoints enforce node/edge caps (50–200 nodes max) and depth limits.
+- PostgreSQL graph implementation works independently (no Neo4j required).
 
 ### 27.4 Quality acceptance
 
@@ -2134,7 +2198,7 @@ Exit criteria:
 3. Search/filter Stories.
 4. Open a Story with multiple Publishers.
 5. Show claims and expandable evidence.
-6. Show Timeline Nodes and “what changed.”
+6. Show timeline (Articles + EvidenceSets ordered over time).
 7. Save an IntelligenceBrief with cover image and capacity rule.
 8. Attempt an unauthorized Investor/Admin action to demonstrate API RBAC.
 9. Switch to Investor and show implication lens and caveats.
@@ -2150,9 +2214,8 @@ Add:
 - GenerationRun status stepper;
 - frozen Evidence Set;
 - entity relation and source evidence;
-- tracked-topic notification;
 - evaluation comparison;
-- Neo4j optional graph traversal with graceful fallback.
+- knowledge graph: entity resolution, co-occurrence edges, bounded Cytoscape view.
 
 ---
 
@@ -2166,13 +2229,20 @@ BullMQ already separates API producers and workers, supports scheduling, retries
 
 pgvector keeps relational metadata and embeddings together, supports exact search and approximate indexes, and is sufficient for the expected scale. The search service is abstracted so a dedicated vector store can be introduced after benchmarking.
 
-### Why use Neo4j at all?
+### Why not Neo4j (or why plain Postgres for the graph)?
 
-PostgreSQL owns graph facts and evidence. Neo4j is an optional derived read model for multi-hop traversal and graph exploration. It can be rebuilt and is not required for core operation.
+> **ADR-0019 supersedes the original Neo4j plan.** The knowledge graph ships in plain
+> PostgreSQL tables traversed with recursive CTEs. Neo4j is explicitly deferred post-course.
+
+PostgreSQL owns graph facts and evidence. The entity graph is bounded (~50–200 nodes per Story)
+and co-occurrence edges are simple enough that recursive CTEs perform well at this scale.
+Neo4j would add an operational dependency (a second database to keep in sync) for marginal
+query benefit on a bounded graph. It remains an optional post-course projection if the
+graph grows beyond what Postgres handles comfortably.
 
 ### How does the project scale?
 
-API, workers, PostgreSQL, Redis, file storage, graph projection, and provider adapters are separated by process or interface. Initial deployment is small, but API and worker replicas can scale independently; managed Postgres/Redis/object storage can replace local containers; individual connectors and processing queues can be split without changing domain entities.
+API, workers, PostgreSQL, Redis, file storage, and provider adapters are separated by process or interface. Initial deployment is small, but API and worker replicas can scale independently; managed Postgres/Redis/object storage can replace local containers; individual connectors and processing queues can be split without changing domain entities.
 
 ### How do you prevent hallucinated citations?
 
@@ -2248,6 +2318,15 @@ The following are deliberately excluded from the eight-week commitment:
 - Kubernetes;
 - global 100,000-article/day claims without load tests.
 
+**Additional deferrals per ADRs 0013–0022:**
+
+- **Neo4j / Apache AGE** — the graph ships in plain PostgreSQL tables with recursive CTEs; a dedicated graph store is an optional later projection (ADR-0019).
+- **Typed entity relations** (acquired / sued / partnered) — GKG doesn't provide them; requires a separate LLM extraction pipeline. Highest moat value, highest risk (ADR-0019).
+- **Broad cross-Story firehose graph** — rejected for the "noisy duplicate nodes" demo risk; the graph is bounded/curated (~50–200 nodes, scoped to the Story in view) (ADR-0019).
+- **TrackedTopic / Notification / change-detection** — monitoring mini-product (alert on what changed) is cut from graded build. The Timeline *view* (showing evolution) still ships (ADR-0011, ADR-0020).
+- **Refresh-token rotation** — deferred security hardening; plain JWT access token ships (ADR-0013).
+- **Generated Timeline Nodes** — the timeline is a read view over existing Articles ordered by time; generated nodes are optional materialization only if queries prove too slow (ADR-0020).
+
 These are not forgotten. Their required interfaces and additive data-model paths are documented.
 
 ---
@@ -2286,9 +2365,9 @@ Each task given to a coding agent must include:
 - Do not start workers in the API process.
 - Do not bypass RBAC/ownership in tests or seed logic.
 - Do not write unvalidated model JSON directly to user-facing tables.
-- Do not make Neo4j authoritative.
 - Do not claim full-article omissions from feed excerpts.
 - Do not hardcode model IDs, thresholds, quotas, or secrets in services.
+- Do not build TrackedTopic, Notification, or typed relation features (ADR-0011, ADR-0019, ADR-0020).
 
 ### 32.4 Definition of done
 
@@ -2331,8 +2410,8 @@ No threshold should be defended as universal before project-specific evaluation.
 ## 34. Open Decisions Before Coding
 
 1. Final first-wave RSS publishers and their rights fields.
-2. Initial GDELT tracked-topic queries.
-3. Whether the optional Neo4j profile will run locally from Week 7 or only in a separate demo profile.
+2. ~~Initial GDELT tracked-topic queries.~~ **Resolved by ADR-0018:** GKG 15-min firehose is the backbone; no tracked-topic queries needed.
+3. ~~Whether the optional Neo4j profile will run locally from Week 7 or only in a separate demo profile.~~ **Resolved by ADR-0019:** Neo4j deferred post-course; graph ships in plain Postgres.
 4. Exact file-storage local path and future object-storage provider.
 5. Tailwind CSS versus Bootstrap.
 6. Initial OpenAI API budget and access to configured models.
@@ -2366,21 +2445,22 @@ The following current, primary references informed this specification:
 5. **pgvector indexing** — exact nearest-neighbor search is the default; HNSW and IVFFlat trade some recall for speed.  
    [pgvector README](https://github.com/pgvector/pgvector/blob/master/README.md)
 
-6. **OpenAI Responses API and Structured Outputs** — Responses is the recommended direct-generation interface; Structured Outputs constrains responses to supplied JSON Schema.  
+6. **OpenAI Responses API and Structured Outputs** — Responses is the recommended direct-generation interface; Structured Outputs constrains responses to supplied JSON Schema. **ADR-0003 supersedes the original mandate:** the SynthesisProvider interface accepts any OpenAI-compatible endpoint, not just the Responses API.  
    [Responses API Migration](https://developers.openai.com/api/docs/guides/migrate-to-responses)  
    [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
 
-7. **OpenAI models** — current model selection guidance identifies Sol for flagship capability, Terra for balance, and Luna for cost-sensitive high-volume workloads; model IDs remain configuration.  
+7. **OpenAI models** — current model selection guidance identifies Sol for flagship capability, Terra for balance, and Luna for cost-sensitive high-volume workloads; model IDs remain configuration. **ADR-0003 supersedes:** no model ID is hardcoded; the provider and model are chosen by environment variable.  
    [OpenAI Models](https://developers.openai.com/api/docs/models)  
    [Model Guidance](https://developers.openai.com/api/docs/guides/latest-model)
 
-8. **Embeddings** — `text-embedding-3-small` is a current low-cost embedding model suitable for search and clustering.  
-   [text-embedding-3-small](https://developers.openai.com/api/docs/models/text-embedding-3-small)
+8. **Embeddings** — `bge-m3` (BAAI, MIT) served via TEI at `vector(1024)` is the default embedding model (ADR-0017). The original `text-embedding-3-small` at `vector(384)` is superseded. Cheap-API fallbacks: `voyage-3.5-lite` or `gemini-embedding-001`, both truncating to 1024 dims.
+   [bge-m3 HuggingFace](https://huggingface.co/BAAI/bge-m3)
+   [pgvector README](https://github.com/pgvector/pgvector/blob/master/README.md)
 
 9. **Evals** — repeatable evaluations are an essential component of reliable model/prompt changes.  
    [OpenAI Evals Guide](https://developers.openai.com/api/docs/guides/evals)
 
-10. **Neo4j knowledge-graph pipeline complexity** — knowledge-graph construction requires entity/relation extraction, graph writing, and entity resolution; the current Neo4j builder is marked experimental, reinforcing the decision to keep PostgreSQL authoritative.  
+10. **Neo4j knowledge-graph pipeline complexity** — knowledge-graph construction requires entity/relation extraction, graph writing, and entity resolution; the current Neo4j builder is marked experimental, reinforcing the decision to keep PostgreSQL authoritative. **ADR-0019 defers Neo4j post-course; the graph ships in plain PostgreSQL tables.**  
     [Neo4j Knowledge Graph Builder](https://neo4j.com/docs/neo4j-graphrag-python/current/user_guide_kg_builder.html)  
     [Neo4j Data Modeling Tutorial](https://neo4j.com/docs/getting-started/data-modeling/tutorial-data-modeling/)
 
@@ -2396,12 +2476,10 @@ Tessera v3 therefore commits to:
 - RSS and GDELT discovery;
 - correctable semantic Story clustering;
 - frozen evidence and claim-level provenance;
-- real Timeline Nodes and change tracking;
+- a timeline read view showing Story evolution (ADR-0020);
 - owned Intelligence Briefs;
-- Student and Investor lenses;
-- tracked topics and notifications;
-- bounded, cited entity/relation intelligence;
-- optional Neo4j graph projection;
+- Student and Investor lenses with role-distinct features (ADR-0021);
+- a bounded, cited entity graph in PostgreSQL (ADR-0019);
 - prompt/version evaluations;
 - production-shaped security, migrations, queues, and observability.
 
