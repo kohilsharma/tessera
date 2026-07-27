@@ -33,3 +33,7 @@ Thumbs.db
 # Claude Code tooling / installed skills (reproducible via skills-lock.json)
 .claude/
 .agents/
+
+# Agent tool state (regenerated on activation)
+.serena/
+.hallmark/
