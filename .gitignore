@@ -43,3 +43,9 @@ Thumbs.db
 
 # TS incremental build cache
 *.tsbuildinfo
+
+# Installed skill payloads (reproducible via skills-lock.json, like .agents/)
+agent/
+
+# Design-exploration screenshots (kept locally, not in history)
+shots/
