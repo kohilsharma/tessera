@@ -11,13 +11,15 @@ export type Evidence = {
 
 export type Claim = {
   id: string;
-  type: "Consensus" | "Source-specific" | "Contradiction" | "Student context";
+  type: "Consensus" | "Source-specific" | "Contradiction" | "Lens-specific";
   text: string;
   evidence: string[];
   contradicts?: string[];
 };
 
 export type Filter = (typeof filters)[number];
+// Prototype only: one claim list toggled by lens. The real Investor role is a
+// distinct dashboard, "deliberately NOT Student + one lens" (CONTEXT.md, ADR-0021).
 export type Lens = "Student" | "Investor";
 
 export const evidence: Evidence[] = [
@@ -85,13 +87,13 @@ export const claims: Claim[] = [
   },
   {
     id: "C4",
-    type: "Student context",
+    type: "Lens-specific",
     text: "The pilot line tests manufacturing processes before high-volume production; meeting a pilot date does not establish commercial scale.",
     evidence: ["A1", "A3"],
   },
 ];
 
-export const filters = ["All claims", "Consensus", "Source-specific", "Contradiction", "Student context"] as const;
+export const filters = ["All claims", "Consensus", "Source-specific", "Contradiction", "Lens-specific"] as const;
 
 export const modeDescription: Record<Evidence["mode"], string> = {
   api_content: "Full text pulled via GDELT DOC API",

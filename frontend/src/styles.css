@@ -83,12 +83,12 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f0a800; outline-offs
 .design-bureau .claim-consensus.active-claim { background: var(--overlap-stock); }
 .design-bureau .claim-source-specific.active-claim { background: var(--blue-stock); }
 .design-bureau .claim-contradiction.active-claim { background: var(--magenta-stock); }
-.design-bureau .claim-student-context.active-claim { background: var(--context-stock); }
+.design-bureau .claim-lens-specific.active-claim { background: var(--context-stock); }
 .design-bureau .claim.active-claim::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 11px; background: linear-gradient(90deg, var(--blue) 0 36%, var(--overlap) 36% 64%, var(--magenta) 64%); }
 .design-bureau .claim.active-claim::after { content: "+"; position: absolute; right: 10px; top: 6px; color: var(--overlap); font: 400 2rem/1 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .design-bureau .claim header { display: flex; justify-content: space-between; align-items: center; }
 .design-bureau .claim-type { padding: 5px 7px; border: 1px solid currentColor; }
-.design-bureau .type-consensus { color: var(--overlap); }.design-bureau .type-source-specific { color: var(--blue); }.design-bureau .type-contradiction { color: var(--magenta); }.design-bureau .type-student-context { color: #315f35; }
+.design-bureau .type-consensus { color: var(--overlap); }.design-bureau .type-source-specific { color: var(--blue); }.design-bureau .type-contradiction { color: var(--magenta); }.design-bureau .type-lens-specific { color: #315f35; }
 .design-bureau .claim-id { color: var(--quiet); }
 .design-bureau .claim > p { font-size: clamp(1.12rem, 1.8vw, 1.55rem); line-height: 1.38; max-width: 68ch; margin: 20px 0 25px; }
 .design-bureau .citation-row { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }

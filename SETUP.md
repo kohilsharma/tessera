@@ -28,7 +28,8 @@ cd backend
 npm install
 cp .env.example .env
 npm run migrate   # applies migrations, incl. `CREATE EXTENSION vector`
-npm run dev        # http://localhost:4000
+npm run dev       # http://localhost:4000
+npm run build     # type-check + compile to dist/ (`npm start` runs the build)
 ```
 
 `GET http://localhost:4000/api/v1/health` should return `{"status":"ok","db":"ok",...}`.
@@ -38,7 +39,8 @@ npm run dev        # http://localhost:4000
 ```bash
 cd frontend
 npm install
-npm run dev         # http://localhost:5173
+npm run dev       # http://localhost:5173
+npm run build     # type-check + production bundle to dist/
 ```
 
 `/status` shows the health check fetched live from the API (proxied via Vite's dev
@@ -54,3 +56,5 @@ just a working `docker` connection (see Prerequisites).
 cd backend
 npm test
 ```
+
+There is no frontend test script yet — `npm run build` is the only frontend check.

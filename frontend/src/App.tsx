@@ -8,7 +8,7 @@ DEMO: `?fail=1` forces save to fail, so the `role="alert"` rejection state stays
 */
 import { useEffect, useRef, useState } from "react";
 import { Route, Routes } from "react-router-dom";
-import { evidence, claims, filters } from "./data";
+import { claims } from "./data";
 import type { Claim, Filter, Lens } from "./data";
 import Bureau from "./versions/bureau";
 import HealthStatus from "./pages/HealthStatus";
@@ -30,6 +30,11 @@ export type SharedState = {
 };
 
 const failSave = new URLSearchParams(window.location.search).has("fail");
+
+function visibleFor(claim: Claim, filter: Filter, lens: Lens) {
+  const matchesFilter = filter === "All claims" || claim.type === filter;
+  return matchesFilter && (claim.type !== "Lens-specific" || lens === "Student");
+}
 
 function App() {
   const [filter, setFilterState] = useState<Filter>("All claims");
@@ -54,15 +59,11 @@ function App() {
     }, 700);
   }
 
-  const visibleClaims = claims.filter(
-    (claim) => (filter === "All claims" || claim.type === filter) && (claim.type !== "Student context" || lens === "Student"),
-  );
+  const visibleClaims = claims.filter((claim) => visibleFor(claim, filter, lens));
 
   function setFilter(next: Filter) {
     setFilterState(next);
-    const nextClaim = claims.find(
-      (claim) => (next === "All claims" || claim.type === next) && (claim.type !== "Student context" || lens === "Student"),
-    );
+    const nextClaim = claims.find((claim) => visibleFor(claim, next, lens));
     if (nextClaim && next !== "All claims" && activeClaim.type !== next) {
       setActiveClaim(nextClaim);
       setActiveEvidenceId(nextClaim.evidence[0]);
@@ -71,7 +72,7 @@ function App() {
 
   function changeLens(next: Lens) {
     setLensState(next);
-    if (next === "Investor" && activeClaim.type === "Student context") {
+    if (next === "Investor" && activeClaim.type === "Lens-specific") {
       setActiveClaim(claims[0]);
       setActiveEvidenceId(claims[0].evidence[0]);
     }
@@ -114,6 +115,3 @@ function App() {
 }
 
 export default App;
-
-// Re-export fixture data for version components that want typed access.
-export { evidence, claims, filters };

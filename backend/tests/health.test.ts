@@ -24,6 +24,14 @@ afterAll(async () => {
   if (container) await container.stop();
 });
 
+describe("initial migration", () => {
+  it("installs the pgvector extension", async () => {
+    const rows = await AppDataSource.query("SELECT extname FROM pg_extension WHERE extname = 'vector'");
+
+    expect(rows).toHaveLength(1);
+  });
+});
+
 describe("GET /api/v1/health", () => {
   it("returns 200 with a live database round-trip", async () => {
     const res = await request(createApp()).get("/api/v1/health");
