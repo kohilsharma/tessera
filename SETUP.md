@@ -32,6 +32,11 @@ npm run dev       # http://localhost:4000
 npm run build     # type-check + compile to dist/ (`npm start` runs the build)
 ```
 
+`.env` must set `JWT_SECRET` to a long random string — there is no built-in
+fallback, so the API refuses to sign or verify a token without it (ADR-0013).
+Changing it invalidates every token already issued, which just means logging in
+again. Generate one with `openssl rand -hex 32`.
+
 `GET http://localhost:4000/api/v1/health` should return `{"status":"ok","db":"ok",...}`.
 
 ## 3. Frontend

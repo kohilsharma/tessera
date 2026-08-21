@@ -1,11 +1,19 @@
-import express from "express";
+import express, { type ErrorRequestHandler } from "express";
 import { healthRouter } from "./routes/health";
 import { authRouter } from "./routes/auth";
+
+// Last resort for anything an async handler rejects with (a DB fault, a bug):
+// one 500 with nothing internal leaked, instead of an unhandled rejection.
+const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
+  console.error("Unhandled error while serving request", err);
+  res.status(500).json({ error: "Internal server error" });
+};
 
 export function createApp() {
   const app = express();
   app.use(express.json());
   app.use("/api/v1", healthRouter);
   app.use("/api/v1", authRouter);
+  app.use(errorHandler);
   return app;
 }

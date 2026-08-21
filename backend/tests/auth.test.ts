@@ -1,14 +1,19 @@
 import "reflect-metadata";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
-import jwt from "jsonwebtoken";
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { createApp } from "../src/app";
 import { AppDataSource } from "../src/data-source";
+import { signToken } from "../src/auth/jwt";
 
 let container: StartedPostgreSqlContainer;
 
 beforeAll(async () => {
+  // Only if the developer has no .env: signToken/verifyToken resolve the secret
+  // per call, so whichever value wins, this suite signs with the same one the
+  // app verifies with.
+  process.env.JWT_SECRET ??= "test-only-secret";
+
   container = await new PostgreSqlContainer("pgvector/pgvector:pg16")
     .withDatabase("tessera_test")
     .withUsername("tessera")
@@ -39,6 +44,30 @@ describe("POST /api/v1/auth/register", () => {
     expect(res.body.user.passwordHash).toBeUndefined();
   });
 
+  it("accepts email + password alone, defaulting to the Student role", async () => {
+    const res = await request(app())
+      .post("/api/v1/auth/register")
+      .send({ email: "no-role@example.com", password: "correct-horse" });
+
+    expect(res.status).toBe(201);
+    expect(res.body.user).toMatchObject({ email: "no-role@example.com", role: "student" });
+  });
+
+  it("stores the email lowercased, so case cannot duplicate an account", async () => {
+    const created = await request(app())
+      .post("/api/v1/auth/register")
+      .send({ email: "MixedCase@Example.com", password: "correct-horse" });
+
+    expect(created.status).toBe(201);
+    expect(created.body.user.email).toBe("mixedcase@example.com");
+
+    const again = await request(app())
+      .post("/api/v1/auth/register")
+      .send({ email: "mixedcase@example.com", password: "correct-horse" });
+
+    expect(again.status).toBe(409);
+  });
+
   it("rejects a duplicate email with 409", async () => {
     await request(app())
       .post("/api/v1/auth/register")
@@ -49,6 +78,17 @@ describe("POST /api/v1/auth/register", () => {
       .send({ email: "dupe@example.com", password: "another-password", role: "investor" });
 
     expect(res.status).toBe(409);
+  });
+
+  it("answers concurrent duplicate registrations with 201 + 409, not a crash", async () => {
+    const send = () =>
+      request(app())
+        .post("/api/v1/auth/register")
+        .send({ email: "race@example.com", password: "correct-horse", role: "student" });
+
+    const statuses = (await Promise.all([send(), send()])).map((res) => res.status).sort();
+
+    expect(statuses).toEqual([201, 409]);
   });
 
   it("rejects an invalid email with 422", async () => {
@@ -91,6 +131,18 @@ describe("POST /api/v1/auth/login", () => {
     expect(res.body.user).toMatchObject({ email: "login-ok@example.com", role: "investor" });
   });
 
+  it("logs in regardless of the case the email is typed in", async () => {
+    await request(app())
+      .post("/api/v1/auth/register")
+      .send({ email: "case-login@example.com", password: "correct-horse" });
+
+    const res = await request(app())
+      .post("/api/v1/auth/login")
+      .send({ email: "Case-Login@Example.com", password: "correct-horse" });
+
+    expect(res.status).toBe(200);
+  });
+
   it("rejects wrong password with 401", async () => {
     await request(app())
       .post("/api/v1/auth/register")
@@ -124,8 +176,21 @@ describe("GET /api/v1/auth/me", () => {
   });
 
   it("rejects an expired token with 401", async () => {
-    const expired = jwt.sign({ sub: "some-id", role: "student" }, "test-secret", { expiresIn: -1 });
+    // Signed through the real signing path, so this fails only on expiry — not
+    // on a signature mismatch from a secret the test invented.
+    const expired = signToken({ sub: "00000000-0000-0000-0000-000000000000", role: "student" }, "-1s");
+
     const res = await request(app()).get("/api/v1/auth/me").set("Authorization", `Bearer ${expired}`);
+
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe("Invalid or expired token");
+  });
+
+  it("rejects a valid token whose user has been deleted with 401", async () => {
+    const orphan = signToken({ sub: "00000000-0000-0000-0000-000000000000", role: "student" });
+
+    const res = await request(app()).get("/api/v1/auth/me").set("Authorization", `Bearer ${orphan}`);
+
     expect(res.status).toBe(401);
   });
 
