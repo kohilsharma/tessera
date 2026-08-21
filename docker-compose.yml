@@ -1,3 +1,5 @@
+# Host ports offset from Postgres/Redis defaults (5433/6380) to avoid clashing with
+# other locally-running services on 5432/6379.
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -7,7 +9,7 @@ services:
       POSTGRES_PASSWORD: tessera
       POSTGRES_DB: tessera
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - tessera-postgres:/var/lib/postgresql/data
     healthcheck:
@@ -20,7 +22,7 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

@@ -17,7 +17,9 @@ frontend run natively (ADR-0015).
 docker compose up -d
 ```
 
-Starts Postgres (with the `vector` extension available) on `5432` and Redis on `6379`.
+Starts Postgres (with the `vector` extension available) on `5433` and Redis on `6380` —
+offset from the defaults to avoid clashing with other services you may already have
+running locally.
 
 ## 2. Backend
 
