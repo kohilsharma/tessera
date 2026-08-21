@@ -33,3 +33,9 @@ Thumbs.db
 # Claude Code tooling / installed skills (reproducible via skills-lock.json)
 .claude/
 .agents/
+.codex/
+.impeccable/
+.playwright-mcp/
+
+# TS incremental build cache
+*.tsbuildinfo

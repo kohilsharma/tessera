@@ -1,0 +1,54 @@
+# SETUP
+
+Local demo path for Tessera. Stateful dependencies run in Docker Compose; the API and
+frontend run natively (ADR-0015).
+
+## Prerequisites
+
+- Node.js 22+, npm 10+
+- Docker + Docker Compose
+- Your user must be able to run `docker` without `sudo` (member of the `docker` group).
+  If `docker ps` fails with a permission error: `sudo usermod -aG docker $USER`, then log
+  out and back in (or start a new shell) for the group change to take effect.
+
+## 1. Start stateful dependencies
+
+```bash
+docker compose up -d
+```
+
+Starts Postgres (with the `vector` extension available) on `5432` and Redis on `6379`.
+
+## 2. Backend
+
+```bash
+cd backend
+npm install
+cp .env.example .env
+npm run migrate   # applies migrations, incl. `CREATE EXTENSION vector`
+npm run dev        # http://localhost:4000
+```
+
+`GET http://localhost:4000/api/v1/health` should return `{"status":"ok","db":"ok",...}`.
+
+## 3. Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev         # http://localhost:5173
+```
+
+`/status` shows the health check fetched live from the API (proxied via Vite's dev
+server — see `frontend/vite.config.ts`). `/` shows the design-prototype UI.
+
+## Tests
+
+Backend tests drive the Express app with `supertest` against a real, ephemeral
+Postgres spun up per test run via Testcontainers — no manual test-DB setup needed,
+just a working `docker` connection (see Prerequisites).
+
+```bash
+cd backend
+npm test
+```
