@@ -6,7 +6,7 @@
 ## Quick start
 
 1. Read `CONTEXT.md` for the domain glossary — use these exact terms.
-2. Read `docs/adr/` (22 ADRs) — **these override the spec** where they conflict.
+2. Read `docs/adr/` (23 ADRs) — **these override the spec** where they conflict.
 3. Read `project-docs/Tessera_Master_Build_Specification_v3.md` — the full product spec.
 4. Read `project-docs/project-statement.md` — non-negotiable course requirements.
 5. Read `project-docs/Tessera_Initial_Report.md` — the capstone initial report (submission-ready).
@@ -16,10 +16,15 @@
 
 ## Repo state
 
-**Backend/** — empty. To be built: Node/Express + TypeORM + PostgreSQL.
-**Frontend/** — empty. To be built: Vite + React SPA.
+**backend/** — walking skeleton only (#16): Express + TypeORM, one migration
+(`CREATE EXTENSION vector`), and `GET /api/v1/health`. No product entities/routes yet.
+**frontend/** — still mostly the **design prototype**: `src/App.tsx` renders
+`src/versions/bureau.tsx` against `src/styles.css` with hardcoded `src/data.ts` at `/`. The
+walking skeleton (#16) added a router, a `fetch`-based API client (`src/api/client.ts`), and
+one live page — `/status` — that calls the backend health endpoint. No other backend calls yet.
 
-No package.json, no source files, no tests, no migrations exist yet.
+`npm run migrate` (backend) applies migrations; `npm test` (backend) is the API-seam test
+pattern (supertest + an ephemeral Testcontainers Postgres) later Foundation tickets extend.
 
 ## Stack (decided — do NOT scaffold the old spec's stack)
 
@@ -28,11 +33,11 @@ No package.json, no source files, no tests, no migrations exist yet.
 | Backend | Node/Express + TypeORM + PostgreSQL (+pgvector) | 0005 |
 | Queue/worker | Redis + BullMQ | 0005 |
 | Graph | Plain Postgres tables + recursive CTEs (NO Neo4j) | 0019 |
-| Embeddings | bge-m3 via TEI (Docker) @ `vector(1024)` | 0017 |
+| Embeddings | Hosted API @ `vector(1024)`; TEI/bge-m3 optional local | 0017, 0023 |
 | Ingestion | GDELT GKG 15-min firehose + DOC API + RSS + Readability | 0018 |
 | Frontend | Vite + React SPA; Cytoscape.js for graph view | 0005, 0019 |
 | LLM | Cheap OpenAI-compatible models via env config + Mock provider | 0003 |
-| Local demo | Docker Compose (Postgres+pgvector, Redis, TEI); app runs natively | 0015 |
+| Local demo | Docker Compose (Postgres+pgvector, Redis); app runs natively | 0015, 0023 |
 
 **NO:** Kafka, Python/FastAPI, SSR, Neo4j, separate vector DB, hardcoded model IDs.
 
@@ -43,12 +48,16 @@ No package.json, no source files, no tests, no migrations exist yet.
 - **ADR-0003** Cheap OpenAI-compatible models via env config + validate-and-repair loop. No hardcoded model IDs. Mock provider required.
 - **ADR-0004** Three genuinely distinct roles (Admin/Student/Investor) — different endpoints & data.
 - **ADR-0005** Node/Express + TypeORM + PostgreSQL backend; Vite + React SPA; Redis + BullMQ; NO SSR; NO Python.
-- **ADR-0017** Embeddings: bge-m3 via TEI @ vector(1024); voyage/gemini API fallbacks.
+- **ADR-0017** Embeddings @ `vector(1024)`, HNSW cosine, provider-swappable within the 1024
+  Matryoshka family. (Serving default revised by ADR-0023.)
 - **ADR-0018** Ingestion: GDELT GKG firehose + DOC API + RSS + Readability. Metadata open; bodies internal-only.
 - **ADR-0019** Knowledge graph: GKG-backed, bounded (~50–200 nodes), co-occurrence edges in plain Postgres. No Neo4j. Typed relations deferred.
 - **ADR-0020** Timeline: read view over Stories (evolution only, not alerting).
 - **ADR-0021** Role features: Student flashcards, Admin PromptTemplate tuning, Investor consensus/contradiction.
 - **ADR-0022** Build order: Foundation → Ingestion → Flagship → Phase 3.5 (graph+timeline) → Eval.
+- **ADR-0023** Embeddings served by hosted API (demo machine has ~3 GB free RAM); TEI optional.
+  Bodies to the embedding provider is a documented exception to ADR-0018; synthesis evidence
+  text stays on the paid no-training provider.
 
 ## Build order (ADR-0022)
 
@@ -66,6 +75,8 @@ No package.json, no source files, no tests, no migrations exist yet.
 - EntityEdges are **co-occurrence**, not typed relations (typed relations deferred).
 - Cache LLM calls by `content_hash`; batch where possible.
 - GDELT/API **metadata** is storable; article **bodies** are internal only, never redistributed.
+  One documented exception: the hosted embedding provider (ADR-0023). Synthesis evidence text
+  goes only to the paid, contractually no-training provider (ADR-0003).
 
 ## Working conventions
 
@@ -94,15 +105,28 @@ Load via the `skill` tool. Key ones for this project:
 | `codebase-design` | Finding deepening opportunities in modules |
 | `resolving-merge-conflicts` | Fixing git merge conflicts |
 
-Full list: 31 skills in `.agents/skills/` — see `ask-matt` if unsure which fits.
+Full list: 34 skills in `.agents/skills/` — see `ask-matt` if unsure which fits.
+Skills are pinned in `skills-lock.json` (`.agents/`+`.claude/` are gitignored); restore with
+`npx skills experimental_install`, refresh with `npx skills update -p`.
+
+### Issue tracker
+
+GitHub Issues on `kohilsharma/tessera`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`,
+`wontfix`), unchanged. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
 ## Plugins
 
 | Plugin | Purpose |
 |---|---|
-| **caveman** | Ultra-compressed output mode (65% token savings) |
-| **rtk** | Auto-rewrites shell commands through `rtk rewrite` for token savings |
-| **ponytail** | Lazy senior dev mode — forces simplest working solution |
+| **ponytail** | Lazy senior dev mode — forces simplest working solution (default: full) |
 
 ## Available MCPs
 
@@ -114,19 +138,22 @@ Full list: 31 skills in `.agents/skills/` — see `ask-matt` if unsure which fit
 
 ## Verification
 
-No manifests or test framework exist yet. When they do, document the exact `npm` invocations
-here (build / dev / lint / test). Do not claim a build passes until a real command exists.
-
-## RTK (token-optimized commands)
-
-Always prefix shell commands with `rtk` for 60-90% token savings:
+Frontend commands (run from `frontend/`):
 
 ```bash
-rtk git status          rtk git diff            rtk git log
-rtk ls <path>           rtk read <file>         rtk grep <pattern>
-rtk pytest tests/       rtk npm run <script>    rtk docker ps
-rtk tsc                 rtk lint                rtk prettier --check
+npm run build
+npm run dev
 ```
 
-Prefix each segment in chains: `rtk git add . && rtk git commit -m "msg"`.
-For debugging, use raw command without rtk prefix.
+No frontend test or lint script exists yet. Do not claim either passes until implemented.
+
+Backend commands (run from `backend/`, after `docker compose up -d` — see `SETUP.md`):
+
+```bash
+npm run dev       # tsx watch, http://localhost:4000
+npm run build     # tsc -> dist/
+npm run migrate   # apply TypeORM migrations
+npm test          # vitest; spins up an ephemeral Postgres via Testcontainers, needs docker access
+```
+
+No lint script exists yet. Do not claim it passes until implemented.

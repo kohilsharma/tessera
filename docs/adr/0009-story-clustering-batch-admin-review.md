@@ -34,3 +34,13 @@ already guarantee the clean set.
 - Online/incremental clustering remains a documented later evolution behind the same
   Story-assignment path.
 - Threshold config is a tunable, not a correctness dependency for the demo.
+
+## Later evolution: Louvain (gated on the eval harness)
+
+Community detection (Louvain over a cosine-similarity graph) is a candidate replacement for
+the flat threshold — but **only once the eval harness (ADR-0011) exists to measure whether it
+helped**. Without clustering precision/recall you cannot tell an improvement from a
+regression, and Louvain does not remove tuning: it replaces one knob (similarity threshold)
+with two (edge threshold + resolution γ), both data-dependent on live news.
+
+Decision 2026-08-21: **not adopted now.** Reconsider if and when Phase 5 ships.

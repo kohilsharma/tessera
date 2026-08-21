@@ -1,7 +1,9 @@
 # 17. Embeddings revised: bge-m3 @ vector(1024) (supersedes ADR-0008)
 
 Date: 2026-07-26
-Status: Accepted
+Status: **Partially superseded by ADR-0023** — the serving default moved from local TEI to a
+  hosted API (system-RAM constraint, not VRAM), and the "~200M free tokens" voyage claim below
+  is stale. `vector(1024)`, the HNSW index, and the `EmbeddingProvider` interface still stand.
 Supersedes: ADR-0008 (local bge-small @ 384-dim)
 Refines: ADR-0003 (provider interfaces), ADR-0014 (hybrid search)
 

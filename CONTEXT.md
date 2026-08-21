@@ -82,8 +82,9 @@ Terms are canonical: use these words in code, docs, and conversation.
 - **TrackedTopic / Notification / change-detection** — Monitoring mini-product (alert on what
   changed), cut from graded build. Distinct from the Timeline *view*, which ships. (ADR-0011, ADR-0020)
 - **Refresh-token rotation** — Deferred security hardening; plain JWT ships. (ADR-0013)
-- **Cheap embedding API (voyage-3.5-lite / gemini-embedding-001)** — Fallback behind the
-  `EmbeddingProvider` interface; local **bge-m3 @ vector(1024)** is the default. (ADR-0017)
+- **Local embedding serving (bge-m3 via TEI)** — Optional local provider behind the
+  `EmbeddingProvider` interface; a **hosted embedding API** is the default. The vector space
+  stays `vector(1024)` either way. (ADR-0017, ADR-0023)
 
 ## Kept but sequenced last (degradable)
 
@@ -92,9 +93,11 @@ Terms are canonical: use these words in code, docs, and conversation.
 
 ## Decision index
 
-All decisions are recorded in `docs/adr/0001`–`0022`. The 2026-07-26 additions
+All decisions are recorded in `docs/adr/0001`–`0023`. ADR-0023 (2026-08-21) moves embedding
+serving to a hosted API default after a system-RAM measurement on the demo machine; the
+`vector(1024)` space and provider interface are unchanged. The 2026-07-26 additions
 (ADR-0017–0022) un-defer the knowledge graph + timeline (GKG-backed, bounded), upgrade
-embeddings (bge-m3 @ vector(1024)), pin the ingestion architecture (GDELT GKG firehose), add
+embeddings (@ vector(1024)), pin the ingestion architecture (GDELT GKG firehose), add
 role features (flashcards / Admin tuning / investor consensus), and revise the build order.
 They **supersede** parts of ADR-0002 (→0019), ADR-0008 (→0017), ADR-0011 (→0020), ADR-0016
 (→0022). `AGENTS.md` binds agents to v3 + these ADRs. The old `ai-news-intelligence-spec.md`

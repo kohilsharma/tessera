@@ -53,3 +53,13 @@ Ingestion stack, all $0/month:
 - The 15-min poll loop + zip parse + upsert is the core connector; RSS and DOC are secondary.
 - BigQuery is explicitly avoided (a single GKG year is ~2.5TB; raw files are free).
 - ⚠️ `gdeltcloud.com` is a separate paid third party — do not confuse it with official GDELT.
+- **Feed curation is the cheapest lever on text quality.** Readability is the primary body
+  source and fails predictably (paywalls, JS-rendered pages, consent walls, bot blocks), so
+  the curated RSS list should deliberately favour feeds that emit `content:encoded`. This is
+  data curation, not code — no connector, no dependency.
+- Evaluated and rejected 2026-08-21: **Currents API**. Verified against current sources — it
+  returns metadata only (title, description, URL, source, published time, language, category),
+  not article bodies. RSS `content:encoded` + Readability already cover this strictly better.
+- Embeddings are a **documented exception** to the internal-only rule above: bodies are sent
+  to the hosted embedding provider (ADR-0023). Synthesis evidence text is not — that goes to
+  the paid, contractually no-training provider (ADR-0003).
