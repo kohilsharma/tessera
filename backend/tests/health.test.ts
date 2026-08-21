@@ -1,28 +1,11 @@
 import "reflect-metadata";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import request from "supertest";
-import { PostgreSqlContainer, StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { createApp } from "../src/app";
 import { AppDataSource } from "../src/data-source";
+import { setupTestDb } from "./setupTestDb";
 
-let container: StartedPostgreSqlContainer;
-
-beforeAll(async () => {
-  container = await new PostgreSqlContainer("pgvector/pgvector:pg16")
-    .withDatabase("tessera_test")
-    .withUsername("tessera")
-    .withPassword("tessera")
-    .start();
-
-  AppDataSource.setOptions({ url: container.getConnectionUri() });
-  await AppDataSource.initialize();
-  await AppDataSource.runMigrations();
-});
-
-afterAll(async () => {
-  if (AppDataSource.isInitialized) await AppDataSource.destroy();
-  if (container) await container.stop();
-});
+setupTestDb();
 
 describe("initial migration", () => {
   it("installs the pgvector extension", async () => {

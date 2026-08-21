@@ -82,3 +82,28 @@ export async function getMe(): Promise<User> {
   if (!res.ok) throw new Error(await parseErrorMessage(res, "Could not load current user"));
   return res.json();
 }
+
+// ADR-0004: distinct shapes per role, not one endpoint with a lens flag — mirrors
+// backend/src/routes/dashboard.ts. studyCollections/watchlist are placeholders
+// until #19/#20 add the corpus and owned Briefs these will surface.
+export type StudentDashboard = { role: "student"; studyCollections: unknown[] };
+export type InvestorDashboard = { role: "investor"; watchlist: unknown[] };
+export type AdminDashboard = { role: "admin"; userCounts: Record<UserRole, number> };
+
+async function getDashboard<T>(path: string): Promise<T> {
+  const res = await authFetch(path);
+  if (!res.ok) throw new Error(await parseErrorMessage(res, "Could not load this dashboard"));
+  return res.json();
+}
+
+export function getStudentDashboard(): Promise<StudentDashboard> {
+  return getDashboard("/api/v1/dashboard/student");
+}
+
+export function getInvestorDashboard(): Promise<InvestorDashboard> {
+  return getDashboard("/api/v1/dashboard/investor");
+}
+
+export function getAdminDashboard(): Promise<AdminDashboard> {
+  return getDashboard("/api/v1/dashboard/admin");
+}

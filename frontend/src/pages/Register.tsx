@@ -37,7 +37,7 @@ export default function Register() {
     setSubmitting(true);
     try {
       await register({ email, password, role });
-      navigate("/account");
+      navigate("/dashboard");
     } catch (err) {
       setErrors({ form: (err as Error).message });
     } finally {

@@ -31,7 +31,7 @@ export default function Login() {
     setSubmitting(true);
     try {
       await login({ email, password });
-      navigate("/account");
+      navigate("/dashboard");
     } catch (err) {
       setErrors({ form: (err as Error).message });
     } finally {

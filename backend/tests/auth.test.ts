@@ -1,34 +1,12 @@
 import "reflect-metadata";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import request from "supertest";
-import { PostgreSqlContainer, StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { createApp } from "../src/app";
 import { AppDataSource } from "../src/data-source";
 import { signToken } from "../src/auth/jwt";
+import { setupTestDb } from "./setupTestDb";
 
-let container: StartedPostgreSqlContainer;
-
-beforeAll(async () => {
-  // Only if the developer has no .env: signToken/verifyToken resolve the secret
-  // per call, so whichever value wins, this suite signs with the same one the
-  // app verifies with.
-  process.env.JWT_SECRET ??= "test-only-secret";
-
-  container = await new PostgreSqlContainer("pgvector/pgvector:pg16")
-    .withDatabase("tessera_test")
-    .withUsername("tessera")
-    .withPassword("tessera")
-    .start();
-
-  AppDataSource.setOptions({ url: container.getConnectionUri() });
-  await AppDataSource.initialize();
-  await AppDataSource.runMigrations();
-}, 60_000);
-
-afterAll(async () => {
-  if (AppDataSource.isInitialized) await AppDataSource.destroy();
-  if (container) await container.stop();
-});
+setupTestDb();
 
 const app = () => createApp();
 
