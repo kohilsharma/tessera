@@ -12,6 +12,10 @@ import { claims } from "./data";
 import type { Claim, Filter, Lens } from "./data";
 import Bureau from "./versions/bureau";
 import HealthStatus from "./pages/HealthStatus";
+import Register from "./pages/Register";
+import Login from "./pages/Login";
+import Account from "./pages/Account";
+import RequireAuth from "./pages/RequireAuth";
 
 export type SharedState = {
   filter: Filter;
@@ -110,6 +114,16 @@ function App() {
         }
       />
       <Route path="/status" element={<HealthStatus />} />
+      <Route path="/register" element={<Register />} />
+      <Route path="/login" element={<Login />} />
+      <Route
+        path="/account"
+        element={
+          <RequireAuth>
+            <Account />
+          </RequireAuth>
+        }
+      />
     </Routes>
   );
 }
