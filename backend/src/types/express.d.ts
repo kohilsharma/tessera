@@ -1,9 +1,10 @@
-import type { UserRole } from "../entities/User";
+import type { User } from "../entities/User";
 
 declare global {
   namespace Express {
     interface Request {
-      user?: { id: string; role: UserRole };
+      // The row requireAuth loaded, not the token's claims — see requireAuth.ts.
+      user?: User;
     }
   }
 }

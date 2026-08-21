@@ -1,4 +1,5 @@
 import { clearToken, getToken, setToken } from "../auth/token";
+import { queryClient } from "../queryClient";
 
 export type HealthResponse = {
   status: "ok" | "error";
@@ -22,9 +23,13 @@ export async function getHealth(): Promise<HealthResponse> {
 }
 
 // Mirrors the role split in backend/src/entities/User.ts: admin is assigned, so
-// it is a role a user can hold but never one they can register as.
-export type RegistrableRole = "student" | "investor";
-export type UserRole = RegistrableRole | "admin";
+// it is a role a user can hold but never one they can register as. Exported as
+// values, not just types, so anything rendering per-role reads the list from here
+// instead of re-listing the three roles.
+export const REGISTRABLE_ROLES = ["student", "investor"] as const;
+export const USER_ROLES = [...REGISTRABLE_ROLES, "admin"] as const;
+export type RegistrableRole = (typeof REGISTRABLE_ROLES)[number];
+export type UserRole = (typeof USER_ROLES)[number];
 export type User = { id: string; email: string; role: UserRole };
 export type AuthResponse = { token: string; user: User };
 
@@ -37,6 +42,10 @@ async function postForToken(path: string, body: unknown, fallback: string): Prom
   if (!res.ok) throw new Error(await parseErrorMessage(res, fallback));
   const data: AuthResponse = await res.json();
   setToken(data.token);
+  // The cache is keyed by nothing but the query key, so ["me"] and the dashboards
+  // would otherwise survive into the next identity: logging in as a second user
+  // without reloading would read the first user's role and route by it.
+  queryClient.clear();
   return data;
 }
 
@@ -54,6 +63,7 @@ export function login(input: { email: string; password: string }): Promise<AuthR
 
 export function logout(): void {
   clearToken();
+  queryClient.clear();
 }
 
 // Attaches the bearer token and, on a 401 (missing, expired, or pointing at a
@@ -86,9 +96,11 @@ export async function getMe(): Promise<User> {
 // ADR-0004: distinct shapes per role, not one endpoint with a lens flag — mirrors
 // backend/src/routes/dashboard.ts. studyCollections/watchlist are placeholders
 // until #19/#20 add the corpus and owned Briefs these will surface.
-export type StudentDashboard = { role: "student"; studyCollections: unknown[] };
-export type InvestorDashboard = { role: "investor"; watchlist: unknown[] };
-export type AdminDashboard = { role: "admin"; userCounts: Record<UserRole, number> };
+// Named *DashboardData, not *Dashboard: the components of that name live in
+// src/pages/, and a file importing both a type and its component would collide.
+export type StudentDashboardData = { role: "student"; studyCollections: unknown[] };
+export type InvestorDashboardData = { role: "investor"; watchlist: unknown[] };
+export type AdminDashboardData = { role: "admin"; userCounts: Record<UserRole, number> };
 
 async function getDashboard<T>(path: string): Promise<T> {
   const res = await authFetch(path);
@@ -96,14 +108,14 @@ async function getDashboard<T>(path: string): Promise<T> {
   return res.json();
 }
 
-export function getStudentDashboard(): Promise<StudentDashboard> {
+export function getStudentDashboard(): Promise<StudentDashboardData> {
   return getDashboard("/api/v1/dashboard/student");
 }
 
-export function getInvestorDashboard(): Promise<InvestorDashboard> {
+export function getInvestorDashboard(): Promise<InvestorDashboardData> {
   return getDashboard("/api/v1/dashboard/investor");
 }
 
-export function getAdminDashboard(): Promise<AdminDashboard> {
+export function getAdminDashboard(): Promise<AdminDashboardData> {
   return getDashboard("/api/v1/dashboard/admin");
 }

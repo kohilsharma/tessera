@@ -1,17 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { getInvestorDashboard } from "../api/client";
-import DashboardError from "./DashboardError";
+import DashboardShell from "./DashboardShell";
 
 export default function InvestorDashboard() {
-  const { data, error, isLoading } = useQuery({ queryKey: ["dashboard", "investor"], queryFn: getInvestorDashboard });
-
-  if (isLoading) return <p role="status">Loading your dashboard…</p>;
-  if (error) return <DashboardError message={(error as Error).message} />;
+  const query = useQuery({ queryKey: ["dashboard", "investor"], queryFn: getInvestorDashboard });
 
   return (
-    <main>
-      <h1>Investor dashboard</h1>
-      <p>Watchlist: {data!.watchlist.length === 0 ? "none yet" : data!.watchlist.length}</p>
-    </main>
+    <DashboardShell query={query}>
+      {(data) => (
+        <main>
+          <h1>Investor dashboard</h1>
+          <p>Watchlist: {data.watchlist.length === 0 ? "none yet" : data.watchlist.length}</p>
+        </main>
+      )}
+    </DashboardShell>
   );
 }

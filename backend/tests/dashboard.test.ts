@@ -59,6 +59,30 @@ describe("dashboard RBAC", () => {
     expect(admin.status).toBe(403);
   });
 
+  // requireAuth resolves identity and role from the users row, not the token's
+  // claims, so a 24h token stops carrying authority the moment the row changes.
+  it("stops honouring a token once its user is deleted", async () => {
+    const email = "deleted-dash@example.com";
+    const token = await registerAndLogin(email, "student");
+    await AppDataSource.getRepository(User).delete({ email });
+
+    const res = await request(app()).get("/api/v1/dashboard/student").set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(401);
+  });
+
+  it("authorises off the stored role, not the role the token was signed with", async () => {
+    const email = "demoted-dash@example.com";
+    const token = await registerAndLogin(email, "student");
+    await AppDataSource.getRepository(User).update({ email }, { role: "investor" });
+
+    const stale = await request(app()).get("/api/v1/dashboard/student").set("Authorization", `Bearer ${token}`);
+    expect(stale.status).toBe(403);
+
+    const current = await request(app()).get("/api/v1/dashboard/investor").set("Authorization", `Bearer ${token}`);
+    expect(current.status).toBe(200);
+  });
+
   it("lets an Admin read the Admin dashboard's role counts and blocks Student/Investor", async () => {
     await registerAndLogin("admin-count-student@example.com", "student");
     await registerAndLogin("admin-count-investor@example.com", "investor");

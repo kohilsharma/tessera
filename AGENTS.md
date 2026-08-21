@@ -153,6 +153,7 @@ Backend commands (run from `backend/`, after `docker compose up -d` — see `SET
 npm run dev       # tsx watch, http://localhost:4000
 npm run build     # tsc -> dist/
 npm run migrate   # apply TypeORM migrations
+npm run seed      # demo users for all three roles; the only path to an Admin (ADR-0015)
 npm test          # vitest; spins up an ephemeral Postgres via Testcontainers, needs docker access
 ```
 

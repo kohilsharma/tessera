@@ -28,9 +28,27 @@ cd backend
 npm install
 cp .env.example .env
 npm run migrate   # applies migrations, incl. `CREATE EXTENSION vector`
+npm run seed      # demo users for all three roles (ADR-0015)
 npm run dev       # http://localhost:4000
 npm run build     # type-check + compile to dist/ (`npm start` runs the build)
 ```
+
+### Demo logins
+
+`npm run seed` is idempotent — re-run it after any migration. It creates one user
+per role, all sharing the same password:
+
+| Email | Role |
+|---|---|
+| `student@tessera.local` | Student |
+| `investor@tessera.local` | Investor |
+| `admin@tessera.local` | Admin |
+
+Password: `tessera-demo`, or whatever `SEED_PASSWORD` is set to when you run it.
+
+**Seeding is the only way an Admin exists.** `POST /auth/register` accepts Student
+and Investor only — Admin is assigned, never self-served (ADR-0004) — so without
+this step `/dashboard/admin` has no one who can reach it.
 
 `.env` must set `JWT_SECRET` to a long random string — there is no built-in
 fallback, so the API refuses to sign or verify a token without it (ADR-0013).

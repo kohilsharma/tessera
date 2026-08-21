@@ -17,9 +17,7 @@ import Login from "./pages/Login";
 import Account from "./pages/Account";
 import RequireAuth from "./pages/RequireAuth";
 import DashboardRedirect from "./pages/DashboardRedirect";
-import StudentDashboard from "./pages/StudentDashboard";
-import InvestorDashboard from "./pages/InvestorDashboard";
-import AdminDashboard from "./pages/AdminDashboard";
+import RoleDashboard from "./pages/RoleDashboard";
 
 export type SharedState = {
   filter: Filter;
@@ -137,26 +135,10 @@ function App() {
         }
       />
       <Route
-        path="/dashboard/student"
+        path="/dashboard/:role"
         element={
           <RequireAuth>
-            <StudentDashboard />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/dashboard/investor"
-        element={
-          <RequireAuth>
-            <InvestorDashboard />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/dashboard/admin"
-        element={
-          <RequireAuth>
-            <AdminDashboard />
+            <RoleDashboard />
           </RequireAuth>
         }
       />

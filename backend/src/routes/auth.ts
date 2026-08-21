@@ -99,19 +99,8 @@ authRouter.post(
   }),
 );
 
-authRouter.get(
-  "/auth/me",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const user = await userRepo().findOne({ where: { id: req.user!.id } });
-    if (!user) {
-      // 401, not ADR-0013's 404: the endpoint exists, it is the bearer's
-      // identity that is gone. The client must drop the token and log in again,
-      // which is exactly what the SPA's 401 interceptor does — a 404 here would
-      // strand a dead token in localStorage.
-      res.status(401).json({ error: "Token identifies a user that no longer exists" });
-      return;
-    }
-    res.json(toPublicUser(user));
-  }),
-);
+// requireAuth has already loaded the row and 401'd a token whose user is gone,
+// so there is nothing left to look up here.
+authRouter.get("/auth/me", requireAuth, (req, res) => {
+  res.json(toPublicUser(req.user!));
+});

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { getMe, logout } from "../api/client";
 
 export default function Account() {
@@ -23,6 +23,9 @@ export default function Account() {
         <dt>Role</dt>
         <dd>{data!.role}</dd>
       </dl>
+      <p>
+        <Link to="/dashboard">Go to your dashboard</Link>
+      </p>
       <button type="button" onClick={onLogout}>
         Log out
       </button>
