@@ -4,6 +4,7 @@ import { authRouter } from "./routes/auth";
 import { dashboardRouter } from "./routes/dashboard";
 import { storiesRouter } from "./routes/stories";
 import { articlesRouter } from "./routes/articles";
+import { briefsRouter } from "./routes/briefs";
 
 // Last resort for anything an async handler rejects with (a DB fault, a bug):
 // one 500 with nothing internal leaked, instead of an unhandled rejection.
@@ -20,6 +21,7 @@ export function createApp() {
   app.use("/api/v1", dashboardRouter);
   app.use("/api/v1", storiesRouter);
   app.use("/api/v1", articlesRouter);
+  app.use("/api/v1", briefsRouter);
   app.use(errorHandler);
   return app;
 }

@@ -13,7 +13,7 @@ export default function InvestorDashboard() {
           <h1>Investor dashboard</h1>
           <p>Watchlist: {data.watchlist.length === 0 ? "none yet" : data.watchlist.length}</p>
           <p>
-            <Link to="/stories">Browse Stories</Link>
+            <Link to="/stories">Browse Stories</Link> · <Link to="/briefs">My Briefs</Link>
           </p>
         </main>
       )}

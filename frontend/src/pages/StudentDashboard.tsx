@@ -16,7 +16,7 @@ export default function StudentDashboard() {
             {data.studyCollections.length === 0 ? "none yet" : data.studyCollections.length}
           </p>
           <p>
-            <Link to="/stories">Browse Stories</Link>
+            <Link to="/stories">Browse Stories</Link> · <Link to="/briefs">My Briefs</Link>
           </p>
         </main>
       )}

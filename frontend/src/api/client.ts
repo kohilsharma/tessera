@@ -198,3 +198,88 @@ export function getStory(id: string): Promise<StoryDetail> {
 export function getArticle(id: string): Promise<ArticleDetail> {
   return getJson(`/api/v1/articles/${id}`, "Could not load this Article");
 }
+
+// #20: mirrors backend/src/entities/IntelligenceBrief.ts + routes/briefs.ts.
+export const DEFAULT_ARTICLE_CAPACITY_LIMIT = 20;
+
+export type BriefSummary = {
+  id: string;
+  title: string;
+  note: string | null;
+  category: StoryCategory;
+  articleCapacityLimit: number;
+  coverImageKey: string | null;
+  ownerId: string;
+  articleCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BriefDetail = BriefSummary & { articles: ArticleSummary[] };
+
+export type BriefSortField = "createdAt" | "updatedAt" | "title";
+
+export type BriefListParams = {
+  page?: number;
+  pageSize?: number;
+  category?: StoryCategory;
+  dateFrom?: string;
+  dateTo?: string;
+  sort?: `${BriefSortField}:asc` | `${BriefSortField}:desc`;
+};
+
+export type BriefInput = {
+  title: string;
+  note?: string | null;
+  category: StoryCategory;
+  articleCapacityLimit?: number;
+};
+
+async function sendJson<T>(
+  method: "POST" | "PATCH" | "DELETE",
+  path: string,
+  body: unknown,
+  errorMessage: string,
+): Promise<T> {
+  const res = await authFetch(path, {
+    method,
+    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseErrorMessage(res, errorMessage));
+  if (res.status === 204) return undefined as T;
+  return res.json();
+}
+
+export function getBriefs(params: BriefListParams = {}): Promise<ListEnvelope<BriefSummary>> {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) query.set(key, String(value));
+  }
+  const suffix = query.toString();
+  return getJson(`/api/v1/briefs${suffix ? `?${suffix}` : ""}`, "Could not load Briefs");
+}
+
+export function getBrief(id: string): Promise<BriefDetail> {
+  return getJson(`/api/v1/briefs/${id}`, "Could not load this Brief");
+}
+
+export function createBrief(input: BriefInput): Promise<BriefSummary> {
+  return sendJson("POST", "/api/v1/briefs", input, "Could not create this Brief");
+}
+
+export function updateBrief(id: string, input: Partial<BriefInput>): Promise<BriefSummary> {
+  return sendJson("PATCH", `/api/v1/briefs/${id}`, input, "Could not update this Brief");
+}
+
+export function deleteBrief(id: string): Promise<void> {
+  return sendJson("DELETE", `/api/v1/briefs/${id}`, undefined, "Could not delete this Brief");
+}
+
+export function attachArticleToBrief(briefId: string, articleId: string): Promise<ArticleSummary> {
+  return sendJson("POST", `/api/v1/briefs/${briefId}/articles`, { articleId }, "Could not attach this Article");
+}
+
+export function detachArticleFromBrief(briefId: string, articleId: string): Promise<void> {
+  return sendJson("DELETE", `/api/v1/briefs/${briefId}/articles/${articleId}`, undefined, "Could not remove this Article");
+}

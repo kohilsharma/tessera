@@ -21,6 +21,9 @@ import RoleDashboard from "./pages/RoleDashboard";
 import Stories from "./pages/Stories";
 import StoryDetail from "./pages/StoryDetail";
 import ArticleDetail from "./pages/ArticleDetail";
+import Briefs from "./pages/Briefs";
+import BriefForm from "./pages/BriefForm";
+import BriefDetail from "./pages/BriefDetail";
 
 export type SharedState = {
   filter: Filter;
@@ -166,6 +169,38 @@ function App() {
         element={
           <RequireAuth>
             <ArticleDetail />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/briefs"
+        element={
+          <RequireAuth>
+            <Briefs />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/briefs/new"
+        element={
+          <RequireAuth>
+            <BriefForm />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/briefs/:id"
+        element={
+          <RequireAuth>
+            <BriefDetail />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/briefs/:id/edit"
+        element={
+          <RequireAuth>
+            <BriefForm />
           </RequireAuth>
         }
       />
