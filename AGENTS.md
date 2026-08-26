@@ -108,8 +108,9 @@ Load via the `skill` tool. Key ones for this project:
 | `domain-modeling` | Sharpening domain terminology |
 | `codebase-design` | Finding deepening opportunities in modules |
 | `resolving-merge-conflicts` | Fixing git merge conflicts |
+| `caveman-commit` | Writing any commit message — use it for every commit |
 
-Full list: 34 skills in `.agents/skills/` — see `ask-matt` if unsure which fits.
+Full list: 35 skills in `.agents/skills/` — see `ask-matt` if unsure which fits.
 Skills are pinned in `skills-lock.json` (`.agents/`+`.claude/` are gitignored); restore with
 `npx skills experimental_install`, refresh with `npx skills update -p`.
 
