@@ -7,7 +7,15 @@ export default function StoryDetail() {
   const query = useQuery({ queryKey: ["story", id], queryFn: () => getStory(id!), enabled: !!id });
 
   if (query.isPending) return <p role="status">Loading Story…</p>;
-  if (query.isError) return <p role="alert">Could not load Story: {(query.error as Error).message}</p>;
+  if (query.isError)
+    return (
+      <div role="alert">
+        <p>Could not load Story: {(query.error as Error).message}</p>
+        <button type="button" onClick={() => query.refetch()} disabled={query.isFetching}>
+          {query.isFetching ? "Retrying…" : "Retry"}
+        </button>
+      </div>
+    );
 
   const story = query.data;
 

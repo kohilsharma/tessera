@@ -7,12 +7,12 @@ export type HealthResponse = {
   timestamp: string;
 };
 
-async function parseErrorMessage(res: Response, fallback: string): Promise<string> {
+async function parseErrorMessage(res: Response, whenUnreadable: string): Promise<string> {
   try {
     const body = await res.json();
-    return typeof body?.error === "string" ? body.error : fallback;
+    return typeof body?.error === "string" ? body.error : whenUnreadable;
   } catch {
-    return fallback;
+    return whenUnreadable;
   }
 }
 
@@ -33,13 +33,13 @@ export type UserRole = (typeof USER_ROLES)[number];
 export type User = { id: string; email: string; role: UserRole };
 export type AuthResponse = { token: string; user: User };
 
-async function postForToken(path: string, body: unknown, fallback: string): Promise<AuthResponse> {
+async function postForToken(path: string, body: unknown, errorMessage: string): Promise<AuthResponse> {
   const res = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(await parseErrorMessage(res, fallback));
+  if (!res.ok) throw new Error(await parseErrorMessage(res, errorMessage));
   const data: AuthResponse = await res.json();
   setToken(data.token);
   // The cache is keyed by nothing but the query key, so ["me"] and the dashboards
@@ -102,9 +102,9 @@ export type StudentDashboardData = { role: "student"; studyCollections: unknown[
 export type InvestorDashboardData = { role: "investor"; watchlist: unknown[] };
 export type AdminDashboardData = { role: "admin"; userCounts: Record<UserRole, number> };
 
-async function getJson<T>(path: string, fallback: string): Promise<T> {
+async function getJson<T>(path: string, errorMessage: string): Promise<T> {
   const res = await authFetch(path);
-  if (!res.ok) throw new Error(await parseErrorMessage(res, fallback));
+  if (!res.ok) throw new Error(await parseErrorMessage(res, errorMessage));
   return res.json();
 }
 
@@ -161,21 +161,24 @@ export type ArticleDetail = {
   id: string;
   title: string;
   url: string;
-  analysisText: string;
+  // null when the Article's Analysis Text Mode is not ours to redistribute
+  // (ADR-0018) — the body is held for analysis but never served.
+  analysisText: string | null;
   analysisTextType: string;
   publishedAt: string;
   publisher: { id: string; name: string; domain: string };
   story: { id: string; slug: string; title: string };
 };
 
+export type StorySortField = "firstSeenAt" | "title";
+
 export type StoryListParams = {
   page?: number;
   pageSize?: number;
   category?: StoryCategory;
-  from?: string;
-  to?: string;
-  sortBy?: "firstSeenAt" | "title";
-  sortDir?: "asc" | "desc";
+  dateFrom?: string;
+  dateTo?: string;
+  sort?: `${StorySortField}:asc` | `${StorySortField}:desc`;
 };
 
 // Mirrors backend/src/lib/listQuery.ts's shared filter+sort+pagination contract.

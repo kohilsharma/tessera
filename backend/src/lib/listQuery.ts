@@ -8,8 +8,8 @@ export type ParsedListQuery = {
   sortBy: string;
   sortDir: SortDir;
   category?: string;
-  from?: Date;
-  to?: Date;
+  dateFrom?: Date;
+  dateTo?: Date;
 };
 
 export type ListQueryOptions = {
@@ -28,6 +28,7 @@ export type ListEnvelope<T> = {
 
 const DEFAULT_PAGE_SIZE = 10;
 const MAX_PAGE_SIZE = 50;
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
 function parsePositiveInt(value: unknown, fallback: number, errors: string[], field: string): number {
   if (value === undefined) return fallback;
@@ -39,19 +40,27 @@ function parsePositiveInt(value: unknown, fallback: number, errors: string[], fi
   return n;
 }
 
-function parseDate(value: unknown, errors: string[], field: string): Date | undefined {
+// `endOfDay` matters for the inclusive upper bound: <input type="date"> sends
+// "2026-01-04", which parses to midnight UTC, so a plain `<=` would drop
+// everything published later that same day under a UI that says "to 4 Jan".
+// A caller passing a full timestamp gets it honoured as given.
+function parseDate(value: unknown, errors: string[], field: string, endOfDay = false): Date | undefined {
   if (value === undefined) return undefined;
-  const date = new Date(String(value));
+  const raw = String(value);
+  const date = new Date(raw);
   if (Number.isNaN(date.getTime())) {
     errors.push(`${field} must be a valid date`);
     return undefined;
   }
+  if (endOfDay && DATE_ONLY.test(raw)) date.setUTCHours(23, 59, 59, 999);
   return date;
 }
 
 // Shared filter+sort+pagination contract for every paginated list endpoint —
 // Stories here, IntelligenceBrief list (#20) and hybrid search (#22) reuse it —
 // so the query-param shape and validation stay identical across all three.
+// Param names are the parent spec's API contract: `category`, `dateFrom`,
+// `dateTo`, `sort` (as `field` or `field:asc|desc`), `page`, `pageSize`.
 export function parseListQuery(
   query: Record<string, unknown>,
   options: ListQueryOptions,
@@ -62,16 +71,16 @@ export function parseListQuery(
   const pageSize = parsePositiveInt(query.pageSize, DEFAULT_PAGE_SIZE, errors, "pageSize");
   if (pageSize > MAX_PAGE_SIZE) errors.push(`pageSize must be at most ${MAX_PAGE_SIZE}`);
 
-  const sortBy = query.sortBy === undefined ? options.defaultSortBy : String(query.sortBy);
+  const parts = (query.sort === undefined ? options.defaultSortBy : String(query.sort)).split(":");
+  if (parts.length > 2) errors.push("sort must be 'field' or 'field:asc|desc'");
+  const sortBy = parts[0];
   if (!options.allowedSortBy.includes(sortBy)) {
-    errors.push(`sortBy must be one of: ${options.allowedSortBy.join(", ")}`);
+    errors.push(`sort field must be one of: ${options.allowedSortBy.join(", ")}`);
   }
-
   let sortDir: SortDir = "desc";
-  if (query.sortDir !== undefined) {
-    if (query.sortDir !== "asc" && query.sortDir !== "desc") errors.push("sortDir must be 'asc' or 'desc'");
-    else sortDir = query.sortDir;
-  }
+  const rawDir = parts[1] ?? "desc";
+  if (rawDir !== "asc" && rawDir !== "desc") errors.push("sort direction must be 'asc' or 'desc'");
+  else sortDir = rawDir;
 
   let category: string | undefined;
   if (query.category !== undefined) {
@@ -82,11 +91,12 @@ export function parseListQuery(
     }
   }
 
-  const from = parseDate(query.from, errors, "from");
-  const to = parseDate(query.to, errors, "to");
+  const dateFrom = parseDate(query.dateFrom, errors, "dateFrom");
+  const dateTo = parseDate(query.dateTo, errors, "dateTo", true);
+  if (dateFrom && dateTo && dateFrom > dateTo) errors.push("dateFrom must not be after dateTo");
 
   if (errors.length > 0) return { ok: false, error: errors.join("; ") };
-  return { ok: true, value: { page, pageSize, sortBy, sortDir, category, from, to } };
+  return { ok: true, value: { page, pageSize, sortBy, sortDir, category, dateFrom, dateTo } };
 }
 
 export async function paginate<T extends object>(
@@ -94,7 +104,12 @@ export async function paginate<T extends object>(
   page: number,
   pageSize: number,
 ): Promise<{ items: T[]; total: number }> {
+  // Primary-key tiebreaker, appended after the caller's sort: Postgres promises
+  // no order between rows tied on the sort column, so without this a tie can
+  // repeat a row on one page and drop another entirely. Every entity behind a
+  // paginated list here has a uuid `id`.
   const [items, total] = await qb
+    .addOrderBy(`${qb.alias}.id`, "ASC")
     .skip((page - 1) * pageSize)
     .take(pageSize)
     .getManyAndCount();

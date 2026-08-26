@@ -34,7 +34,8 @@ async function seedUsers(): Promise<void> {
 }
 
 // #19: seeds the browsable corpus with the deterministic Mock EmbeddingProvider
-// (ADR-0003) so the app is never empty and re-running is reproducible.
+// (ADR-0017/0023 interface, in the spirit of ADR-0003's Mock-provider rule) so the
+// app is never empty and re-running is reproducible.
 async function seedCorpus(): Promise<void> {
   const publishers = AppDataSource.getRepository(Publisher);
   const stories = AppDataSource.getRepository(Story);

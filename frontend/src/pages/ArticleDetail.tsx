@@ -7,7 +7,15 @@ export default function ArticleDetail() {
   const query = useQuery({ queryKey: ["article", id], queryFn: () => getArticle(id!), enabled: !!id });
 
   if (query.isPending) return <p role="status">Loading Article…</p>;
-  if (query.isError) return <p role="alert">Could not load Article: {(query.error as Error).message}</p>;
+  if (query.isError)
+    return (
+      <div role="alert">
+        <p>Could not load Article: {(query.error as Error).message}</p>
+        <button type="button" onClick={() => query.refetch()} disabled={query.isFetching}>
+          {query.isFetching ? "Retrying…" : "Retry"}
+        </button>
+      </div>
+    );
 
   const article = query.data;
 
@@ -23,7 +31,14 @@ export default function ArticleDetail() {
           Original source
         </a>
       </p>
-      <p>{article.analysisText}</p>
+      {article.analysisText ? (
+        <p>{article.analysisText}</p>
+      ) : (
+        <p>
+          This Article&rsquo;s text is held for analysis only and is not shown here (
+          {article.analysisTextType}). Read it at the original source above.
+        </p>
+      )}
     </main>
   );
 }

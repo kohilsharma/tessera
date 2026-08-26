@@ -3,6 +3,7 @@ import { AppDataSource } from "../data-source";
 import { Article } from "../entities/Article";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
+import { mayRedistribute, toPublicArticle } from "../lib/articleView";
 import { isUuid } from "../lib/uuid";
 
 export const articlesRouter = Router();
@@ -26,13 +27,11 @@ articlesRouter.get(
     }
 
     res.json({
-      id: article.id,
-      title: article.title,
-      url: article.url,
-      analysisText: article.analysisText,
-      analysisTextType: article.analysisTextType,
-      publishedAt: article.publishedAt,
-      publisher: { id: article.publisher.id, name: article.publisher.name, domain: article.publisher.domain },
+      ...toPublicArticle(article),
+      // The one endpoint that serves body text, and only for modes we may
+      // redistribute (ADR-0018) — null otherwise, so the client can say so
+      // rather than render an empty body.
+      analysisText: mayRedistribute(article.analysisTextType) ? article.analysisText : null,
       story: { id: article.story.id, slug: article.story.slug, title: article.story.title },
     });
   }),

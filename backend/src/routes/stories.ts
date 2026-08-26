@@ -3,6 +3,7 @@ import { AppDataSource } from "../data-source";
 import { Story, STORY_CATEGORIES } from "../entities/Story";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
+import { toPublicArticle } from "../lib/articleView";
 import { paginate, parseListQuery, toEnvelope } from "../lib/listQuery";
 import { isUuid } from "../lib/uuid";
 
@@ -12,7 +13,7 @@ function storyRepo() {
   return AppDataSource.getRepository(Story);
 }
 
-function toPublicStory(story: Story & { articleCount?: number }) {
+function toPublicStory(story: Story, articleCount: number) {
   return {
     id: story.id,
     slug: story.slug,
@@ -21,7 +22,7 @@ function toPublicStory(story: Story & { articleCount?: number }) {
     category: story.category,
     firstSeenAt: story.firstSeenAt,
     lastSeenAt: story.lastSeenAt,
-    articleCount: story.articleCount ?? 0,
+    articleCount,
   };
 }
 
@@ -38,7 +39,7 @@ storiesRouter.get(
       res.status(422).json({ error: parsed.error });
       return;
     }
-    const { page, pageSize, sortBy, sortDir, category, from, to } = parsed.value;
+    const { page, pageSize, sortBy, sortDir, category, dateFrom, dateTo } = parsed.value;
 
     const qb = storyRepo()
       .createQueryBuilder("story")
@@ -46,11 +47,21 @@ storiesRouter.get(
       .orderBy(`story.${sortBy}`, sortDir === "asc" ? "ASC" : "DESC");
 
     if (category) qb.andWhere("story.category = :category", { category });
-    if (from) qb.andWhere(`story."firstSeenAt" >= :from`, { from });
-    if (to) qb.andWhere(`story."firstSeenAt" <= :to`, { to });
+    // Both bounds test firstSeenAt — a Story is dated by when its coverage began
+    // (see Story.firstSeenAt), so the range filters story starts, not overlap.
+    if (dateFrom) qb.andWhere(`story."firstSeenAt" >= :dateFrom`, { dateFrom });
+    if (dateTo) qb.andWhere(`story."firstSeenAt" <= :dateTo`, { dateTo });
 
     const { items, total } = await paginate(qb, page, pageSize);
-    res.json(toEnvelope(items.map(toPublicStory), page, pageSize, total));
+    const withCount = items as (Story & { articleCount?: number })[];
+    res.json(
+      toEnvelope(
+        withCount.map((story) => toPublicStory(story, story.articleCount ?? 0)),
+        page,
+        pageSize,
+        total,
+      ),
+    );
   }),
 );
 
@@ -73,18 +84,10 @@ storiesRouter.get(
     }
 
     res.json({
-      ...toPublicStory(story),
-      articleCount: story.articles.length,
+      ...toPublicStory(story, story.articles.length),
       articles: [...story.articles]
         .sort((a, b) => a.publishedAt.getTime() - b.publishedAt.getTime())
-        .map((article) => ({
-          id: article.id,
-          title: article.title,
-          url: article.url,
-          publishedAt: article.publishedAt,
-          analysisTextType: article.analysisTextType,
-          publisher: { id: article.publisher.id, name: article.publisher.name, domain: article.publisher.domain },
-        })),
+        .map(toPublicArticle),
     });
   }),
 );

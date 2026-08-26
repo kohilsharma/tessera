@@ -1,6 +1,7 @@
 import { EMBEDDING_DIMENSIONS, EmbeddingProvider } from "./EmbeddingProvider";
 
-// ADR-0003: a deterministic Mock provider so seeding/tests never need an API
+// ADR-0017/0023 define the embedding interface and its 1024-dim space; ADR-0003 is
+// what requires a Mock provider at all. Deterministic, so seeding/tests never need an API
 // key — the same text always yields the same unit vector. FNV-1a seeds a
 // xorshift32 PRNG, both pure integer math, no crypto/dependency needed.
 function hashString(text: string): number {

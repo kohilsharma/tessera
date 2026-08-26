@@ -38,7 +38,7 @@ npm run build     # type-check + compile to dist/ (`npm start` runs the build)
 `npm run seed` is idempotent — re-run it after any migration. It creates one user
 per role, all sharing the same password, plus a Publisher/Story/Article corpus
 (browsable at `/stories` once the frontend is running) embedded with the deterministic
-Mock EmbeddingProvider (ADR-0003).
+Mock EmbeddingProvider (ADR-0003's Mock-provider rule, ADR-0017 interface).
 
 | Email | Role |
 |---|---|

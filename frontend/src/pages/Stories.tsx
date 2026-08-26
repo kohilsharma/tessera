@@ -1,32 +1,35 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
-import { getStories, STORY_CATEGORIES, type StoryCategory } from "../api/client";
+import { getStories, STORY_CATEGORIES, type StoryCategory, type StorySortField } from "../api/client";
 
 function isStoryCategory(value: string): value is StoryCategory {
   return (STORY_CATEGORIES as readonly string[]).includes(value);
 }
 
 // URL search params double as the filter/sort/page state: shareable links,
-// and back/forward behaves the way a reader expects on a list page.
+// and back/forward behaves the way a reader expects on a list page. The names
+// mirror the API's list contract (category, dateFrom, dateTo, sort, page) so
+// there is one vocabulary from the address bar to the query.
 export default function Stories() {
   const [searchParams, setSearchParams] = useSearchParams();
   const rawCategory = searchParams.get("category") ?? "";
   const category = isStoryCategory(rawCategory) ? rawCategory : "";
-  const sortBy = searchParams.get("sortBy") === "title" ? "title" : "firstSeenAt";
-  const sortDir = searchParams.get("sortDir") === "asc" ? "asc" : "desc";
-  const from = searchParams.get("from") ?? "";
-  const to = searchParams.get("to") ?? "";
+  const [rawSortField, rawSortDir] = (searchParams.get("sort") ?? "").split(":");
+  const sortField: StorySortField = rawSortField === "title" ? "title" : "firstSeenAt";
+  const sortDir = rawSortDir === "asc" ? "asc" : "desc";
+  const dateFrom = searchParams.get("dateFrom") ?? "";
+  const dateTo = searchParams.get("dateTo") ?? "";
   const page = Number(searchParams.get("page") ?? "1") || 1;
+  const hasFilters = Boolean(category || dateFrom || dateTo);
 
   const query = useQuery({
-    queryKey: ["stories", { category, sortBy, sortDir, from, to, page }],
+    queryKey: ["stories", { category, sortField, sortDir, dateFrom, dateTo, page }],
     queryFn: () =>
       getStories({
         category: category || undefined,
-        sortBy,
-        sortDir,
-        from: from || undefined,
-        to: to || undefined,
+        sort: `${sortField}:${sortDir}`,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
         page,
       }),
   });
@@ -36,6 +39,13 @@ export default function Stories() {
     if (value) next.set(key, value);
     else next.delete(key);
     next.delete("page");
+    setSearchParams(next);
+  }
+
+  function clearFilters() {
+    const next = new URLSearchParams();
+    const sort = searchParams.get("sort");
+    if (sort) next.set("sort", sort);
     setSearchParams(next);
   }
 
@@ -62,30 +72,50 @@ export default function Stories() {
         </label>{" "}
         <label>
           Sort by{" "}
-          <select value={sortBy} onChange={(e) => updateFilter("sortBy", e.target.value)}>
+          <select value={sortField} onChange={(e) => updateFilter("sort", `${e.target.value}:${sortDir}`)}>
             <option value="firstSeenAt">Date first seen</option>
             <option value="title">Title</option>
           </select>
         </label>{" "}
         <label>
           Direction{" "}
-          <select value={sortDir} onChange={(e) => updateFilter("sortDir", e.target.value)}>
+          <select value={sortDir} onChange={(e) => updateFilter("sort", `${sortField}:${e.target.value}`)}>
             <option value="desc">Descending</option>
             <option value="asc">Ascending</option>
           </select>
         </label>{" "}
         <label>
           First seen from{" "}
-          <input type="date" value={from} onChange={(e) => updateFilter("from", e.target.value)} />
+          <input type="date" value={dateFrom} onChange={(e) => updateFilter("dateFrom", e.target.value)} />
         </label>{" "}
         <label>
-          to <input type="date" value={to} onChange={(e) => updateFilter("to", e.target.value)} />
+          to <input type="date" value={dateTo} onChange={(e) => updateFilter("dateTo", e.target.value)} />
         </label>
       </form>
 
       {query.isPending && <p role="status">Loading Stories…</p>}
-      {query.isError && <p role="alert">Could not load Stories: {(query.error as Error).message}</p>}
-      {query.isSuccess && query.data.items.length === 0 && <p>No Stories match these filters.</p>}
+      {query.isError && (
+        <div role="alert">
+          <p>Could not load Stories: {(query.error as Error).message}</p>
+          <button type="button" onClick={() => query.refetch()} disabled={query.isFetching}>
+            {query.isFetching ? "Retrying…" : "Retry"}
+          </button>
+        </div>
+      )}
+      {query.isSuccess && query.data.items.length === 0 && (
+        <div>
+          <p>No Stories match these filters.</p>
+          {hasFilters ? (
+            <button type="button" onClick={clearFilters}>
+              Clear filters
+            </button>
+          ) : (
+            <p>
+              The corpus is empty — run <code>npm run seed</code> in <code>backend/</code> to load the demo Stories.
+            </p>
+          )}
+        </div>
+      )}
       {query.isSuccess && query.data.items.length > 0 && (
         <>
           <ul>
