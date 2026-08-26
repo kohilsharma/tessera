@@ -16,12 +16,16 @@
 
 ## Repo state
 
-**backend/** — walking skeleton only (#16): Express + TypeORM, one migration
-(`CREATE EXTENSION vector`), and `GET /api/v1/health`. No product entities/routes yet.
+**backend/** — Express + TypeORM. Auth (#17), role-guard middleware + dashboards (#18), and a
+seeded Publisher/Story/Article corpus with browse endpoints (#19) are live; `GET /api/v1/health`
+from the walking skeleton (#16) too. Ingestion, the flagship generation pipeline, and Phase 3.5
+(graph/timeline) are not built yet.
 **frontend/** — still mostly the **design prototype**: `src/App.tsx` renders
-`src/versions/bureau.tsx` against `src/styles.css` with hardcoded `src/data.ts` at `/`. The
-walking skeleton (#16) added a router, a `fetch`-based API client (`src/api/client.ts`), and
-one live page — `/status` — that calls the backend health endpoint. No other backend calls yet.
+`src/versions/bureau.tsx` against `src/styles.css` with hardcoded `src/data.ts` at `/`. Live,
+`fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`, `/register`,
+`/account`), role dashboards (`/dashboard/:role`), and browsing the corpus (`/stories`,
+`/stories/:id`, `/articles/:id`) — all plain unstyled markup, not yet run through the Bureau
+design system.
 
 `npm run migrate` (backend) applies migrations; `npm test` (backend) is the API-seam test
 pattern (supertest + an ephemeral Testcontainers Postgres) later Foundation tickets extend.
@@ -153,8 +157,19 @@ Backend commands (run from `backend/`, after `docker compose up -d` — see `SET
 npm run dev       # tsx watch, http://localhost:4000
 npm run build     # tsc -> dist/
 npm run migrate   # apply TypeORM migrations
-npm run seed      # demo users for all three roles; the only path to an Admin (ADR-0015)
+npm run seed      # demo users for all three roles (only path to an Admin, ADR-0015) + the
+                  # Story/Article/Publisher corpus, embedded with the Mock EmbeddingProvider
 npm test          # vitest; spins up an ephemeral Postgres via Testcontainers, needs docker access
 ```
 
 No lint script exists yet. Do not claim it passes until implemented.
+
+## Browser Automation
+
+Use `agent-browser` for web automation. Run `agent-browser --help` for all commands.
+
+Core workflow:
+1. `agent-browser open <url>` - Navigate to page
+2. `agent-browser snapshot -i` - Get interactive elements with refs (@e1, @e2)
+3. `agent-browser click @e1` / `fill @e2 "text"` - Interact using refs
+4. Re-snapshot after page changes

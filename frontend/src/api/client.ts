@@ -102,20 +102,96 @@ export type StudentDashboardData = { role: "student"; studyCollections: unknown[
 export type InvestorDashboardData = { role: "investor"; watchlist: unknown[] };
 export type AdminDashboardData = { role: "admin"; userCounts: Record<UserRole, number> };
 
-async function getDashboard<T>(path: string): Promise<T> {
+async function getJson<T>(path: string, fallback: string): Promise<T> {
   const res = await authFetch(path);
-  if (!res.ok) throw new Error(await parseErrorMessage(res, "Could not load this dashboard"));
+  if (!res.ok) throw new Error(await parseErrorMessage(res, fallback));
   return res.json();
 }
 
 export function getStudentDashboard(): Promise<StudentDashboardData> {
-  return getDashboard("/api/v1/dashboard/student");
+  return getJson("/api/v1/dashboard/student", "Could not load this dashboard");
 }
 
 export function getInvestorDashboard(): Promise<InvestorDashboardData> {
-  return getDashboard("/api/v1/dashboard/investor");
+  return getJson("/api/v1/dashboard/investor", "Could not load this dashboard");
 }
 
 export function getAdminDashboard(): Promise<AdminDashboardData> {
-  return getDashboard("/api/v1/dashboard/admin");
+  return getJson("/api/v1/dashboard/admin", "Could not load this dashboard");
+}
+
+// #19: mirrors backend/src/entities/Story.ts's constrained vocabulary.
+export const STORY_CATEGORIES = [
+  "politics",
+  "business",
+  "technology",
+  "science",
+  "health",
+  "world",
+  "sports",
+  "entertainment",
+] as const;
+export type StoryCategory = (typeof STORY_CATEGORIES)[number];
+
+export type ListEnvelope<T> = { items: T[]; page: number; pageSize: number; total: number; totalPages: number };
+
+export type StorySummary = {
+  id: string;
+  slug: string;
+  title: string;
+  summary: string | null;
+  category: StoryCategory;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  articleCount: number;
+};
+
+export type ArticleSummary = {
+  id: string;
+  title: string;
+  url: string;
+  publishedAt: string;
+  analysisTextType: string;
+  publisher: { id: string; name: string; domain: string };
+};
+
+export type StoryDetail = StorySummary & { articles: ArticleSummary[] };
+
+export type ArticleDetail = {
+  id: string;
+  title: string;
+  url: string;
+  analysisText: string;
+  analysisTextType: string;
+  publishedAt: string;
+  publisher: { id: string; name: string; domain: string };
+  story: { id: string; slug: string; title: string };
+};
+
+export type StoryListParams = {
+  page?: number;
+  pageSize?: number;
+  category?: StoryCategory;
+  from?: string;
+  to?: string;
+  sortBy?: "firstSeenAt" | "title";
+  sortDir?: "asc" | "desc";
+};
+
+// Mirrors backend/src/lib/listQuery.ts's shared filter+sort+pagination contract.
+export function getStories(params: StoryListParams = {}): Promise<ListEnvelope<StorySummary>> {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) query.set(key, String(value));
+  }
+  const suffix = query.toString();
+  return getJson(`/api/v1/stories${suffix ? `?${suffix}` : ""}`, "Could not load Stories");
+}
+
+export function getStory(id: string): Promise<StoryDetail> {
+  return getJson(`/api/v1/stories/${id}`, "Could not load this Story");
+}
+
+export function getArticle(id: string): Promise<ArticleDetail> {
+  return getJson(`/api/v1/articles/${id}`, "Could not load this Article");
 }

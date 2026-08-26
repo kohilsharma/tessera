@@ -18,6 +18,9 @@ import Account from "./pages/Account";
 import RequireAuth from "./pages/RequireAuth";
 import DashboardRedirect from "./pages/DashboardRedirect";
 import RoleDashboard from "./pages/RoleDashboard";
+import Stories from "./pages/Stories";
+import StoryDetail from "./pages/StoryDetail";
+import ArticleDetail from "./pages/ArticleDetail";
 
 export type SharedState = {
   filter: Filter;
@@ -139,6 +142,30 @@ function App() {
         element={
           <RequireAuth>
             <RoleDashboard />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/stories"
+        element={
+          <RequireAuth>
+            <Stories />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/stories/:id"
+        element={
+          <RequireAuth>
+            <StoryDetail />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/articles/:id"
+        element={
+          <RequireAuth>
+            <ArticleDetail />
           </RequireAuth>
         }
       />

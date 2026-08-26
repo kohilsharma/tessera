@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { getAdminDashboard, USER_ROLES } from "../api/client";
 import DashboardShell from "./DashboardShell";
 
@@ -19,6 +20,9 @@ export default function AdminDashboard() {
               </div>
             ))}
           </dl>
+          <p>
+            <Link to="/stories">Browse Stories</Link>
+          </p>
         </main>
       )}
     </DashboardShell>

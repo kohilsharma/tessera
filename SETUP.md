@@ -28,7 +28,7 @@ cd backend
 npm install
 cp .env.example .env
 npm run migrate   # applies migrations, incl. `CREATE EXTENSION vector`
-npm run seed      # demo users for all three roles (ADR-0015)
+npm run seed      # demo users for all three roles (ADR-0015) + a Story/Article corpus
 npm run dev       # http://localhost:4000
 npm run build     # type-check + compile to dist/ (`npm start` runs the build)
 ```
@@ -36,7 +36,9 @@ npm run build     # type-check + compile to dist/ (`npm start` runs the build)
 ### Demo logins
 
 `npm run seed` is idempotent — re-run it after any migration. It creates one user
-per role, all sharing the same password:
+per role, all sharing the same password, plus a Publisher/Story/Article corpus
+(browsable at `/stories` once the frontend is running) embedded with the deterministic
+Mock EmbeddingProvider (ADR-0003).
 
 | Email | Role |
 |---|---|

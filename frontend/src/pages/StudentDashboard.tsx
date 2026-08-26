@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { getStudentDashboard } from "../api/client";
 import DashboardShell from "./DashboardShell";
 
@@ -13,6 +14,9 @@ export default function StudentDashboard() {
           <p>
             Study collections:{" "}
             {data.studyCollections.length === 0 ? "none yet" : data.studyCollections.length}
+          </p>
+          <p>
+            <Link to="/stories">Browse Stories</Link>
           </p>
         </main>
       )}

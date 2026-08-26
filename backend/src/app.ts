@@ -2,6 +2,8 @@ import express, { type ErrorRequestHandler } from "express";
 import { healthRouter } from "./routes/health";
 import { authRouter } from "./routes/auth";
 import { dashboardRouter } from "./routes/dashboard";
+import { storiesRouter } from "./routes/stories";
+import { articlesRouter } from "./routes/articles";
 
 // Last resort for anything an async handler rejects with (a DB fault, a bug):
 // one 500 with nothing internal leaked, instead of an unhandled rejection.
@@ -16,6 +18,8 @@ export function createApp() {
   app.use("/api/v1", healthRouter);
   app.use("/api/v1", authRouter);
   app.use("/api/v1", dashboardRouter);
+  app.use("/api/v1", storiesRouter);
+  app.use("/api/v1", articlesRouter);
   app.use(errorHandler);
   return app;
 }
