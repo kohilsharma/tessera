@@ -1,7 +1,7 @@
 import { AppDataSource } from "../data-source";
 import { toVectorLiteral } from "../embeddings/pgvector";
 import type { EmbeddingProvider } from "../embeddings/EmbeddingProvider";
-import type { SortDir } from "./listQuery";
+import type { ParsedListQuery } from "./listQuery";
 
 // ADR-0014: standard RRF constant (also Elasticsearch's default) — large enough
 // that a single signal's rank-1 doesn't dominate the sum, small enough that
@@ -16,17 +16,22 @@ const RRF_K = 60;
 // pool or filtered ANN once the corpus grows past low hundreds.
 const SEMANTIC_CANDIDATE_POOL = 500;
 
+// The nearest neighbours of a query are only *relevant* neighbours if they're
+// actually close: ANN always returns its k nearest, however far away they are,
+// so without a cutoff a nonsense query fuses in the whole corpus and "nothing
+// matched" becomes unreachable. `<=>` is cosine distance (0 identical, 1
+// orthogonal), so 0.6 keeps neighbours above ~0.4 cosine similarity.
+// ponytail: one hand-set threshold, not a per-query or learned one — this is a
+// calibration knob, and the right value depends on the serving model, so retune
+// it when the hosted provider replaces Mock (#23) rather than trusting 0.6.
+const SEMANTIC_MAX_DISTANCE = 0.6;
+
 export type HybridSearchSortBy = "relevance" | "publishedAt";
 
-export type HybridSearchFilters = {
-  category?: string;
-  dateFrom?: Date;
-  dateTo?: Date;
-  sortBy: HybridSearchSortBy;
-  sortDir: SortDir;
-  page: number;
-  pageSize: number;
-};
+// Search takes the shared list contract (lib/listQuery.ts) whole and only
+// narrows `sortBy` to the two fields it can actually order by, so the filter
+// and pagination shapes can't drift apart from the other list endpoints.
+export type HybridSearchFilters = ParsedListQuery<HybridSearchSortBy>;
 
 export type HybridSearchHit = { id: string; score: number };
 
@@ -35,7 +40,7 @@ export type HybridSearchResult = {
   total: number;
 };
 
-type FusedRow = { articleId: string; score: string; totalCount: string };
+type FusedRow = { articleId: string | null; score: string | null; totalCount: string };
 
 // Lexical (tsvector/GIN) and semantic (pgvector cosine/HNSW) are each ranked
 // independently, then fused by Reciprocal Rank Fusion (sum(1/(k+rank))) —
@@ -50,7 +55,7 @@ export async function hybridSearchArticleIds(
   embedder: EmbeddingProvider,
 ): Promise<HybridSearchResult> {
   const queryVector = toVectorLiteral(await embedder.embed(queryText));
-  const sortColumn = filters.sortBy === "relevance" ? "f.score" : `a."publishedAt"`;
+  const sortColumn = filters.sortBy === "relevance" ? "score" : `"publishedAt"`;
   const sortDir: "ASC" | "DESC" = filters.sortDir === "asc" ? "ASC" : "DESC";
   const offset = (filters.page - 1) * filters.pageSize;
 
@@ -69,27 +74,45 @@ export async function hybridSearchArticleIds(
       WHERE a."searchVector" @@ query OR st."searchVector" @@ query
     ),
     semantic AS (
-      SELECT id, ROW_NUMBER() OVER (ORDER BY embedding <=> $2::vector, id ASC) AS rank
-      FROM articles
-      WHERE embedding IS NOT NULL
-      ORDER BY embedding <=> $2::vector, id ASC
-      LIMIT ${SEMANTIC_CANDIDATE_POOL}
+      -- The ANN scan is the inner query and nothing but ORDER BY ... LIMIT, so
+      -- the HNSW index can serve it; ranking and the distance cutoff sit
+      -- outside it. Inlining either one would force a window function or a
+      -- filter over the whole table first and turn this back into a seq scan.
+      SELECT id, ROW_NUMBER() OVER (ORDER BY distance, id ASC) AS rank
+      FROM (
+        SELECT id, embedding <=> $2::vector AS distance
+        FROM articles
+        WHERE embedding IS NOT NULL
+        ORDER BY embedding <=> $2::vector
+        LIMIT ${SEMANTIC_CANDIDATE_POOL}
+      ) nn
+      WHERE distance <= ${SEMANTIC_MAX_DISTANCE}
     ),
     fused AS (
       SELECT COALESCE(l.id, s.id) AS "articleId",
              COALESCE(1.0 / (${RRF_K} + l.rank), 0) + COALESCE(1.0 / (${RRF_K} + s.rank), 0) AS score
       FROM lexical l
       FULL OUTER JOIN semantic s ON l.id = s.id
+    ),
+    filtered AS (
+      SELECT f."articleId", f.score, a."publishedAt"
+      FROM fused f
+      JOIN articles a ON a.id = f."articleId"
+      JOIN stories st ON st.id = a."storyId"
+      WHERE ($3::varchar IS NULL OR st.category = $3)
+        AND ($4::timestamptz IS NULL OR a."publishedAt" >= $4)
+        AND ($5::timestamptz IS NULL OR a."publishedAt" <= $5)
     )
-    SELECT f."articleId", f.score, COUNT(*) OVER() AS "totalCount"
-    FROM fused f
-    JOIN articles a ON a.id = f."articleId"
-    JOIN stories st ON st.id = a."storyId"
-    WHERE ($3::varchar IS NULL OR st.category = $3)
-      AND ($4::timestamptz IS NULL OR a."publishedAt" >= $4)
-      AND ($5::timestamptz IS NULL OR a."publishedAt" <= $5)
-    ORDER BY ${sortColumn} ${sortDir}, f."articleId" ASC
-    LIMIT $6 OFFSET $7
+    -- The count is its own scalar row, LEFT JOINed to the page rather than
+    -- carried on them: COUNT(*) OVER() rides along on result rows, so a page
+    -- past the end returns none and the total silently reads back as 0.
+    SELECT page."articleId", page.score, total.n AS "totalCount"
+    FROM (SELECT COUNT(*) AS n FROM filtered) total
+    LEFT JOIN LATERAL (
+      SELECT * FROM filtered
+      ORDER BY ${sortColumn} ${sortDir}, "articleId" ASC
+      LIMIT $6 OFFSET $7
+    ) page ON TRUE
     `,
     [
       queryText,
@@ -103,7 +126,9 @@ export async function hybridSearchArticleIds(
   );
 
   return {
-    hits: rows.map((r) => ({ id: r.articleId, score: Number(r.score) })),
-    total: rows.length > 0 ? Number(rows[0].totalCount) : 0,
+    hits: rows
+      .filter((r): r is FusedRow & { articleId: string; score: string } => r.articleId !== null)
+      .map((r) => ({ id: r.articleId, score: Number(r.score) })),
+    total: Number(rows[0].totalCount),
   };
 }

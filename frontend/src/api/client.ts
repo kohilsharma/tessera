@@ -208,8 +208,9 @@ export function getArticle(id: string): Promise<ArticleDetail> {
 // #22: mirrors backend/src/routes/search.ts's hybrid (FTS + vector, RRF) search.
 export type SearchSortField = "relevance" | "publishedAt";
 
+// No analysisText: body text is served only by the Article detail endpoint
+// (ADR-0018), so a result links through to it rather than carrying it.
 export type SearchResult = ArticleSummary & {
-  analysisText: string | null;
   story: { id: string; slug: string; title: string };
   score: number;
 };

@@ -2,19 +2,23 @@ import { SelectQueryBuilder } from "typeorm";
 
 export type SortDir = "asc" | "desc";
 
-export type ParsedListQuery = {
+// Generic over the sort field so a caller's `allowedSortBy` literal is the
+// single source of truth for both the runtime check and the returned type —
+// otherwise every caller re-asserts the union with a cast the validator has
+// already earned.
+export type ParsedListQuery<TSort extends string = string> = {
   page: number;
   pageSize: number;
-  sortBy: string;
+  sortBy: TSort;
   sortDir: SortDir;
   category?: string;
   dateFrom?: Date;
   dateTo?: Date;
 };
 
-export type ListQueryOptions = {
-  allowedSortBy: readonly string[];
-  defaultSortBy: string;
+export type ListQueryOptions<TSort extends string> = {
+  allowedSortBy: readonly TSort[];
+  defaultSortBy: NoInfer<TSort>;
   allowedCategories?: readonly string[];
 };
 
@@ -61,10 +65,10 @@ function parseDate(value: unknown, errors: string[], field: string, endOfDay = f
 // so the query-param shape and validation stay identical across all three.
 // Param names are the parent spec's API contract: `category`, `dateFrom`,
 // `dateTo`, `sort` (as `field` or `field:asc|desc`), `page`, `pageSize`.
-export function parseListQuery(
+export function parseListQuery<TSort extends string>(
   query: Record<string, unknown>,
-  options: ListQueryOptions,
-): { ok: true; value: ParsedListQuery } | { ok: false; error: string } {
+  options: ListQueryOptions<TSort>,
+): { ok: true; value: ParsedListQuery<TSort> } | { ok: false; error: string } {
   const errors: string[] = [];
 
   const page = parsePositiveInt(query.page, 1, errors, "page");
@@ -73,7 +77,7 @@ export function parseListQuery(
 
   const parts = (query.sort === undefined ? options.defaultSortBy : String(query.sort)).split(":");
   if (parts.length > 2) errors.push("sort must be 'field' or 'field:asc|desc'");
-  const sortBy = parts[0];
+  const sortBy = parts[0] as TSort;
   if (!options.allowedSortBy.includes(sortBy)) {
     errors.push(`sort field must be one of: ${options.allowedSortBy.join(", ")}`);
   }

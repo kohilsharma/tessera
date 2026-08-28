@@ -16,16 +16,17 @@
 
 ## Repo state
 
-**backend/** — Express + TypeORM. Auth (#17), role-guard middleware + dashboards (#18), and a
-seeded Publisher/Story/Article corpus with browse endpoints (#19) are live; `GET /api/v1/health`
-from the walking skeleton (#16) too. Ingestion, the flagship generation pipeline, and Phase 3.5
-(graph/timeline) are not built yet.
+**backend/** — Express + TypeORM. Auth (#17), role-guard middleware + dashboards (#18), a
+seeded Publisher/Story/Article corpus with browse endpoints (#19), IntelligenceBrief CRUD with
+cover images (#20, #21), and hybrid search over the corpus (#22 — Postgres FTS + pgvector
+cosine, fused by RRF) are live; `GET /api/v1/health` from the walking skeleton (#16) too.
+Ingestion, the flagship generation pipeline, and Phase 3.5 (graph/timeline) are not built yet.
 **frontend/** — still mostly the **design prototype**: `src/App.tsx` renders
 `src/versions/bureau.tsx` against `src/styles.css` with hardcoded `src/data.ts` at `/`. Live,
 `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`, `/register`,
-`/account`), role dashboards (`/dashboard/:role`), and browsing the corpus (`/stories`,
-`/stories/:id`, `/articles/:id`) — all plain unstyled markup, not yet run through the Bureau
-design system.
+`/account`), role dashboards (`/dashboard/:role`), browsing the corpus (`/stories`,
+`/stories/:id`, `/articles/:id`), IntelligenceBriefs (`/briefs`, `/briefs/:id`), and search
+(`/search`) — all plain unstyled markup, not yet run through the Bureau design system.
 
 `npm run migrate` (backend) applies migrations; `npm test` (backend) is the API-seam test
 pattern (supertest + an ephemeral Testcontainers Postgres) later Foundation tickets extend.

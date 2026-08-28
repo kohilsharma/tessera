@@ -5,9 +5,9 @@ import { Article } from "../entities/Article";
 import { STORY_CATEGORIES } from "../entities/Story";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
-import { mayRedistribute, toPublicArticle } from "../lib/articleView";
+import { toPublicArticle } from "../lib/articleView";
 import { parseListQuery, toEnvelope } from "../lib/listQuery";
-import { hybridSearchArticleIds, type HybridSearchSortBy } from "../lib/hybridSearch";
+import { hybridSearchArticleIds } from "../lib/hybridSearch";
 import { MockEmbeddingProvider } from "../embeddings/MockEmbeddingProvider";
 
 export const searchRouter = Router();
@@ -41,7 +41,7 @@ searchRouter.get(
 
     const { hits, total } = await hybridSearchArticleIds(
       q,
-      { category, dateFrom, dateTo, sortBy: sortBy as HybridSearchSortBy, sortDir, page, pageSize },
+      { category, dateFrom, dateTo, sortBy, sortDir, page, pageSize },
       embedder,
     );
 
@@ -59,9 +59,10 @@ searchRouter.get(
     const items = hits
       .map((hit) => ({ article: byId.get(hit.id), score: hit.score }))
       .filter((hit): hit is { article: Article; score: number } => hit.article !== undefined)
+      // No analysisText: a result list is not the Article detail endpoint, and
+      // that endpoint stays the only place body text is served (ADR-0018).
       .map(({ article, score }) => ({
         ...toPublicArticle(article),
-        analysisText: mayRedistribute(article.analysisTextType) ? article.analysisText : null,
         story: { id: article.story.id, slug: article.story.slug, title: article.story.title },
         score,
       }));
