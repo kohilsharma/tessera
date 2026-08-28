@@ -1,10 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
-import { getStories, STORY_CATEGORIES, type StoryCategory, type StorySortField } from "../api/client";
-
-function isStoryCategory(value: string): value is StoryCategory {
-  return (STORY_CATEGORIES as readonly string[]).includes(value);
-}
+import { getStories, isStoryCategory, STORY_CATEGORIES, type StorySortField } from "../api/client";
 
 // URL search params double as the filter/sort/page state: shareable links,
 // and back/forward behaves the way a reader expects on a list page. The names

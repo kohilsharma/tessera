@@ -1,10 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
-import { getBriefs, STORY_CATEGORIES, type BriefSortField, type StoryCategory } from "../api/client";
-
-function isStoryCategory(value: string): value is StoryCategory {
-  return (STORY_CATEGORIES as readonly string[]).includes(value);
-}
+import { getBriefs, isStoryCategory, STORY_CATEGORIES, type BriefSortField } from "../api/client";
 
 // Mirrors src/pages/Stories.tsx's URL-as-state pattern, filtered server-side to
 // the caller's own Briefs (see backend/src/routes/briefs.ts).

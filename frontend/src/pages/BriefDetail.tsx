@@ -92,6 +92,7 @@ export default function BriefDetail() {
           ))}
         </ul>
       )}
+      {detach.isError && <p role="alert">Could not remove this Article: {(detach.error as Error).message}</p>}
 
       <h3>Attach an Article</h3>
       <p>

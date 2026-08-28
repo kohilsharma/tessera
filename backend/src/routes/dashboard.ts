@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AppDataSource } from "../data-source";
 import { User, USER_ROLES, UserRole } from "../entities/User";
+import { IntelligenceBrief } from "../entities/IntelligenceBrief";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
@@ -9,11 +10,21 @@ export const dashboardRouter = Router();
 
 // ADR-0004: Student and Investor are genuinely distinct endpoints/data, not one
 // shared shape with a role flag — each route below returns its own field set.
-// The corpus/Brief-shaped content these will surface (study collections,
-// watchlist) lands with #19/#20; this ticket proves the RBAC seam is real.
-dashboardRouter.get("/dashboard/student", requireAuth, requireRole("student"), (_req, res) => {
-  res.json({ role: "student", studyCollections: [] });
-});
+// Student study collections are backed by owned Briefs; Investor watchlist data
+// remains deferred until its entity lands.
+dashboardRouter.get(
+  "/dashboard/student",
+  requireAuth,
+  requireRole("student"),
+  asyncHandler(async (req, res) => {
+    const studyCollections = await AppDataSource.getRepository(IntelligenceBrief).find({
+      where: { ownerId: req.user!.id },
+      select: { id: true, title: true, category: true },
+      order: { updatedAt: "DESC" },
+    });
+    res.json({ role: "student", studyCollections });
+  }),
+);
 
 dashboardRouter.get("/dashboard/investor", requireAuth, requireRole("investor"), (_req, res) => {
   res.json({ role: "investor", watchlist: [] });

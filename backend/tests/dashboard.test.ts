@@ -34,9 +34,17 @@ describe("dashboard RBAC", () => {
   it("lets a Student read the Student dashboard and blocks Investor/Admin", async () => {
     const token = await registerAndLogin("student-dash@example.com", "student");
 
+    const brief = await request(app())
+      .post("/api/v1/briefs")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ title: "Study Brief", category: "technology" });
+
     const own = await request(app()).get("/api/v1/dashboard/student").set("Authorization", `Bearer ${token}`);
     expect(own.status).toBe(200);
-    expect(own.body).toMatchObject({ role: "student", studyCollections: [] });
+    expect(own.body).toMatchObject({
+      role: "student",
+      studyCollections: [{ id: brief.body.id, title: "Study Brief", category: "technology" }],
+    });
 
     const investor = await request(app()).get("/api/v1/dashboard/investor").set("Authorization", `Bearer ${token}`);
     expect(investor.status).toBe(403);

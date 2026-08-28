@@ -94,11 +94,13 @@ export async function getMe(): Promise<User> {
 }
 
 // ADR-0004: distinct shapes per role, not one endpoint with a lens flag — mirrors
-// backend/src/routes/dashboard.ts. studyCollections/watchlist are placeholders
-// until #19/#20 add the corpus and owned Briefs these will surface.
+// backend/src/routes/dashboard.ts.
 // Named *DashboardData, not *Dashboard: the components of that name live in
 // src/pages/, and a file importing both a type and its component would collide.
-export type StudentDashboardData = { role: "student"; studyCollections: unknown[] };
+export type StudentDashboardData = {
+  role: "student";
+  studyCollections: { id: string; title: string; category: StoryCategory }[];
+};
 export type InvestorDashboardData = { role: "investor"; watchlist: unknown[] };
 export type AdminDashboardData = { role: "admin"; userCounts: Record<UserRole, number> };
 
@@ -132,6 +134,10 @@ export const STORY_CATEGORIES = [
   "entertainment",
 ] as const;
 export type StoryCategory = (typeof STORY_CATEGORIES)[number];
+
+export function isStoryCategory(value: string): value is StoryCategory {
+  return (STORY_CATEGORIES as readonly string[]).includes(value);
+}
 
 export type ListEnvelope<T> = { items: T[]; page: number; pageSize: number; total: number; totalPages: number };
 

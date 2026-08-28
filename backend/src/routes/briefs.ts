@@ -10,7 +10,6 @@ import { requireRole } from "../middleware/requireRole";
 import { toPublicArticle } from "../lib/articleView";
 import { paginate, parseListQuery, toEnvelope } from "../lib/listQuery";
 import { isUuid } from "../lib/uuid";
-import type { Request, Response } from "express";
 
 export const briefsRouter = Router();
 
@@ -84,9 +83,9 @@ function parseBriefInput(
   }
 
   if (input.articleCapacityLimit !== undefined) {
-    const n = Number(input.articleCapacityLimit);
-    if (!Number.isInteger(n) || n < 1) errors.push("articleCapacityLimit must be a positive integer");
-    else value.articleCapacityLimit = n;
+    if (typeof input.articleCapacityLimit !== "number" || !Number.isInteger(input.articleCapacityLimit) || input.articleCapacityLimit < 1) {
+      errors.push("articleCapacityLimit must be a positive integer");
+    } else value.articleCapacityLimit = input.articleCapacityLimit;
   } else if (isCreate) {
     value.articleCapacityLimit = DEFAULT_ARTICLE_CAPACITY_LIMIT;
   }
@@ -95,28 +94,28 @@ function parseBriefInput(
   return { ok: true, value };
 }
 
-// Shared 404/403 lookup: existence and ownership are checked separately (rather
-// than filtering the query by ownerId) so a Brief that exists but belongs to
-// someone else reports 403, not an existence-hiding 404 — the acceptance
-// criteria for #20 draws that line explicitly.
-async function loadOwnedBrief(req: Request, res: Response, id: string): Promise<IntelligenceBrief | null> {
-  if (!isUuid(id)) {
+// Existence and ownership stay in middleware beside authentication/RBAC, while
+// remaining separate so another user's Brief is 403 and a missing Brief is 404.
+const requireBriefOwner = asyncHandler(async (req, res, next) => {
+  if (!isUuid(req.params.id)) {
     res.status(404).json({ error: "Brief not found" });
-    return null;
+    return;
   }
-  const brief = await briefRepo().findOne({ where: { id } });
+  const brief = await briefRepo().findOne({ where: { id: req.params.id } });
   if (!brief) {
     res.status(404).json({ error: "Brief not found" });
-    return null;
+    return;
   }
   if (brief.ownerId !== req.user!.id) {
     res.status(403).json({ error: "You do not have access to this Brief" });
-    return null;
+    return;
   }
-  return brief;
-}
+  res.locals.brief = brief;
+  next();
+});
 
 briefsRouter.use(requireAuth, requireRole("student", "investor"));
+briefsRouter.use("/briefs/:id", requireBriefOwner);
 
 briefsRouter.get(
   "/briefs",
@@ -171,8 +170,7 @@ briefsRouter.post(
 briefsRouter.get(
   "/briefs/:id",
   asyncHandler(async (req, res) => {
-    const brief = await loadOwnedBrief(req, res, req.params.id);
-    if (!brief) return;
+    const brief = res.locals.brief as IntelligenceBrief;
 
     const briefArticles = await briefArticleRepo().find({
       where: { briefId: brief.id },
@@ -190,8 +188,7 @@ briefsRouter.get(
 briefsRouter.patch(
   "/briefs/:id",
   asyncHandler(async (req, res) => {
-    const brief = await loadOwnedBrief(req, res, req.params.id);
-    if (!brief) return;
+    const brief = res.locals.brief as IntelligenceBrief;
 
     const parsed = parseBriefInput(req.body, false);
     if (!parsed.ok) {
@@ -199,24 +196,35 @@ briefsRouter.patch(
       return;
     }
 
-    if (parsed.value.articleCapacityLimit !== undefined) {
-      const attachedCount = await briefArticleRepo().count({ where: { briefId: brief.id } });
-      if (parsed.value.articleCapacityLimit < attachedCount) {
-        res.status(422).json({ error: `articleCapacityLimit cannot be below the ${attachedCount} Article(s) already attached` });
-        return;
-      }
-    }
+    try {
+      const error = await AppDataSource.transaction(async (manager) => {
+        const lockedBrief = await manager.getRepository(IntelligenceBrief).findOne({
+          where: { id: brief.id },
+          lock: { mode: "pessimistic_write" },
+        });
+        if (!lockedBrief) return "Brief not found";
 
-    // TypeORM's update() throws on an empty value object, so an empty-body
-    // PATCH (`{}`) is a no-op rather than a call with nothing to set.
-    if (Object.keys(parsed.value).length > 0) {
-      try {
-        await briefRepo().update({ id: brief.id }, parsed.value);
-      } catch (err) {
-        if (!isCheckViolation(err)) throw err;
-        res.status(422).json({ error: "Brief violates a database constraint" });
+        if (parsed.value.articleCapacityLimit !== undefined) {
+          const attachedCount = await manager.getRepository(BriefArticle).count({ where: { briefId: brief.id } });
+          if (parsed.value.articleCapacityLimit < attachedCount) {
+            return `articleCapacityLimit cannot be below the ${attachedCount} Article(s) already attached`;
+          }
+        }
+
+        // TypeORM's update() throws on an empty value object.
+        if (Object.keys(parsed.value).length > 0) {
+          await manager.getRepository(IntelligenceBrief).update({ id: brief.id }, parsed.value);
+        }
+        return null;
+      });
+      if (error) {
+        res.status(error === "Brief not found" ? 404 : 422).json({ error });
         return;
       }
+    } catch (err) {
+      if (!isCheckViolation(err)) throw err;
+      res.status(422).json({ error: "Brief violates a database constraint" });
+      return;
     }
     const updated = await briefRepo().findOneOrFail({ where: { id: brief.id } });
     const articleCount = await briefArticleRepo().count({ where: { briefId: brief.id } });
@@ -227,8 +235,7 @@ briefsRouter.patch(
 briefsRouter.delete(
   "/briefs/:id",
   asyncHandler(async (req, res) => {
-    const brief = await loadOwnedBrief(req, res, req.params.id);
-    if (!brief) return;
+    const brief = res.locals.brief as IntelligenceBrief;
 
     await briefRepo().delete({ id: brief.id });
     res.status(204).end();
@@ -238,8 +245,7 @@ briefsRouter.delete(
 briefsRouter.post(
   "/briefs/:id/articles",
   asyncHandler(async (req, res) => {
-    const brief = await loadOwnedBrief(req, res, req.params.id);
-    if (!brief) return;
+    const brief = res.locals.brief as IntelligenceBrief;
 
     const articleId = (req.body ?? {}).articleId;
     if (typeof articleId !== "string" || !isUuid(articleId)) {
@@ -255,19 +261,28 @@ briefsRouter.post(
       return;
     }
 
-    const existing = await briefArticleRepo().findOne({ where: { briefId: brief.id, articleId } });
-    if (existing) {
-      res.status(422).json({ error: "This Article is already attached to the Brief" });
+    const error = await AppDataSource.transaction(async (manager) => {
+      const lockedBrief = await manager.getRepository(IntelligenceBrief).findOne({
+        where: { id: brief.id },
+        lock: { mode: "pessimistic_write" },
+      });
+      if (!lockedBrief) return "Brief not found";
+
+      const joins = manager.getRepository(BriefArticle);
+      if (await joins.findOne({ where: { briefId: brief.id, articleId } })) {
+        return "This Article is already attached to the Brief";
+      }
+      const attachedCount = await joins.count({ where: { briefId: brief.id } });
+      if (attachedCount >= lockedBrief.articleCapacityLimit) {
+        return `Brief has reached its capacity of ${lockedBrief.articleCapacityLimit} Article(s)`;
+      }
+      await joins.save({ briefId: brief.id, articleId });
+      return null;
+    });
+    if (error) {
+      res.status(error === "Brief not found" ? 404 : 422).json({ error });
       return;
     }
-
-    const attachedCount = await briefArticleRepo().count({ where: { briefId: brief.id } });
-    if (attachedCount >= brief.articleCapacityLimit) {
-      res.status(422).json({ error: `Brief has reached its capacity of ${brief.articleCapacityLimit} Article(s)` });
-      return;
-    }
-
-    await briefArticleRepo().save({ briefId: brief.id, articleId });
     res.status(201).json(toPublicArticle(article));
   }),
 );
@@ -275,8 +290,7 @@ briefsRouter.post(
 briefsRouter.delete(
   "/briefs/:id/articles/:articleId",
   asyncHandler(async (req, res) => {
-    const brief = await loadOwnedBrief(req, res, req.params.id);
-    if (!brief) return;
+    const brief = res.locals.brief as IntelligenceBrief;
 
     if (!isUuid(req.params.articleId)) {
       res.status(404).json({ error: "Article is not attached to this Brief" });

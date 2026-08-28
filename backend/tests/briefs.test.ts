@@ -21,6 +21,7 @@ async function registerAndLogin(email: string, role: "student" | "investor" = "s
 
 let articleOneId: string;
 let articleTwoId: string;
+const concurrentArticleIds: string[] = [];
 
 beforeAll(async () => {
   const publisher = await AppDataSource.getRepository(Publisher).save({
@@ -56,6 +57,18 @@ beforeAll(async () => {
     publishedAt: new Date("2026-01-01T01:00:00Z"),
   });
   articleTwoId = articleTwo.id;
+  for (let index = 0; index < 8; index += 1) {
+    const article = await articles.save({
+      storyId: story.id,
+      publisherId: publisher.id,
+      title: `Concurrent Briefs Article ${index}`,
+      url: `https://briefs-publisher.example/concurrent-${index}`,
+      analysisText: `${index}.`,
+      analysisTextType: "manual_fixture",
+      publishedAt: new Date(`2026-01-02T0${index}:00:00Z`),
+    });
+    concurrentArticleIds.push(article.id);
+  }
 });
 
 describe("POST /api/v1/briefs", () => {
@@ -105,6 +118,15 @@ describe("POST /api/v1/briefs", () => {
       .post("/api/v1/briefs")
       .set("Authorization", `Bearer ${token}`)
       .send({ title: "x", category: "technology", articleCapacityLimit: 0 });
+    expect(res.status).toBe(422);
+  });
+
+  it("rejects a non-number articleCapacityLimit with 422", async () => {
+    const token = await registerAndLogin("brief-non-number-capacity@example.com");
+    const res = await request(app())
+      .post("/api/v1/briefs")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ title: "x", category: "technology", articleCapacityLimit: true });
     expect(res.status).toBe(422);
   });
 });
@@ -262,6 +284,29 @@ describe("Brief article attachment and capacity", () => {
     expect(second.status).toBe(422);
   });
 
+  it("serializes concurrent attachments at articleCapacityLimit", async () => {
+    const token = await registerAndLogin("brief-concurrent-capacity@example.com");
+    const created = await request(app())
+      .post("/api/v1/briefs")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ title: "Concurrent Capacity Brief", category: "technology", articleCapacityLimit: 1 });
+    const briefId = created.body.id;
+
+    const responses = await Promise.all(
+      [articleOneId, articleTwoId, ...concurrentArticleIds].map((articleId) =>
+        request(app())
+          .post(`/api/v1/briefs/${briefId}/articles`)
+          .set("Authorization", `Bearer ${token}`)
+          .send({ articleId }),
+      ),
+    );
+
+    expect(responses.filter((res) => res.status === 201)).toHaveLength(1);
+    expect(responses.filter((res) => res.status === 422)).toHaveLength(9);
+    const detail = await request(app()).get(`/api/v1/briefs/${briefId}`).set("Authorization", `Bearer ${token}`);
+    expect(detail.body.articleCount).toBe(1);
+  });
+
   it("blocks attaching to a Brief owned by someone else with 403", async () => {
     const ownerToken = await registerAndLogin("brief-attach-owner@example.com");
     const otherToken = await registerAndLogin("brief-attach-other@example.com", "investor");
@@ -315,10 +360,15 @@ describe("Brief article attachment and capacity", () => {
       .set("Authorization", `Bearer ${token}`)
       .send({ articleId: articleOneId });
 
+    await request(app())
+      .post(`/api/v1/briefs/${briefId}/articles`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ articleId: articleTwoId });
+
     const res = await request(app())
       .patch(`/api/v1/briefs/${briefId}`)
       .set("Authorization", `Bearer ${token}`)
-      .send({ articleCapacityLimit: 0 });
+      .send({ articleCapacityLimit: 1 });
     expect(res.status).toBe(422);
   });
 });
