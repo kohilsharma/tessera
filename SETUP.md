@@ -57,6 +57,11 @@ fallback, so the API refuses to sign or verify a token without it (ADR-0013).
 Changing it invalidates every token already issued, which just means logging in
 again. Generate one with `openssl rand -hex 32`.
 
+`UPLOADS_DIR` is where Brief cover images are written, defaulting to
+`backend/uploads/` (ADR-0015: a local persistent volume for the demo). It is
+created on first upload and gitignored; point it at a real volume to keep
+uploads across a container rebuild.
+
 `GET http://localhost:4000/api/v1/health` should return `{"status":"ok","db":"ok",...}`.
 
 ## 3. Frontend

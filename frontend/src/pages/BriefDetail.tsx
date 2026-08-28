@@ -1,15 +1,52 @@
-import { ChangeEvent, FormEvent, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   attachArticleToBrief,
   deleteBrief,
   detachArticleFromBrief,
+  fetchBriefCoverImage,
   getBrief,
   uploadBriefCoverImage,
 } from "../api/client";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// The cover image endpoint is owner-only, so the bytes need the bearer token an
+// <img src> can't send: fetch them, then point the <img> at an object URL.
+function CoverImage({ url, cacheKey }: { url: string; cacheKey: string | null }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    setSrc(null);
+    setFailed(false);
+
+    fetchBriefCoverImage(url)
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setSrc(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+
+    return () => {
+      cancelled = true;
+      // Without this the blob stays in memory for the life of the document.
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+    // cacheKey too: replacing the image keeps the same URL but changes the key,
+    // so this is what tells us to re-fetch after an upload.
+  }, [url, cacheKey]);
+
+  if (failed) return <p role="alert">Could not load the cover image.</p>;
+  if (!src) return <p role="status">Loading cover image…</p>;
+  return <img src={src} alt="" width={320} />;
+}
 
 export default function BriefDetail() {
   const { id } = useParams();
@@ -80,7 +117,7 @@ export default function BriefDetail() {
         <Link to="/briefs">Back to My Briefs</Link>
       </p>
       <h1>{brief.title}</h1>
-      {brief.coverImageUrl && <img src={brief.coverImageUrl} alt="" width={320} />}
+      {brief.coverImageUrl && <CoverImage url={brief.coverImageUrl} cacheKey={brief.coverImageKey} />}
       <p>
         {brief.category} · {brief.articleCount}/{brief.articleCapacityLimit} articles
       </p>

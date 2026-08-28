@@ -300,3 +300,12 @@ export async function uploadBriefCoverImage(briefId: string, file: File): Promis
   if (!res.ok) throw new Error(await parseErrorMessage(res, "Could not upload this cover image"));
   return res.json();
 }
+
+// The cover image is owner-only, so it comes back from a guarded endpoint that
+// needs the bearer token — which an <img src> can't send. Callers fetch the
+// bytes here and point the <img> at an object URL instead (see BriefDetail).
+export async function fetchBriefCoverImage(coverImageUrl: string): Promise<Blob> {
+  const res = await authFetch(coverImageUrl);
+  if (!res.ok) throw new Error(await parseErrorMessage(res, "Could not load this cover image"));
+  return res.blob();
+}

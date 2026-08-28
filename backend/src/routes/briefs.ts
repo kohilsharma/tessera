@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { extname } from "node:path";
 import { Response, Router } from "express";
 import multer from "multer";
 import { AppDataSource } from "../data-source";
@@ -24,18 +25,33 @@ const storage: FileStorageProvider = new LocalDiskFileStorageProvider();
 // fast pre-filter here; sniffImageType() checks the real bytes below.
 const MAX_COVER_IMAGE_BYTES = 2 * 1024 * 1024;
 const ALLOWED_COVER_IMAGE_MIME_TYPES = new Set(IMAGE_MIME_TYPES);
+// Both the mimetype pre-filter and the byte sniff below reject with this same
+// message: the client can't tell which gate caught it, and shouldn't need to.
+const INVALID_COVER_IMAGE_MESSAGE = "coverImage must be a JPEG, PNG, or WEBP image";
 
 const uploadCoverImage = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_COVER_IMAGE_BYTES },
   fileFilter: (_req, file, cb) => {
     if (!ALLOWED_COVER_IMAGE_MIME_TYPES.has(file.mimetype)) {
-      cb(new Error("coverImage must be a JPEG, PNG, or WEBP image"));
+      cb(new Error(INVALID_COVER_IMAGE_MESSAGE));
       return;
     }
     cb(null, true);
   },
 });
+
+// FileStorageProvider.delete is documented best-effort, and every call below is
+// cleanup after a DB write that already committed: a failed unlink leaves an
+// orphan file on disk, which is not worth failing an otherwise-successful
+// request over.
+async function deleteQuietly(key: string): Promise<void> {
+  try {
+    await storage.delete(key);
+  } catch {
+    /* orphaned file; see FileStorageProvider.delete's best-effort contract */
+  }
+}
 
 // Mirrors routes/auth.ts's isUniqueViolation: parseBriefInput mirrors every one
 // of the migration's CHECK constraints, so this path is a backstop, not the
@@ -73,7 +89,10 @@ function toPublicBrief(brief: IntelligenceBrief, articleCount: number) {
     category: brief.category,
     articleCapacityLimit: brief.articleCapacityLimit,
     coverImageKey: brief.coverImageKey,
-    coverImageUrl: brief.coverImageKey ? storage.url(brief.coverImageKey) : null,
+    // Points at this router's own guarded route, not at the storage layer: the
+    // bytes are owner-only, so they're fetched the same authenticated way as
+    // the rest of the Brief (see GET /briefs/:id/cover-image below).
+    coverImageUrl: brief.coverImageKey ? `/api/v1/briefs/${brief.id}/cover-image` : null,
     ownerId: brief.ownerId,
     articleCount,
     createdAt: brief.createdAt,
@@ -264,6 +283,24 @@ briefsRouter.patch(
   }),
 );
 
+// Registered under /briefs/:id, so requireAuth + requireRole + requireBriefOwner
+// (briefsRouter.use above) gate the image bytes exactly like every other field
+// of a Brief: CONTEXT.md's "personal and owned" holds for the cover image too.
+briefsRouter.get(
+  "/briefs/:id/cover-image",
+  asyncHandler(async (_req, res) => {
+    const brief = res.locals.brief as IntelligenceBrief;
+    const data = brief.coverImageKey ? await storage.read(brief.coverImageKey) : null;
+    if (!data) {
+      res.status(404).json({ error: "Brief has no cover image" });
+      return;
+    }
+    // The key's extension is server-generated from the sniffed bytes on upload,
+    // so it's a trustworthy content type rather than anything the client said.
+    res.type(extname(brief.coverImageKey!)).send(data);
+  }),
+);
+
 briefsRouter.post(
   "/briefs/:id/cover-image",
   (req, res, next) => {
@@ -285,7 +322,7 @@ briefsRouter.post(
 
     const imageType = sniffImageType(file.buffer);
     if (!imageType) {
-      res.status(422).json({ error: "coverImage must be a JPEG, PNG, or WEBP image" });
+      res.status(422).json({ error: INVALID_COVER_IMAGE_MESSAGE });
       return;
     }
 
@@ -293,9 +330,16 @@ briefsRouter.post(
     // client's filename never reaches the filesystem.
     const key = `${brief.id}-${randomUUID()}.${imageType}`;
     await storage.save(key, file.buffer, `image/${imageType}`);
-    await briefRepo().update({ id: brief.id }, { coverImageKey: key });
+    try {
+      await briefRepo().update({ id: brief.id }, { coverImageKey: key });
+    } catch (err) {
+      // The row still points at the old key, so the file just written is
+      // unreachable: drop it rather than leaking it on every failed update.
+      await deleteQuietly(key);
+      throw err;
+    }
 
-    if (brief.coverImageKey) await storage.delete(brief.coverImageKey);
+    if (brief.coverImageKey) await deleteQuietly(brief.coverImageKey);
 
     await respondWithBrief(res, brief.id);
   }),
@@ -307,6 +351,9 @@ briefsRouter.delete(
     const brief = res.locals.brief as IntelligenceBrief;
 
     await briefRepo().delete({ id: brief.id });
+    // The row is gone, so nothing can ever reference this key again; without
+    // this the file outlives its Brief on disk (and stays fetchable) forever.
+    if (brief.coverImageKey) await deleteQuietly(brief.coverImageKey);
     res.status(204).end();
   }),
 );

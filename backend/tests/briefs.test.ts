@@ -1,5 +1,6 @@
 import "reflect-metadata";
-import { describe, expect, it, beforeAll } from "vitest";
+import { readdir, rm } from "node:fs/promises";
+import { afterAll, describe, expect, it, beforeAll } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app";
 import { AppDataSource } from "../src/data-source";
@@ -9,6 +10,12 @@ import { Article } from "../src/entities/Article";
 import { setupTestDb } from "./setupTestDb";
 
 setupTestDb();
+
+// vitest.config.ts points UPLOADS_DIR at a temp dir; this is the disk half of
+// setupTestDb's teardown, so an upload test leaves nothing behind either.
+afterAll(async () => {
+  await rm(process.env.UPLOADS_DIR!, { recursive: true, force: true });
+});
 
 const app = () => createApp();
 
@@ -417,11 +424,36 @@ describe("POST /api/v1/briefs/:id/cover-image", () => {
       .attach("coverImage", TINY_PNG, { filename: "cover.png", contentType: "image/png" });
     expect(res.status).toBe(200);
     expect(res.body.coverImageKey).toMatch(/\.png$/);
-    expect(res.body.coverImageUrl).toBe(`/api/v1/media/${res.body.coverImageKey}`);
+    expect(res.body.coverImageUrl).toBe(`/api/v1/briefs/${briefId}/cover-image`);
 
-    const served = await request(app()).get(res.body.coverImageUrl);
+    const served = await request(app()).get(res.body.coverImageUrl).set("Authorization", `Bearer ${token}`);
     expect(served.status).toBe(200);
+    expect(served.headers["content-type"]).toContain("image/png");
     expect(served.body).toEqual(TINY_PNG);
+  });
+
+  it("does not serve a cover image to an anonymous caller or a non-owner", async () => {
+    const ownerToken = await registerAndLogin("brief-cover-read-owner@example.com");
+    const otherToken = await registerAndLogin("brief-cover-read-other@example.com", "investor");
+    const briefId = await createBrief(ownerToken, "Cover Read Brief");
+    await request(app())
+      .post(`/api/v1/briefs/${briefId}/cover-image`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .attach("coverImage", TINY_PNG, { filename: "cover.png", contentType: "image/png" });
+
+    const coverImageUrl = `/api/v1/briefs/${briefId}/cover-image`;
+    expect((await request(app()).get(coverImageUrl)).status).toBe(401);
+    expect((await request(app()).get(coverImageUrl).set("Authorization", `Bearer ${otherToken}`)).status).toBe(403);
+  });
+
+  it("404s a Brief that has no cover image", async () => {
+    const token = await registerAndLogin("brief-cover-absent@example.com");
+    const briefId = await createBrief(token, "Cover Absent Brief");
+
+    const res = await request(app())
+      .get(`/api/v1/briefs/${briefId}/cover-image`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(404);
   });
 
   it("deletes the previous file when a cover image is replaced", async () => {
@@ -432,18 +464,22 @@ describe("POST /api/v1/briefs/:id/cover-image", () => {
       .post(`/api/v1/briefs/${briefId}/cover-image`)
       .set("Authorization", `Bearer ${token}`)
       .attach("coverImage", TINY_PNG, { filename: "cover.png", contentType: "image/png" });
-    const firstUrl = first.body.coverImageUrl as string;
 
     const second = await request(app())
       .post(`/api/v1/briefs/${briefId}/cover-image`)
       .set("Authorization", `Bearer ${token}`)
       .attach("coverImage", TINY_PNG, { filename: "cover.png", contentType: "image/png" });
-    expect(second.body.coverImageUrl).not.toBe(firstUrl);
+    expect(second.body.coverImageKey).not.toBe(first.body.coverImageKey);
 
-    const oldFile = await request(app()).get(firstUrl);
-    expect(oldFile.status).toBe(404);
+    // The URL is stable across a replace now, so the old file's absence is only
+    // visible on disk: keys are `${briefId}-${uuid}.${ext}`, so exactly one
+    // should survive.
+    const files = await readdir(process.env.UPLOADS_DIR!);
+    expect(files.filter((name) => name.startsWith(briefId))).toEqual([second.body.coverImageKey]);
 
-    const newFile = await request(app()).get(second.body.coverImageUrl);
+    const newFile = await request(app())
+      .get(second.body.coverImageUrl)
+      .set("Authorization", `Bearer ${token}`);
     expect(newFile.status).toBe(200);
   });
 
@@ -479,5 +515,24 @@ describe("POST /api/v1/briefs/:id/cover-image", () => {
       .set("Authorization", `Bearer ${token}`)
       .attach("coverImage", Buffer.from("not actually a png"), { filename: "cover.png", contentType: "image/png" });
     expect(res.status).toBe(422);
+  });
+
+  it("deletes the stored cover image when its Brief is deleted", async () => {
+    const token = await registerAndLogin("brief-cover-delete@example.com");
+    const briefId = await createBrief(token, "Cover Delete Brief");
+
+    const uploaded = await request(app())
+      .post(`/api/v1/briefs/${briefId}/cover-image`)
+      .set("Authorization", `Bearer ${token}`)
+      .attach("coverImage", TINY_PNG, { filename: "cover.png", contentType: "image/png" });
+    expect(uploaded.status).toBe(200);
+    const key = uploaded.body.coverImageKey as string;
+    expect(await readdir(process.env.UPLOADS_DIR!)).toContain(key);
+
+    const deleted = await request(app()).delete(`/api/v1/briefs/${briefId}`).set("Authorization", `Bearer ${token}`);
+    expect(deleted.status).toBe(204);
+
+    // The row is gone; the file must not outlive it on disk.
+    expect(await readdir(process.env.UPLOADS_DIR!)).not.toContain(key);
   });
 });
