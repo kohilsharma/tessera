@@ -26,6 +26,9 @@ coverage/
 # Stale Python venv (project is Node — see ADR-0005)
 backend/.venv/
 
+# Local disk storage for uploaded Brief cover images (ADR-0015)
+backend/uploads/
+
 # OS
 .DS_Store
 Thumbs.db

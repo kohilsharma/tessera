@@ -1,4 +1,6 @@
-import { Router } from "express";
+import { randomUUID } from "node:crypto";
+import { Response, Router } from "express";
+import multer from "multer";
 import { AppDataSource } from "../data-source";
 import { BriefArticle } from "../entities/BriefArticle";
 import { Article } from "../entities/Article";
@@ -8,10 +10,32 @@ import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
 import { toPublicArticle } from "../lib/articleView";
+import { IMAGE_MIME_TYPES, sniffImageType } from "../lib/imageValidation";
 import { paginate, parseListQuery, toEnvelope } from "../lib/listQuery";
 import { isUuid } from "../lib/uuid";
+import { LocalDiskFileStorageProvider } from "../storage/LocalDiskFileStorageProvider";
+import type { FileStorageProvider } from "../storage/FileStorageProvider";
 
 export const briefsRouter = Router();
+
+const storage: FileStorageProvider = new LocalDiskFileStorageProvider();
+
+// spec v3 §34.4 "Cover image maximum | 2 MB". Client-claimed mimetype is only a
+// fast pre-filter here; sniffImageType() checks the real bytes below.
+const MAX_COVER_IMAGE_BYTES = 2 * 1024 * 1024;
+const ALLOWED_COVER_IMAGE_MIME_TYPES = new Set(IMAGE_MIME_TYPES);
+
+const uploadCoverImage = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_COVER_IMAGE_BYTES },
+  fileFilter: (_req, file, cb) => {
+    if (!ALLOWED_COVER_IMAGE_MIME_TYPES.has(file.mimetype)) {
+      cb(new Error("coverImage must be a JPEG, PNG, or WEBP image"));
+      return;
+    }
+    cb(null, true);
+  },
+});
 
 // Mirrors routes/auth.ts's isUniqueViolation: parseBriefInput mirrors every one
 // of the migration's CHECK constraints, so this path is a backstop, not the
@@ -32,6 +56,15 @@ function briefArticleRepo() {
   return AppDataSource.getRepository(BriefArticle);
 }
 
+// Shared by every write endpoint below that needs to hand back the Brief's
+// current state: re-reads it (rather than reusing the pre-write copy) so the
+// response always reflects what the write actually committed.
+async function respondWithBrief(res: Response, briefId: string) {
+  const updated = await briefRepo().findOneOrFail({ where: { id: briefId } });
+  const articleCount = await briefArticleRepo().count({ where: { briefId } });
+  res.json(toPublicBrief(updated, articleCount));
+}
+
 function toPublicBrief(brief: IntelligenceBrief, articleCount: number) {
   return {
     id: brief.id,
@@ -40,6 +73,7 @@ function toPublicBrief(brief: IntelligenceBrief, articleCount: number) {
     category: brief.category,
     articleCapacityLimit: brief.articleCapacityLimit,
     coverImageKey: brief.coverImageKey,
+    coverImageUrl: brief.coverImageKey ? storage.url(brief.coverImageKey) : null,
     ownerId: brief.ownerId,
     articleCount,
     createdAt: brief.createdAt,
@@ -226,9 +260,44 @@ briefsRouter.patch(
       res.status(422).json({ error: "Brief violates a database constraint" });
       return;
     }
-    const updated = await briefRepo().findOneOrFail({ where: { id: brief.id } });
-    const articleCount = await briefArticleRepo().count({ where: { briefId: brief.id } });
-    res.json(toPublicBrief(updated, articleCount));
+    await respondWithBrief(res, brief.id);
+  }),
+);
+
+briefsRouter.post(
+  "/briefs/:id/cover-image",
+  (req, res, next) => {
+    uploadCoverImage.single("coverImage")(req, res, (err: unknown) => {
+      if (err) {
+        res.status(422).json({ error: err instanceof Error ? err.message : "Invalid coverImage upload" });
+        return;
+      }
+      next();
+    });
+  },
+  asyncHandler(async (req, res) => {
+    const brief = res.locals.brief as IntelligenceBrief;
+    const file = req.file;
+    if (!file) {
+      res.status(422).json({ error: "coverImage file is required" });
+      return;
+    }
+
+    const imageType = sniffImageType(file.buffer);
+    if (!imageType) {
+      res.status(422).json({ error: "coverImage must be a JPEG, PNG, or WEBP image" });
+      return;
+    }
+
+    // Server-generated key (spec v3 §20.4 "no user-supplied path"): the
+    // client's filename never reaches the filesystem.
+    const key = `${brief.id}-${randomUUID()}.${imageType}`;
+    await storage.save(key, file.buffer, `image/${imageType}`);
+    await briefRepo().update({ id: brief.id }, { coverImageKey: key });
+
+    if (brief.coverImageKey) await storage.delete(brief.coverImageKey);
+
+    await respondWithBrief(res, brief.id);
   }),
 );
 

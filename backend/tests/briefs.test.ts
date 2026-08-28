@@ -372,3 +372,112 @@ describe("Brief article attachment and capacity", () => {
     expect(res.status).toBe(422);
   });
 });
+
+// 68-byte 1x1 transparent PNG: real magic bytes, small enough to hardcode.
+const TINY_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64",
+);
+
+describe("POST /api/v1/briefs/:id/cover-image", () => {
+  async function createBrief(token: string, title: string): Promise<string> {
+    const created = await request(app())
+      .post("/api/v1/briefs")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ title, category: "technology" });
+    return created.body.id;
+  }
+
+  it("rejects an unauthenticated request with 401", async () => {
+    const res = await request(app())
+      .post(`/api/v1/briefs/${unknownBriefId}/cover-image`)
+      .attach("coverImage", TINY_PNG, { filename: "cover.png", contentType: "image/png" });
+    expect(res.status).toBe(401);
+  });
+
+  it("blocks uploading a cover image to a Brief owned by someone else with 403", async () => {
+    const ownerToken = await registerAndLogin("brief-cover-owner@example.com");
+    const otherToken = await registerAndLogin("brief-cover-other@example.com", "investor");
+    const briefId = await createBrief(ownerToken, "Cover Owner Brief");
+
+    const res = await request(app())
+      .post(`/api/v1/briefs/${briefId}/cover-image`)
+      .set("Authorization", `Bearer ${otherToken}`)
+      .attach("coverImage", TINY_PNG, { filename: "cover.png", contentType: "image/png" });
+    expect(res.status).toBe(403);
+  });
+
+  it("stores a valid PNG and serves it back through coverImageUrl", async () => {
+    const token = await registerAndLogin("brief-cover-success@example.com");
+    const briefId = await createBrief(token, "Cover Success Brief");
+
+    const res = await request(app())
+      .post(`/api/v1/briefs/${briefId}/cover-image`)
+      .set("Authorization", `Bearer ${token}`)
+      .attach("coverImage", TINY_PNG, { filename: "cover.png", contentType: "image/png" });
+    expect(res.status).toBe(200);
+    expect(res.body.coverImageKey).toMatch(/\.png$/);
+    expect(res.body.coverImageUrl).toBe(`/api/v1/media/${res.body.coverImageKey}`);
+
+    const served = await request(app()).get(res.body.coverImageUrl);
+    expect(served.status).toBe(200);
+    expect(served.body).toEqual(TINY_PNG);
+  });
+
+  it("deletes the previous file when a cover image is replaced", async () => {
+    const token = await registerAndLogin("brief-cover-replace@example.com");
+    const briefId = await createBrief(token, "Cover Replace Brief");
+
+    const first = await request(app())
+      .post(`/api/v1/briefs/${briefId}/cover-image`)
+      .set("Authorization", `Bearer ${token}`)
+      .attach("coverImage", TINY_PNG, { filename: "cover.png", contentType: "image/png" });
+    const firstUrl = first.body.coverImageUrl as string;
+
+    const second = await request(app())
+      .post(`/api/v1/briefs/${briefId}/cover-image`)
+      .set("Authorization", `Bearer ${token}`)
+      .attach("coverImage", TINY_PNG, { filename: "cover.png", contentType: "image/png" });
+    expect(second.body.coverImageUrl).not.toBe(firstUrl);
+
+    const oldFile = await request(app()).get(firstUrl);
+    expect(oldFile.status).toBe(404);
+
+    const newFile = await request(app()).get(second.body.coverImageUrl);
+    expect(newFile.status).toBe(200);
+  });
+
+  it("rejects a file over the 2 MB limit with 422", async () => {
+    const token = await registerAndLogin("brief-cover-oversized@example.com");
+    const briefId = await createBrief(token, "Cover Oversized Brief");
+
+    const oversized = Buffer.concat([TINY_PNG, Buffer.alloc(2 * 1024 * 1024)]);
+    const res = await request(app())
+      .post(`/api/v1/briefs/${briefId}/cover-image`)
+      .set("Authorization", `Bearer ${token}`)
+      .attach("coverImage", oversized, { filename: "cover.png", contentType: "image/png" });
+    expect(res.status).toBe(422);
+  });
+
+  it("rejects a disallowed content type with 422", async () => {
+    const token = await registerAndLogin("brief-cover-bad-type@example.com");
+    const briefId = await createBrief(token, "Cover Bad Type Brief");
+
+    const res = await request(app())
+      .post(`/api/v1/briefs/${briefId}/cover-image`)
+      .set("Authorization", `Bearer ${token}`)
+      .attach("coverImage", Buffer.from("not an image"), { filename: "cover.txt", contentType: "text/plain" });
+    expect(res.status).toBe(422);
+  });
+
+  it("rejects bytes that are not really an image even with an image/png Content-Type", async () => {
+    const token = await registerAndLogin("brief-cover-fake-png@example.com");
+    const briefId = await createBrief(token, "Cover Fake PNG Brief");
+
+    const res = await request(app())
+      .post(`/api/v1/briefs/${briefId}/cover-image`)
+      .set("Authorization", `Bearer ${token}`)
+      .attach("coverImage", Buffer.from("not actually a png"), { filename: "cover.png", contentType: "image/png" });
+    expect(res.status).toBe(422);
+  });
+});

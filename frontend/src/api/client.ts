@@ -215,6 +215,7 @@ export type BriefSummary = {
   category: StoryCategory;
   articleCapacityLimit: number;
   coverImageKey: string | null;
+  coverImageUrl: string | null;
   ownerId: string;
   articleCount: number;
   createdAt: string;
@@ -288,4 +289,14 @@ export function attachArticleToBrief(briefId: string, articleId: string): Promis
 
 export function detachArticleFromBrief(briefId: string, articleId: string): Promise<void> {
   return sendJson("DELETE", `/api/v1/briefs/${briefId}/articles/${articleId}`, undefined, "Could not remove this Article");
+}
+
+// #21: multipart, so this bypasses sendJson's JSON body/Content-Type entirely
+// (the browser sets the multipart boundary on its own when given a FormData).
+export async function uploadBriefCoverImage(briefId: string, file: File): Promise<BriefSummary> {
+  const body = new FormData();
+  body.set("coverImage", file);
+  const res = await authFetch(`/api/v1/briefs/${briefId}/cover-image`, { method: "POST", body });
+  if (!res.ok) throw new Error(await parseErrorMessage(res, "Could not upload this cover image"));
+  return res.json();
 }

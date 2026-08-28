@@ -14,7 +14,8 @@ import { User } from "./User";
 
 // ADR-0012: the course's mandated "owned core business entity". articleCapacityLimit
 // is real business logic (enforced via BriefArticle count in routes/briefs.ts), not a
-// token field. coverImageKey stays nullable/unused until #21 (cover-image upload).
+// token field. coverImageKey is a StorageProvider key (see routes/briefs.ts's
+// cover-image upload), nullable until an owner uploads one.
 export const DEFAULT_ARTICLE_CAPACITY_LIMIT = 20;
 
 @Entity("intelligence_briefs")

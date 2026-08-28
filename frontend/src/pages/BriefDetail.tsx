@@ -1,7 +1,13 @@
-import { FormEvent, useState } from "react";
+import { ChangeEvent, FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { attachArticleToBrief, deleteBrief, detachArticleFromBrief, getBrief } from "../api/client";
+import {
+  attachArticleToBrief,
+  deleteBrief,
+  detachArticleFromBrief,
+  getBrief,
+  uploadBriefCoverImage,
+} from "../api/client";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -33,6 +39,17 @@ export default function BriefDetail() {
     onSuccess: () => navigate("/briefs"),
   });
 
+  const uploadCover = useMutation({
+    mutationFn: (file: File) => uploadBriefCoverImage(id!, file),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["brief", id] }),
+  });
+
+  function onCoverImageChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) uploadCover.mutate(file);
+    e.target.value = "";
+  }
+
   function onAttach(e: FormEvent) {
     e.preventDefault();
     if (!UUID_RE.test(articleId)) {
@@ -63,6 +80,7 @@ export default function BriefDetail() {
         <Link to="/briefs">Back to My Briefs</Link>
       </p>
       <h1>{brief.title}</h1>
+      {brief.coverImageUrl && <img src={brief.coverImageUrl} alt="" width={320} />}
       <p>
         {brief.category} · {brief.articleCount}/{brief.articleCapacityLimit} articles
       </p>
@@ -75,6 +93,17 @@ export default function BriefDetail() {
       </p>
       {remove.isError && (
         <p role="alert">Could not delete this Brief: {(remove.error as Error).message}</p>
+      )}
+
+      <p>
+        <label>
+          {brief.coverImageUrl ? "Replace cover image" : "Add a cover image"}{" "}
+          <input type="file" accept="image/jpeg,image/png,image/webp" onChange={onCoverImageChange} disabled={uploadCover.isPending} />
+        </label>
+      </p>
+      {uploadCover.isPending && <p role="status">Uploading…</p>}
+      {uploadCover.isError && (
+        <p role="alert">Could not upload this cover image: {(uploadCover.error as Error).message}</p>
       )}
 
       <h2>Articles</h2>
