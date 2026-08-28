@@ -21,7 +21,7 @@ export default function AdminDashboard() {
             ))}
           </dl>
           <p>
-            <Link to="/stories">Browse Stories</Link>
+            <Link to="/stories">Browse Stories</Link> · <Link to="/search">Search</Link>
           </p>
         </main>
       )}

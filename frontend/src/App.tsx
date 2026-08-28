@@ -21,6 +21,7 @@ import RoleDashboard from "./pages/RoleDashboard";
 import Stories from "./pages/Stories";
 import StoryDetail from "./pages/StoryDetail";
 import ArticleDetail from "./pages/ArticleDetail";
+import Search from "./pages/Search";
 import Briefs from "./pages/Briefs";
 import BriefForm from "./pages/BriefForm";
 import BriefDetail from "./pages/BriefDetail";
@@ -169,6 +170,14 @@ function App() {
         element={
           <RequireAuth>
             <ArticleDetail />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/search"
+        element={
+          <RequireAuth>
+            <Search />
           </RequireAuth>
         }
       />

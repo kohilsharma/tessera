@@ -5,6 +5,7 @@ import { InitPgvector1755740000000 } from "./migrations/1755740000000-InitPgvect
 import { CreateUsers1755741000000 } from "./migrations/1755741000000-CreateUsers";
 import { CreateCorpus1755742000000 } from "./migrations/1755742000000-CreateCorpus";
 import { CreateBriefs1755743000000 } from "./migrations/1755743000000-CreateBriefs";
+import { AddSearchVectors1755744000000 } from "./migrations/1755744000000-AddSearchVectors";
 import { User } from "./entities/User";
 import { Publisher } from "./entities/Publisher";
 import { Story } from "./entities/Story";
@@ -34,6 +35,7 @@ export const AppDataSource = new DataSource({
     CreateUsers1755741000000,
     CreateCorpus1755742000000,
     CreateBriefs1755743000000,
+    AddSearchVectors1755744000000,
   ],
   synchronize: false,
   logging: false,

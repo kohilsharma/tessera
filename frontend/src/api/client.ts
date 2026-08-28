@@ -205,6 +205,33 @@ export function getArticle(id: string): Promise<ArticleDetail> {
   return getJson(`/api/v1/articles/${id}`, "Could not load this Article");
 }
 
+// #22: mirrors backend/src/routes/search.ts's hybrid (FTS + vector, RRF) search.
+export type SearchSortField = "relevance" | "publishedAt";
+
+export type SearchResult = ArticleSummary & {
+  analysisText: string | null;
+  story: { id: string; slug: string; title: string };
+  score: number;
+};
+
+export type SearchParams = {
+  q: string;
+  page?: number;
+  pageSize?: number;
+  category?: StoryCategory;
+  dateFrom?: string;
+  dateTo?: string;
+  sort?: `${SearchSortField}:asc` | `${SearchSortField}:desc`;
+};
+
+export function search(params: SearchParams): Promise<ListEnvelope<SearchResult>> {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) query.set(key, String(value));
+  }
+  return getJson(`/api/v1/search?${query.toString()}`, "Could not run this search");
+}
+
 // #20: mirrors backend/src/entities/IntelligenceBrief.ts + routes/briefs.ts.
 export const DEFAULT_ARTICLE_CAPACITY_LIMIT = 20;
 
