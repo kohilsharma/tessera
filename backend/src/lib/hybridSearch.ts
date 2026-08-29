@@ -49,12 +49,29 @@ type FusedRow = { articleId: string | null; score: string | null; totalCount: st
 // either signal alone. Returns ids + scores only; the caller hydrates full
 // Article entities (with relations, redistribution gating) via the normal
 // repository.
+// ADR-0023: a hosted provider is a network dependency, and the seeded demo has
+// to stay usable when it rate-limits or the network drops. A failed embed costs
+// the semantic signal, not the request — lexical still answers the query, which
+// is a visibly worse result but a working one. Rethrowing here would turn every
+// Gemini 429 into a 500 on GET /search.
+async function embedQueryOrNull(
+  queryText: string,
+  embedder: EmbeddingProvider,
+): Promise<string | null> {
+  try {
+    return toVectorLiteral(await embedder.embed(queryText));
+  } catch (err) {
+    console.warn("[search] embedding failed, falling back to lexical-only results:", err);
+    return null;
+  }
+}
+
 export async function hybridSearchArticleIds(
   queryText: string,
   filters: HybridSearchFilters,
   embedder: EmbeddingProvider,
 ): Promise<HybridSearchResult> {
-  const queryVector = toVectorLiteral(await embedder.embed(queryText));
+  const queryVector = await embedQueryOrNull(queryText, embedder);
   const sortColumn = filters.sortBy === "relevance" ? "score" : `"publishedAt"`;
   const sortDir: "ASC" | "DESC" = filters.sortDir === "asc" ? "ASC" : "DESC";
   const offset = (filters.page - 1) * filters.pageSize;
@@ -82,7 +99,9 @@ export async function hybridSearchArticleIds(
       FROM (
         SELECT id, embedding <=> $2::vector AS distance
         FROM articles
-        WHERE embedding IS NOT NULL
+        -- $2 is NULL when the embedding provider is unreachable: the CTE goes
+        -- empty and RRF degrades to lexical-only (see embedQueryOrNull).
+        WHERE embedding IS NOT NULL AND $2::vector IS NOT NULL
         ORDER BY embedding <=> $2::vector
         LIMIT ${SEMANTIC_CANDIDATE_POOL}
       ) nn

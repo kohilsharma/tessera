@@ -7,7 +7,9 @@ const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 export class GeminiEmbeddingProvider implements EmbeddingProvider {
   constructor(
     private readonly apiKey: string,
-    private readonly model: string = process.env.EMBEDDING_MODEL ?? "gemini-embedding-001",
+    // `||`, not `??`: a bare `EMBEDDING_MODEL=` line in a .env sets the empty
+    // string, which `??` would happily pass through as the model id.
+    private readonly model: string = process.env.EMBEDDING_MODEL || "gemini-embedding-001",
   ) {}
 
   async embed(text: string): Promise<number[]> {
@@ -17,14 +19,26 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
       body: JSON.stringify({
         content: { parts: [{ text }] },
         // ADR-0017's Matryoshka meeting point: truncate the hosted model's
-        // native output down to the column's fixed vector(1024).
+        // native output down to the column's fixed vector(1024). Nested under
+        // embedContentConfig, not top-level: the v1beta body accepts both, but
+        // the flat `outputDimensionality` is documented as deprecated in favour
+        // of this one. The model itself is a URL path parameter, not a body field.
         embedContentConfig: { outputDimensionality: EMBEDDING_DIMENSIONS },
       }),
     });
     if (!res.ok) {
       throw new Error(`Gemini embedding request failed: ${res.status} ${await res.text()}`);
     }
-    const body = (await res.json()) as { embedding: { values: number[] } };
-    return body.embedding.values;
+    const body = (await res.json()) as { embedding?: { values?: number[] } };
+    const values = body.embedding?.values ?? [];
+    // "embedding" is vector(1024) (ADR-0017). A wrong width otherwise surfaces
+    // much later as an opaque Postgres error on the INSERT that stores it, so
+    // fail here, where the provider that produced it is still named.
+    if (values.length !== EMBEDDING_DIMENSIONS) {
+      throw new Error(
+        `Gemini returned ${values.length} dimensions, expected ${EMBEDDING_DIMENSIONS} (ADR-0017)`,
+      );
+    }
+    return values;
   }
 }

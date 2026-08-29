@@ -161,8 +161,9 @@ npm run dev       # tsx watch, http://localhost:4000
 npm run build     # tsc -> dist/
 npm run migrate   # apply TypeORM migrations
 npm run seed      # demo users for all three roles (only path to an Admin, ADR-0015) + the
-                  # Story/Article/Publisher corpus + one owned Brief; embedded with the
-                  # Mock EmbeddingProvider unless GEMINI_API_KEY is set (ADR-0023)
+                  # Story/Article/Publisher corpus + one owned Brief with a cover image;
+                  # embedded with the hosted provider when GEMINI_API_KEY is set, else the
+                  # Mock (ADR-0023 — switching providers needs a fresh volume, see SETUP.md)
 npm test          # vitest; spins up an ephemeral Postgres via Testcontainers, needs docker access
 ```
 

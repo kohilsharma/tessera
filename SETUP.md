@@ -38,8 +38,8 @@ npm run build     # type-check + compile to dist/ (`npm start` runs the build)
 `npm run seed` is idempotent — re-run it after any migration. It creates one user
 per role, all sharing the same password, a Publisher/Story/Article corpus (browsable
 at `/stories` once the frontend is running), and one owned Brief for the Student user
-with Articles already attached (browsable at `/briefs`) — so the demo has a populated
-Brief to show without building one live.
+with Articles and a cover image already attached (browsable at `/briefs`) — so the
+demo has a populated Brief to show without building one live.
 
 | Email | Role |
 |---|---|
@@ -58,14 +58,31 @@ this step `/dashboard/admin` has no one who can reach it.
 The corpus and every search query are embedded with whichever `EmbeddingProvider`
 `GEMINI_API_KEY` selects (ADR-0017/0023's interface):
 
-- **Unset (default):** the deterministic Mock provider — no network, no API key,
-  works offline. This is also what every backend test uses (ADR-0003).
-- **Set:** the hosted `gemini-embedding-001` (Google AI Studio, free tier),
-  truncated to `vector(1024)`. Get a free key at https://aistudio.google.com/apikey
-  and put it in `.env`; `EMBEDDING_MODEL` overrides the model id if needed.
+- **Set — the intended configuration (ADR-0023):** the hosted
+  `gemini-embedding-001` (Google AI Studio, free tier), truncated to
+  `vector(1024)`. Get a free key at https://aistudio.google.com/apikey and put it
+  in `.env`; `EMBEDDING_MODEL` overrides the model id if needed.
+- **Unset — fallback:** the deterministic Mock provider. No network, no API key,
+  works offline, and it is what every backend test uses (ADR-0003) — but its
+  vectors carry no meaning, so the *semantic* half of hybrid search returns
+  deterministic placeholders rather than real similarity. Lexical (Postgres FTS)
+  results stay genuine either way. The API logs a warning on startup when it
+  falls back, so a demo can't be running on it unnoticed.
 
-Re-run `npm run seed` after changing `GEMINI_API_KEY` — search compares the query's
-vector against whatever embedded the corpus, so both sides must match.
+**Switching providers means re-embedding from scratch.** Search compares a query's
+vector against whatever embedded the corpus, and the two providers' vector spaces
+are unrelated — mixing them silently returns nonsense rather than failing. A plain
+re-run of `npm run seed` will *not* fix this: seeding is idempotent and skips
+Stories that already exist, so it re-embeds nothing. Drop the data and rebuild:
+
+```bash
+docker compose down -v && docker compose up -d   # discards the Postgres volume
+cd backend && npm run migrate && npm run seed
+```
+
+If the hosted provider is unreachable or rate-limited at query time, search logs
+the failure and degrades to lexical-only results instead of erroring (ADR-0023:
+the seeded demo stays usable when the network drops).
 
 `.env` must set `JWT_SECRET` to a long random string — there is no built-in
 fallback, so the API refuses to sign or verify a token without it (ADR-0013).

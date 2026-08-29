@@ -17,6 +17,13 @@ export default defineConfig({
     // data-source.ts) never overwrites a key already present in process.env —
     // so this wins over a real key sitting in a developer's own .env and keeps
     // ADR-0003's "tests run with no API key" true regardless of local config.
-    env: { UPLOADS_DIR: join(tmpdir(), "tessera-test-uploads"), GEMINI_API_KEY: "" },
+    // EMBEDDING_MODEL is pinned alongside it because .env.example ships it
+    // uncommented: a developer who copied that file would otherwise change what
+    // GeminiEmbeddingProvider's default-model test is asserting against.
+    env: {
+      UPLOADS_DIR: join(tmpdir(), "tessera-test-uploads"),
+      GEMINI_API_KEY: "",
+      EMBEDDING_MODEL: "",
+    },
   },
 });

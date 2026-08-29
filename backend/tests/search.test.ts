@@ -8,6 +8,7 @@ import { Story } from "../src/entities/Story";
 import { Article } from "../src/entities/Article";
 import { MockEmbeddingProvider } from "../src/embeddings/MockEmbeddingProvider";
 import { toVectorLiteral } from "../src/embeddings/pgvector";
+import { hybridSearchArticleIds } from "../src/lib/hybridSearch";
 import { setupTestDb } from "./setupTestDb";
 
 setupTestDb();
@@ -371,6 +372,35 @@ describe("GET /api/v1/search", () => {
     expect(res.body.items).toEqual([]);
     expect(res.body.total).toBe(3);
     expect(res.body.totalPages).toBe(3);
+  });
+
+  // ADR-0023: the hosted provider is a network dependency, so an outage or a 429
+  // has to cost the semantic signal rather than the request.
+  it("degrades to lexical-only results when the embedding provider fails", async () => {
+    const failing = {
+      embed: () => Promise.reject(new Error("429 rate limited")),
+    };
+    const filters = {
+      page: 1,
+      pageSize: 20,
+      sortBy: "relevance" as const,
+      sortDir: "desc" as const,
+      category: undefined,
+      dateFrom: undefined,
+      dateTo: undefined,
+    };
+
+    const degraded = await hybridSearchArticleIds(SEMANTIC_QUERY, filters, failing);
+    const ids = degraded.hits.map((hit) => hit.id);
+
+    // Lexical still answers: the query's own words are in quantumArticle's text.
+    expect(ids).toContain(quantumArticleId);
+    // But the article only the vector branch could reach is now unreachable —
+    // which is exactly the signal that was lost, and nothing else.
+    expect(ids).not.toContain(semanticOnlyArticleId);
+
+    const healthy = await hybridSearchArticleIds(SEMANTIC_QUERY, filters, embedder);
+    expect(healthy.hits.map((hit) => hit.id)).toContain(semanticOnlyArticleId);
   });
 
   it("is deterministic across repeated identical requests", async () => {

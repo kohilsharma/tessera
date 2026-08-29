@@ -8,5 +8,17 @@ import { MockEmbeddingProvider } from "./MockEmbeddingProvider";
 // run with no API key" rule, extended to local dev too.
 export function createEmbeddingProvider(): EmbeddingProvider {
   const apiKey = process.env.GEMINI_API_KEY;
-  return apiKey ? new GeminiEmbeddingProvider(apiKey) : new MockEmbeddingProvider();
+  if (apiKey) return new GeminiEmbeddingProvider(apiKey);
+  // The fallback keeps an offline clone demonstrable, but it silently downgrades
+  // the semantic half of hybrid search to deterministic noise — which looks like
+  // working search until you read the results. ADR-0023 makes hosted the
+  // default, so a run that isn't on it should say so out loud. (Tests are the
+  // one place the Mock is the intended provider, not a degraded one.)
+  if (process.env.NODE_ENV !== "test") {
+    console.warn(
+      "[embeddings] GEMINI_API_KEY is unset — falling back to the Mock provider. " +
+        "Semantic search results are deterministic placeholders, not real similarity (ADR-0023).",
+    );
+  }
+  return new MockEmbeddingProvider();
 }
