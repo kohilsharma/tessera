@@ -181,7 +181,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    (see components/indexArchetype.tsx). Established on Stories, adopted by
    Briefs and Search (#32), so the corpus is scanned in one vocabulary.
    ============================================================ */
-.index h1 { margin: 0; font-size: clamp(1.75rem, 3vw, 2.7rem); font-weight: 700; line-height: 1.05; letter-spacing: -.025em; text-wrap: balance; }
+/* The headline scale a page-level title takes outside the record mast's display —
+   an index's and a form's (#35) are the same title in two archetypes. */
+.index h1, .form-page h1 { margin: 0; font-size: clamp(1.75rem, 3vw, 2.7rem); font-weight: 700; line-height: 1.05; letter-spacing: -.025em; text-wrap: balance; }
 
 /* The title and the index's one action share a baseline band, and the band owns
    the space below it — the title and the action can't drift apart by editing one
@@ -192,11 +194,13 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .index-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px 24px; margin-bottom: 26px; }
 /* margin-right leaves the 5px the offset prints into, so the command's registered
    block ends on the same edge as the rules below it. .record-command is the same
-   treatment on a record page (#34) — one command button, two vocabularies, not
-   two buttons that drift apart. */
-.index-action, .record-command { border: 1px solid var(--bureau-ink); background: var(--stock-paper); color: var(--bureau-ink); padding: 11px 18px; margin-right: 5px; font-size: .78rem; font-weight: 700; text-decoration: none; box-shadow: 5px 5px 0 var(--proof-magenta); transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease, transform 140ms ease; }
-.index-action:hover, .record-command:hover { background: var(--proof-blue); color: var(--stock-paper); }
-.index-action:active, .record-command:active { transform: translate(3px, 3px); box-shadow: 2px 2px 0 var(--proof-magenta); }
+   treatment on a record page (#34) and .form-submit on a form panel (#35) — one
+   command button in three vocabularies, not three buttons that drift apart. The
+   submit is the one of the three that can be refused mid-action, so it alone has
+   a disabled state (DESIGN.md: neutral stock, Quiet Ink, no shadow). */
+.index-action, .record-command, .form-submit { border: 1px solid var(--bureau-ink); background: var(--stock-paper); color: var(--bureau-ink); padding: 11px 18px; margin-right: 5px; font-size: .78rem; font-weight: 700; text-decoration: none; box-shadow: 5px 5px 0 var(--proof-magenta); transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease, transform 140ms ease; }
+.index-action:hover, .record-command:hover, .form-submit:hover:enabled { background: var(--proof-blue); color: var(--stock-paper); }
+.index-action:active, .record-command:active, .form-submit:active:enabled { transform: translate(3px, 3px); box-shadow: 2px 2px 0 var(--proof-magenta); }
 
 /* The register reads as one band on the bench rather than fields floating on
    paper: ink edge because a registered band is ruled in ink (the neutral dashed
@@ -372,8 +376,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    buys: they are designed for paper, and the corpus' ink mast has nowhere to put
    them. */
 .record-cover { min-width: 0; }
-.record-plate { border: 1px solid var(--bureau-ink); background: var(--stock-paper); aspect-ratio: 3 / 2; overflow: hidden; }
-.record-plate img { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* The form's plate is the same sheet at the same ratio (#35), so the owner
+   confirms a cover in the shape it registers in — one plate, two archetypes. */
+.record-plate, .form-plate { border: 1px solid var(--bureau-ink); background: var(--stock-paper); aspect-ratio: 3 / 2; overflow: hidden; }
+.record-plate img, .form-plate img { display: block; width: 100%; height: 100%; object-fit: cover; }
 /* The control names itself in the measurement face, like a ledger term, and the
    native file input stays native (#28: no custom widgets). */
 .record-cover-control { display: block; margin-top: 14px; color: var(--quiet-ink); font: 500 .66rem/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
@@ -385,17 +391,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .record-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 13px 16px; margin-top: 28px; }
 
 /* The attach control: one field and its command, ruled in the record's own
-   vocabulary. The Form archetype (#35) owns the shared field treatment — this
-   stays the minimum that reads as designed rather than as a bare input. */
+   vocabulary. The field itself is the Form archetype's shared treatment (#35) —
+   only its measure is this control's own, because it sits in a row with its
+   command rather than in a panel. */
 .record-attach { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 16px; margin: 22px 0 0; }
 .record-attach label { display: flex; flex-direction: column; gap: 7px; color: var(--quiet-ink); font: 500 .66rem/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
-.record-attach input { width: min(38ch, 100%); border: 1px solid var(--bureau-ink); background: var(--stock-paper); padding: 9px 11px; color: var(--bureau-ink); font: 400 .88rem Arial, Helvetica, sans-serif; }
-.record-attach input:disabled { border-color: var(--registration-rule); background: var(--bench-stock); color: var(--quiet-ink); }
-/* The failure is stated in the error treatment below; the field marks itself as
-   the one that failed. Magenta is the app's error register (.state-error), which
-   DESIGN.md's Registered Color Rule licenses as a validation state — and the
-   heavier rule carries it too, so it survives greyscale. */
-.record-attach input[aria-invalid="true"] { border-width: 2px; border-color: var(--proof-magenta); }
+.record-attach input { width: min(38ch, 100%); }
 
 @media (max-width: 560px) {
   .record-mast-body { padding: 22px 20px 26px; }
@@ -406,6 +407,113 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
      title has nothing left to give at this width. */
   .record-mast-body:has(.record-cover) { grid-template-columns: minmax(0, 1fr); }
   .record-plate { max-width: 320px; }
+}
+
+/* ============================================================
+   FORM ARCHETYPE — a titled sheet over one panel of labelled
+   fields, each field's own error, and one ruled command band
+   (see components/formArchetype.tsx). Shared by registration,
+   sign-in, and the Brief form (#35), so a form behaves the same
+   wherever the product asks for something.
+   ============================================================ */
+/* A form is asked of one person at one measure: the index's full 1600px ground
+   would set a 12-word label against 140 characters of nothing. */
+.form-page { max-width: 700px; }
+
+/* Kind and, where there is one, the way back — the record's own head band
+   (.record-mast-head), in the quiet register, because a form states what it is
+   before it asks. The auth forms have nothing behind them and close with their
+   one link instead (.form-aside). */
+.form-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; margin-bottom: 14px; }
+.form-folio { margin: 0; color: var(--quiet-ink); font: 500 .66rem ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .08em; }
+.form-return { color: var(--quiet-ink); font-size: .8rem; line-height: 1.45; text-underline-offset: 3px; }
+.form-return:hover, .form-return:focus-visible { color: var(--bureau-ink); }
+/* The index's headline scale, not the record mast's display: a form is a task,
+   and the sheet below it is what the reader is here to fill in. The rule itself
+   is the index's (.index h1), so the two can't drift. */
+
+/* The panel: one registered sheet on the ground, ruled in ink, at DESIGN.md's
+   sheet interior. No ink on its edge — a source colour here would be decoration
+   (the Registered Color Rule); the only colour the panel spends is the magenta a
+   refusal earns and the command's own offset. */
+.form-panel { margin-top: 24px; border: 1px solid var(--bureau-ink); background: var(--stock-paper); padding: 28px; }
+
+/* A field: its term in the measurement face, as in every ledger in the app, over
+   its control. Rows are separated by space rather than rules — ten ruled rows
+   would read as a table of something rather than one sheet to fill in. */
+.form-field { margin-top: 24px; }
+.form-field:first-child { margin-top: 0; }
+.form-field > label { display: block; margin-bottom: 8px; color: var(--quiet-ink); font: 500 .66rem/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+
+/* One field treatment, shared with the record page's attach control (#34) so the
+   app has a single input: paper stock inside an ink rule, reading face, native
+   control. */
+.form-field :is(input, select, textarea), .record-attach input { border: 1px solid var(--bureau-ink); background: var(--stock-paper); padding: 10px 12px; color: var(--bureau-ink); font: 400 .92rem Arial, Helvetica, sans-serif; }
+.form-field :is(input, select, textarea):disabled, .record-attach input:disabled { border-color: var(--registration-rule); background: var(--bench-stock); color: var(--quiet-ink); }
+/* Fields take the sheet's measure rather than each guessing its own: a form of
+   four boxes at four widths reads as an accident, and the panel is already
+   narrow enough to be the measure. The exception is the one field whose content
+   is two digits — a capacity box as wide as an email would misstate what it
+   wants. */
+.form-field :is(input, select, textarea) { width: 100%; }
+.form-field textarea { min-height: 112px; resize: vertical; }
+.form-field input[type="number"] { width: min(12ch, 100%); }
+.form-field input[type="file"] { padding: 9px 11px; font-size: .8rem; cursor: pointer; }
+
+/* The failed field marks itself, so the message under it is never the only place
+   the reader has to look. Magenta is the app's error register (.state-error),
+   which DESIGN.md's Registered Color Rule licenses as a validation state; the
+   inset hairline doubles the rule's weight without the 1px reflow a wider border
+   would cost, and carries the state into greyscale. */
+.form-field :is(input, select, textarea)[aria-invalid="true"], .record-attach input[aria-invalid="true"] { border-color: var(--proof-magenta); box-shadow: inset 0 0 0 1px var(--proof-magenta); }
+
+/* The message: magenta ink behind a registration mark, in the reading face
+   because it is a sentence. The mark is what makes it read as a stamp against
+   the field rather than as more hint text. */
+.form-field-error { display: flex; gap: 9px; margin: 9px 0 0; max-width: 60ch; color: var(--proof-magenta); font-size: .85rem; font-weight: 650; line-height: 1.45; }
+.form-field-error::before { content: ""; flex: none; width: 9px; height: 9px; margin-top: .4em; background: var(--proof-magenta); }
+.form-field-hint { margin: 9px 0 0; max-width: 60ch; color: var(--quiet-ink); font-size: .84rem; line-height: 1.45; }
+
+/* The cover plate beside its control, so the image and the way to change it are
+   one thing. The plate's column is fixed: it holds the same shape whether an
+   image landed or not. */
+.form-cover { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 16px 24px; align-items: start; margin-top: 24px; }
+.form-cover .form-field { margin-top: 0; }
+/* An empty plate takes the registration cross rather than reading as a failed
+   image: nothing has been registered on this sheet yet. Neutral rule only — the
+   source inks are not spent on an absence. */
+.form-plate:empty { background-image: linear-gradient(var(--registration-rule) 0 0), linear-gradient(var(--registration-rule) 0 0); background-position: center; background-repeat: no-repeat; background-size: 21px 1px, 1px 21px; }
+/* Which image the plate is showing, in the measurement face like a ledger term —
+   the image itself is decorative, so this is what states it in words. The file's
+   own name is not a label and keeps its own case. */
+.form-plate-note { margin: 9px 0 0; color: var(--quiet-ink); font: 500 .66rem/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; overflow-wrap: anywhere; }
+.form-plate-file { text-transform: none; }
+
+/* The panel's own refusal — the API's, not a field's — in the shared error
+   treatment, above the command it blocked. */
+.form-panel .state-error { margin: 24px 0 0; }
+
+/* The command closes the panel on a rule: everything above is what is being
+   registered, and this is the act of registering it. */
+.form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--bureau-ink); }
+.form-submit { cursor: pointer; }
+.form-submit:disabled { border-color: var(--registration-rule); background: var(--bench-stock); color: var(--quiet-ink); box-shadow: none; cursor: default; }
+
+/* The pair's other half, outside the sheet: it is not part of what is being
+   filled in. */
+.form-aside { margin: 22px 0 0; color: var(--quiet-ink); font-size: .9rem; line-height: 1.55; }
+.form-aside a { color: var(--bureau-ink); font-weight: 700; text-underline-offset: 3px; }
+
+@media (max-width: 560px) {
+  .form-panel { padding: 20px; }
+  /* The plate drops above its control rather than squeezing both — the same
+     choice the record mast makes at this width. */
+  .form-cover { grid-template-columns: minmax(0, 1fr); }
+  .form-plate { max-width: 320px; }
+  /* The command takes the panel's width once there is no room beside it, and
+     keeps the 5px its offset prints into. */
+  .form-actions { display: block; }
+  .form-submit { width: calc(100% - 5px); }
 }
 
 /* ============================================================

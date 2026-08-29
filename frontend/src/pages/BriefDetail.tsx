@@ -7,6 +7,7 @@ import {
   detachArticleFromBrief,
   getBrief,
   uploadBriefCoverImage,
+  COVER_IMAGE_ACCEPT,
   type BriefSummary,
 } from "../api/client";
 import { useBriefCoverImage } from "../components/coverImage";
@@ -44,7 +45,7 @@ function BriefCover({
         {url ? "Replace cover image" : "Add a cover image"}
         <input
           type="file"
-          accept="image/jpeg,image/png,image/webp"
+          accept={COVER_IMAGE_ACCEPT}
           disabled={upload.isPending}
           onChange={(e) => {
             const file = e.target.files?.[0];

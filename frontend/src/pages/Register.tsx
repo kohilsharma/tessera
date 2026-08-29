@@ -1,6 +1,8 @@
 import { FormEvent, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { register, RegistrableRole } from "../api/client";
+import { Field, FormPage, FormSubmit } from "../components/formArchetype";
+import { ErrorState } from "../components/uiStates";
 
 // Kept in step with the same rules in backend/src/routes/auth.ts. The backend is
 // authoritative; these exist only to fail a field before a round-trip.
@@ -46,13 +48,20 @@ export default function Register() {
   }
 
   return (
-    <main>
-      <h1>Register</h1>
-      <form onSubmit={onSubmit} noValidate>
-        <div>
-          <label htmlFor="email">Email</label>
+    <FormPage
+      folio="New account"
+      title="Register"
+      onSubmit={onSubmit}
+      aside={
+        <>
+          Already have an account? <Link to="/login">Log in</Link>
+        </>
+      }
+    >
+      <Field id="email" label="Email" error={errors.email}>
+        {(props) => (
           <input
-            id="email"
+            {...props}
             type="email"
             value={email}
             onChange={(e) => {
@@ -60,19 +69,18 @@ export default function Register() {
               setErrors((prev) => ({ ...prev, email: undefined }));
             }}
             required
-            aria-invalid={Boolean(errors.email)}
-            aria-describedby={errors.email ? "email-error" : undefined}
           />
-          {errors.email && (
-            <p id="email-error" role="alert">
-              {errors.email}
-            </p>
-          )}
-        </div>
-        <div>
-          <label htmlFor="password">Password</label>
+        )}
+      </Field>
+      <Field
+        id="password"
+        label="Password"
+        error={errors.password}
+        hint={`At least ${MIN_PASSWORD_LENGTH} characters.`}
+      >
+        {(props) => (
           <input
-            id="password"
+            {...props}
             type="password"
             value={password}
             onChange={(e) => {
@@ -81,32 +89,21 @@ export default function Register() {
             }}
             required
             minLength={MIN_PASSWORD_LENGTH}
-            aria-invalid={Boolean(errors.password)}
-            aria-describedby={errors.password ? "password-error" : "password-hint"}
           />
-          {errors.password ? (
-            <p id="password-error" role="alert">
-              {errors.password}
-            </p>
-          ) : (
-            <p id="password-hint">At least {MIN_PASSWORD_LENGTH} characters.</p>
-          )}
-        </div>
-        <div>
-          <label htmlFor="role">Role</label>
-          <select id="role" value={role} onChange={(e) => setRole(e.target.value as RegistrableRole)}>
+        )}
+      </Field>
+      <Field id="role" label="Role">
+        {(props) => (
+          <select {...props} value={role} onChange={(e) => setRole(e.target.value as RegistrableRole)}>
             <option value="student">Student</option>
             <option value="investor">Investor</option>
           </select>
-        </div>
-        {errors.form && <p role="alert">{errors.form}</p>}
-        <button type="submit" disabled={submitting}>
-          {submitting ? "Registering…" : "Register"}
-        </button>
-      </form>
-      <p>
-        Already have an account? <Link to="/login">Log in</Link>
-      </p>
-    </main>
+        )}
+      </Field>
+      {errors.form && <ErrorState>{errors.form}</ErrorState>}
+      <FormSubmit pending={submitting} pendingLabel="Registering…">
+        Register
+      </FormSubmit>
+    </FormPage>
   );
 }

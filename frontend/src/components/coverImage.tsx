@@ -42,6 +42,26 @@ export function useBriefCoverImage(url: string | null, cacheKey: string | null) 
   return { src, failed };
 }
 
+// The other half of the same job, on the Brief form (#35): an image the owner has
+// picked but not yet saved. Same object-URL dance, no fetch — the bytes are
+// already in hand — and the same revoke, which is why it lives beside the
+// fetching hook rather than inside the form.
+export function useSelectedImagePreview(file: File | null) {
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!file) {
+      setSrc(null);
+      return;
+    }
+    const objectUrl = URL.createObjectURL(file);
+    setSrc(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [file]);
+
+  return src;
+}
+
 // The index's thumbnail: the plate is already drawn and already holds the row's
 // shape, so a cover that is absent, loading, or unreachable shows the plate
 // rather than a state block. `alt=""` because the entry's title says what this is

@@ -336,6 +336,12 @@ export function detachArticleFromBrief(briefId: string, articleId: string): Prom
   return sendJson("DELETE", `/api/v1/briefs/${briefId}/articles/${articleId}`, undefined, "Could not remove this Article");
 }
 
+// The set the upload endpoint accepts, spelled once for the two file inputs that
+// hint it (the Brief form and the Brief record page). The gate is the server's
+// byte-signature sniff (backend/src/lib/imageValidation.ts) — this is the file
+// picker's filter, not the rule.
+export const COVER_IMAGE_ACCEPT = "image/jpeg,image/png,image/webp";
+
 // #21: multipart, so this bypasses sendJson's JSON body/Content-Type entirely
 // (the browser sets the multipart boundary on its own when given a FormData).
 export async function uploadBriefCoverImage(briefId: string, file: File): Promise<BriefSummary> {

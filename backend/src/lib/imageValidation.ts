@@ -27,9 +27,10 @@ const SIGNATURES: { type: SniffedImageType; mimeType: string; matches: (buf: Buf
 ];
 
 // Source of truth for the allowed-type list on the server: routes/briefs.ts's
-// multer fileFilter derives from it. BriefDetail.tsx's <input accept> spells
-// the same set out separately — the SPA can't import across the backend/
-// frontend package boundary, and that hint is a convenience, not the gate.
+// multer fileFilter derives from it. The SPA spells the same set out separately
+// (COVER_IMAGE_ACCEPT in frontend/src/api/client.ts, one constant behind both of
+// its file inputs) — it can't import across the backend/frontend package
+// boundary, and that hint is a convenience, not the gate.
 export const IMAGE_MIME_TYPES: readonly string[] = SIGNATURES.map((sig) => sig.mimeType);
 
 export function sniffImageType(data: Buffer): SniffedImageType | null {
