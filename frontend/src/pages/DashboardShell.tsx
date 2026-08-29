@@ -14,7 +14,12 @@ export default function DashboardShell<T>({
   query: UseQueryResult<T, Error>;
   children: (data: T) => ReactNode;
 }) {
-  if (query.isPending) return <PendingState>Loading your dashboard…</PendingState>;
+  if (query.isPending)
+    return (
+      <main>
+        <PendingState>Loading your dashboard…</PendingState>
+      </main>
+    );
   if (query.isError) return <DashboardError message={query.error.message} />;
   return <>{children(query.data)}</>;
 }

@@ -29,7 +29,10 @@ export default function RoleDashboard() {
       {(me) => {
         const Dashboard = role === me.role ? DASHBOARDS[me.role] : undefined;
         if (!Dashboard) {
-          return <DashboardError message={`Your account is a ${me.role}, so that dashboard is not yours.`} />;
+          // "an investor", "a student": the role names are a closed set, so the
+          // first letter decides the article correctly for every one of them.
+          const article = /^[aeiou]/.test(me.role) ? "an" : "a";
+          return <DashboardError message={`Your account is ${article} ${me.role}, so that dashboard is not yours.`} />;
         }
         return <Dashboard />;
       }}

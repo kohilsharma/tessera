@@ -182,8 +182,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    Briefs and Search (#32), so the corpus is scanned in one vocabulary.
    ============================================================ */
 /* The headline scale a page-level title takes outside the record mast's display —
-   an index's and a form's (#35) are the same title in two archetypes. */
-.index h1, .form-page h1 { margin: 0; font-size: clamp(1.75rem, 3vw, 2.7rem); font-weight: 700; line-height: 1.05; letter-spacing: -.025em; text-wrap: balance; }
+   an index's, a form's (#35), and a dashboard's (#36) are the same title in
+   three archetypes. */
+.index h1, .form-page h1, .dashboard h1 { margin: 0; font-size: clamp(1.75rem, 3vw, 2.7rem); font-weight: 700; line-height: 1.05; letter-spacing: -.025em; text-wrap: balance; }
 
 /* The title and the index's one action share a baseline band, and the band owns
    the space below it — the title and the action can't drift apart by editing one
@@ -330,7 +331,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 /* The body: sections of substance under the identity, each opening on a rule so
    the record reads as a stack of registered parts. */
 .record-section { margin-top: 44px; }
-.record-section h2 { margin: 0 0 4px; padding-bottom: 13px; border-bottom: 1px solid var(--bureau-ink); font-size: clamp(1.2rem, 2vw, 1.6rem); font-weight: 700; line-height: 1.1; letter-spacing: -.02em; }
+/* The section scale, shared with a dashboard register's heading (#36) — a part
+   of a record and a register on a surface are the same rank. */
+.record-section h2, .dash-register h2 { font-size: clamp(1.2rem, 2vw, 1.6rem); font-weight: 700; line-height: 1.1; letter-spacing: -.02em; }
+.record-section h2 { margin: 0 0 4px; padding-bottom: 13px; border-bottom: 1px solid var(--bureau-ink); }
 /* The reading measure DESIGN.md sets for prose — the register above is compact,
    the record's own text is not. */
 .record-prose { max-width: 68ch; margin: 22px 0 0; font-size: 1rem; line-height: 1.65; }
@@ -514,6 +518,86 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
      keeps the 5px its offset prints into. */
   .form-actions { display: block; }
   .form-submit { width: calc(100% - 5px); }
+}
+
+/* ============================================================
+   DASHBOARD ARCHETYPE — a role-titled surface over one or more
+   registers (see components/dashboardArchetype.tsx). Shared by all
+   three role dashboards (#36), which keep genuinely different content
+   and shapes: ADR-0004 requires three distinct surfaces, so this is a
+   vocabulary they share, not a template they collapse into.
+   ============================================================ */
+/* One accent ink per role, set here and read by the head band and the measure
+   bars — so a role's identity is one token rather than a colour restated per
+   rule. Never the only statement of whose surface this is: .dash-folio names the
+   role in words directly above the title. Student Context green is DESIGN.md's
+   educational ink; the Investor rollup takes Proof Blue, the source ink read
+   here as volume; the operator console takes Registered Overlap, the ink the
+   design already spends on registration itself. */
+.dashboard { --role-ink: var(--proof-blue); }
+.dashboard--student { --role-ink: var(--student-context); }
+.dashboard--admin { --role-ink: var(--registered-overlap); }
+
+/* The surface opens on its role's edge — the one place the accent is spent
+   structurally, at the weight the record mast gives a source edge. */
+.dash-head { border-top: 5px solid var(--role-ink); padding-top: 18px; }
+.dash-folio { margin: 0 0 11px; color: var(--role-ink); font: 500 .66rem ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .08em; }
+.dash-dek { margin: 15px 0 0; max-width: 60ch; color: var(--quiet-ink); font-size: 1.02rem; line-height: 1.55; }
+
+/* A register: its heading and its own folio on one rule — the rule a record's
+   sections open on. The folio states how much the register holds, which is what
+   tells three registers apart before a single row is read. */
+.dash-register { margin-top: 42px; }
+.dash-register-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 20px; padding-bottom: 13px; border-bottom: 1px solid var(--bureau-ink); }
+.dash-register h2 { margin: 0; }
+.dash-register-folio { margin: 0; color: var(--quiet-ink); font: 500 .66rem ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+/* Rows open on the heading's rule rather than ruling again 22px under it — the
+   record archetype's own choice for the same pair. An empty state keeps its
+   margin: it is an unregistered sheet on the ground, not a row in the register. */
+.dash-register .entry-list { margin-top: 0; border-top: 0; }
+
+/* A row's name column: the name, and under it the bar where the row's facts are
+   one quantity. */
+.dash-entry { min-width: 0; }
+/* A row that names something with no record page of its own — a connector, a
+   role — takes the entry title's scale without its link vocabulary. */
+.entry-name { margin: 0; font-size: 1.1rem; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere; }
+/* A row's address line — a connector's endpoint. The measurement face, because
+   an endpoint is a value of fixed identity, and wrapping anywhere because a URL
+   is the one value here that can outrun its column. */
+.dash-entry-note { margin: 7px 0 0; color: var(--quiet-ink); font: 500 .74rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
+/* The measure: a rule as long as the value stated beside it, on the bench, in
+   the role's ink. It restates the count and says nothing the count does not —
+   DESIGN.md's Redundant Signal Rule, and no claim of certainty the data can't
+   support. */
+.dash-measure { max-width: 260px; height: 6px; margin-top: 11px; background: var(--bench-stock); }
+.dash-measure i { display: block; height: 100%; width: calc(var(--share) * 100%); background: var(--role-ink); }
+/* A domain is a value of fixed identity too, and the register's cells stay
+   narrow enough that the short cells beside them keep their column. */
+.dash-register .entry-register dd { max-width: 32ch; overflow-wrap: anywhere; }
+
+/* Standing totals as plates rather than rows: the ledger's term over its number
+   at the scale a total earns. Bench stock and neutral rules — a count is not a
+   source layer, so it spends no ink. */
+.dash-counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 148px), 1fr)); gap: 12px; margin: 22px 0 0; }
+.dash-counts > div { border: 1px solid var(--registration-rule); background: var(--bench-stock); padding: 15px 17px 17px; }
+.dash-counts dt { margin: 0 0 9px; color: var(--quiet-ink); font: 500 .66rem/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.dash-counts dd { margin: 0; font-size: clamp(1.7rem, 3vw, 2.2rem); font-weight: 800; line-height: 1; letter-spacing: -.03em; }
+
+/* The way off the surface: ruled destinations under everything the dashboard
+   registers, not a line of links separated by interpuncts. */
+.dash-onward { display: flex; flex-wrap: wrap; margin-top: 46px; border-top: 1px solid var(--bureau-ink); }
+.dash-onward a { padding: 16px 22px; border-left: 1px solid var(--registration-rule); color: var(--bureau-ink); font-size: .84rem; font-weight: 700; text-decoration: none; text-underline-offset: 3px; transition: background-color 140ms ease; }
+.dash-onward a:first-child { border-left: 0; padding-left: 2px; }
+.dash-onward a:hover, .dash-onward a:focus-visible { background: var(--bench-stock); text-decoration: underline; }
+
+@media (max-width: 560px) {
+  .dash-register { margin-top: 34px; }
+  .dash-counts { grid-template-columns: repeat(auto-fit, minmax(min(100%, 116px), 1fr)); gap: 9px; }
+  /* Destinations become stacked ruled rows: three cells side by side at this
+     width would each be two words tall. */
+  .dash-onward { display: block; }
+  .dash-onward a { display: block; border-left: 0; border-bottom: 1px solid var(--registration-rule); padding: 15px 2px; }
 }
 
 /* ============================================================

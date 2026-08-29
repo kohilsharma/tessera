@@ -1,94 +1,104 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
 import { getAdminDashboard, USER_ROLES } from "../api/client";
 import DashboardShell from "./DashboardShell";
-import { EmptyState } from "../components/uiStates";
+import {
+  CountPlates,
+  DashboardOnward,
+  DashboardPage,
+  DashboardRegister,
+  RegisterRow,
+} from "../components/dashboardArchetype";
+import { EmptyState, EntryList } from "../components/uiStates";
 
+// The Admin surface (#36): three operator registers, in three shapes, so the
+// three are told apart before they are read — standing totals as plates, the
+// connector fleet as a status register, publishers as a coverage register.
 export default function AdminDashboard() {
   const query = useQuery({ queryKey: ["dashboard", "admin"], queryFn: getAdminDashboard });
 
   return (
     <DashboardShell query={query}>
-      {(data) => (
-        <main>
-          <h1>Admin dashboard</h1>
+      {(data) => {
+        // As on the Investor rollup: relative to the widest-covered publisher,
+        // guarded so an unseeded corpus divides by something.
+        const widest = Math.max(1, ...data.publishers.map((publisher) => publisher.articleCount));
 
-          <h2>Users</h2>
-          <dl>
-            {/* Rows come from the role list, so a fourth role needs no edit here. */}
-            {USER_ROLES.map((role) => (
-              <div key={role}>
-                <dt>{role}</dt>
-                <dd>{data.userCounts[role]}</dd>
-              </div>
-            ))}
-          </dl>
+        return (
+          <DashboardPage
+            role="admin"
+            folio="Admin dashboard"
+            title="Operator console"
+            dek="Accounts, ingestion connectors, and the publishers behind the corpus."
+          >
+            <DashboardRegister heading="Accounts" folio={`${USER_ROLES.length} roles`}>
+              {/* Plates come from the role list, so a fourth role needs no edit here. */}
+              <CountPlates
+                counts={USER_ROLES.map((role) => ({ term: role, value: data.userCounts[role] }))}
+              />
+            </DashboardRegister>
 
-          {/* Connectors are seed-only in Phase 1 (ADR-0022): the operator
-              inspects them here; ingestion starts reading them in Phase 2. */}
-          <h2>Ingestion connectors</h2>
-          {data.connectors.length === 0 ? (
-            <EmptyState>
-              No connectors — run <code>npm run seed</code> in <code>backend/</code>.
-            </EmptyState>
-          ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">Name</th>
-                  <th scope="col">Kind</th>
-                  <th scope="col">Endpoint</th>
-                  <th scope="col">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.connectors.map((connector) => (
-                  <tr key={connector.id}>
-                    <th scope="row">{connector.name}</th>
-                    <td>{connector.kind}</td>
-                    <td>
-                      <code>{connector.endpoint}</code>
-                    </td>
-                    <td>{connector.enabled ? "enabled" : "disabled"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+            {/* Connectors are seed-only in Phase 1 (ADR-0022): the operator
+                inspects them here; ingestion starts reading them in Phase 2. */}
+            <DashboardRegister
+              heading="Ingestion connectors"
+              folio={`${data.connectors.filter((connector) => connector.enabled).length} of ${data.connectors.length} enabled`}
+            >
+              {data.connectors.length === 0 ? (
+                <EmptyState>
+                  <p>
+                    No connectors — run <code>npm run seed</code> in <code>backend/</code>.
+                  </p>
+                </EmptyState>
+              ) : (
+                <EntryList>
+                  {data.connectors.map((connector) => (
+                    <RegisterRow
+                      key={connector.id}
+                      name={connector.name}
+                      note={connector.endpoint}
+                      meta={[
+                        { term: "Kind", value: connector.kind },
+                        { term: "Status", value: connector.enabled ? "Enabled" : "Disabled" },
+                      ]}
+                    />
+                  ))}
+                </EntryList>
+              )}
+            </DashboardRegister>
 
-          <h2>Publishers</h2>
-          {data.publishers.length === 0 ? (
-            <EmptyState>
-              No publishers — run <code>npm run seed</code> in <code>backend/</code>.
-            </EmptyState>
-          ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">Name</th>
-                  <th scope="col">Domain</th>
-                  <th scope="col">Articles</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.publishers.map((publisher) => (
-                  <tr key={publisher.id}>
-                    <th scope="row">{publisher.name}</th>
-                    <td>
-                      <code>{publisher.domain}</code>
-                    </td>
-                    <td>{publisher.articleCount}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+            <DashboardRegister heading="Publishers" folio={`${data.publishers.length} registered`}>
+              {data.publishers.length === 0 ? (
+                <EmptyState>
+                  <p>
+                    No publishers — run <code>npm run seed</code> in <code>backend/</code>.
+                  </p>
+                </EmptyState>
+              ) : (
+                <EntryList>
+                  {data.publishers.map((publisher) => (
+                    <RegisterRow
+                      key={publisher.id}
+                      name={publisher.name}
+                      measure={publisher.articleCount / widest}
+                      meta={[
+                        { term: "Domain", value: <code>{publisher.domain}</code> },
+                        { term: "Articles", value: publisher.articleCount },
+                      ]}
+                    />
+                  ))}
+                </EntryList>
+              )}
+            </DashboardRegister>
 
-          <p>
-            <Link to="/stories">Browse Stories</Link> · <Link to="/search">Search</Link>
-          </p>
-        </main>
-      )}
+            <DashboardOnward
+              links={[
+                { to: "/stories", label: "Browse Stories" },
+                { to: "/search", label: "Search the corpus" },
+              ]}
+            />
+          </DashboardPage>
+        );
+      }}
     </DashboardShell>
   );
 }
