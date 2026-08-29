@@ -46,7 +46,7 @@ export default function Account() {
           Go to your dashboard
         </Link>
         <button type="button" onClick={onLogout}>
-          Log out
+          Sign out
         </button>
       </div>
     </main>

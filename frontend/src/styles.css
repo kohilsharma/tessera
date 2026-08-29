@@ -186,14 +186,6 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    the same title in four archetypes. */
 .index h1, .form-page h1, .dashboard h1, .stated-page h1 { margin: 0; font-size: clamp(1.75rem, 3vw, 2.7rem); font-weight: 700; line-height: 1.05; letter-spacing: -.025em; text-wrap: balance; }
 
-/* A stated page: a title over a register of facts, with nothing to filter, no
-   record to mast, and nothing to fill in — Account and the status page (#37).
-   Not a fifth archetype: it borrows the form's one-person measure and the record
-   page's note register (.record-note) and action band (.record-actions), which
-   is all a page of two facts needs. */
-.stated-page { max-width: 700px; }
-.stated-page .record-note { margin-top: 26px; }
-
 /* The title and the index's one action share a baseline band, and the band owns
    the space below it — the title and the action can't drift apart by editing one
    of two margins. The action is DESIGN.md's command button (paper field, hard
@@ -360,7 +352,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .record-section .record-prose + .entry-list { margin-top: 22px; border-top: 1px solid var(--bureau-ink); }
 
 /* The rights note is a register of stated facts, not a small-print line: ruled
-   rows, term in the measurement face, value in the reading face. */
+   rows, term in the measurement face, value in the reading face. Also the fact
+   register the two stated pages borrow (#37) — they restate its dd in the
+   measurement face, because theirs hold identities rather than sentences. */
 .record-note { margin: 22px 0 0; }
 .record-note > div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 4px 24px; padding: 13px 2px; border-bottom: 1px solid var(--registration-rule); }
 .record-note dt { color: var(--quiet-ink); font: 500 .66rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
@@ -435,8 +429,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    wherever the product asks for something.
    ============================================================ */
 /* A form is asked of one person at one measure: the index's full 1600px ground
-   would set a 12-word label against 140 characters of nothing. */
-.form-page { max-width: 700px; }
+   would set a 12-word label against 140 characters of nothing. The stated pages
+   (#37) are asked of the same one person and take the same measure. */
+.form-page, .stated-page { max-width: 700px; }
 
 /* Kind and, where there is one, the way back — the record's own head band
    (.record-mast-head), in the quiet register, because a form states what it is
@@ -612,6 +607,21 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
   .dash-onward { display: block; }
   .dash-onward a { display: block; border-left: 0; border-bottom: 1px solid var(--registration-rule); padding: 15px 2px; }
 }
+
+/* ============================================================
+   STATED PAGE — a title over a register of facts: Account and the
+   status page (#37). Not a fifth archetype, and no component of its
+   own: it is the form's measure, the record page's note register
+   (.record-note), and the record page's action band
+   (.record-actions), which is all a page of two facts needs.
+   ============================================================ */
+/* Its values are identities — an address, a role, a timestamp — so they take the
+   measurement face DESIGN.md reserves for them, and the same one the shell's
+   identity control states two of these values in. The note register's own dd is
+   the prose measure because the rights note it was built for is sentences; there
+   is no sentence on either of these pages. */
+.stated-page .record-note { margin-top: 26px; }
+.stated-page .record-note dd { max-width: none; font: 500 .82rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
 
 /* ============================================================
    BUREAU — Evidence Registration Bureau

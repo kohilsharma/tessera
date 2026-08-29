@@ -177,7 +177,7 @@ Corners are square. Pills are reserved for compact filters; they never define co
 
 ## Implementation
 
-Bureau is the committed and only visual world. The shell (`frontend/src/App.tsx`) owns shared state — filter, lens, active claim, active Evidence, and save lifecycle — and renders `frontend/src/versions/bureau.tsx` against `frontend/src/styles.css`. The `.design-bureau` wrapper hosts the token layer, so every color, rule, and stock wash resolves from one place.
+Bureau is the committed and only visual world, and since the rollout (#28) it reaches the whole application. Its tokens live at `:root` in `frontend/src/styles.css`; the live pages consume them through four page archetypes — index, record, form, dashboard — plus the application shell (`frontend/src/components/AppShell.tsx`) that `frontend/src/App.tsx`, now the route table alone, wraps them in. The Phase-3 design study keeps its own route (`/design-prototype`): `frontend/src/versions/BureauPrototype.tsx` owns that surface's shared state — filter, lens, active claim, active Evidence, and save lifecycle — and renders `versions/bureau.tsx` inside the `.design-bureau` wrapper, which keeps a duplicate token block of its own so a root-level token edit cannot change how the frozen reference renders.
 
 Nine exploratory worlds (Terminal, Shoebox, Specimen, Abyss, Pit, Archive, Stockroom, Darkroom, Cloud Quarry) were built to test this surface's mechanism against alternative grammars and have been removed now that Bureau is chosen. Their record lives in git history; no runtime switcher remains.
 

@@ -34,9 +34,9 @@ Story and Article detail (#33) and Brief detail as the owned artefact (#34), and
 archetype across registration, sign-in, and the Brief form — which gained its own
 cover-image control (#35), and the Dashboard archetype across all three roles (#36).
 The cross-route responsive and accessibility sweep (#37) closed it out: `/account` and
-`/status` are stated pages in the same vocabulary, screenshots at both breakpoints sit in
-`docs/verification/bureau-rollout/`. `/` redirects to
-the caller's own dashboard. The
+`/status` became stated pages in the same vocabulary, and every route's screenshots at both
+breakpoints sit in `docs/verification/bureau-rollout/`. `/` redirects to the caller's own
+dashboard. The
 **design prototype** for the Phase-3 flagship (`src/versions/BureauPrototype.tsx` +
 `bureau.tsx` over hardcoded `src/data.ts`, styled by `src/styles.css`) sits at
 `/design-prototype`, out of the Phase-1 path.
