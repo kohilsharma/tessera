@@ -97,12 +97,7 @@ export default function Search() {
               </li>
             ))}
           </EntryList>
-          <Pagination
-            page={query.data.page}
-            totalPages={query.data.totalPages}
-            total={query.data.total}
-            onGoToPage={list.goToPage}
-          />
+          <Pagination envelope={query.data} onGoToPage={list.goToPage} />
         </>
       )}
     </main>

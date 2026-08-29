@@ -1,0 +1,85 @@
+import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
+import { Pagination, type PaginationEnvelope } from "./listControls";
+import { EntryList } from "./uiStates";
+
+// The Index archetype: a filter register above a ruled entry list above
+// pagination. Defined here as a shared layout rather than as Stories markup,
+// because Briefs and Search want the same one (#32) and three inventions of one
+// layout is how a list vocabulary drifts.
+//
+// The four UI states stay the page's own choice (uiStates.tsx): Search's no-term
+// state has no equivalent on Stories, so the archetype holds the frame and the
+// entry, not the state machine.
+
+export function IndexPage({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <main className="index">
+      <h1>{title}</h1>
+      {children}
+    </main>
+  );
+}
+
+// The filter register: the page's filter, sort, and date-range pills read as one
+// ruled band rather than loose form fields. A form because the controls are
+// controls, named because a named form is a landmark a screen-reader user can
+// jump to; `label` because what is being filtered differs per page.
+export function FilterRegister({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <form className="filter-register" aria-label={label} onSubmit={(e) => e.preventDefault()}>
+      {children}
+    </form>
+  );
+}
+
+// The list's populated frame and its pagination in one place, in the order the
+// archetype names: entries above the control that says where in the result set
+// they fall. Kept together so the three indexes can't order them differently.
+// (EntryList alone is still right for a list with no pages — a Story's
+// Articles.)
+export function EntryRegister({
+  envelope,
+  onGoToPage,
+  children,
+}: {
+  envelope: PaginationEnvelope;
+  onGoToPage: (page: number) => void;
+  children: ReactNode;
+}) {
+  return (
+    <>
+      <EntryList>{children}</EntryList>
+      <Pagination envelope={envelope} onGoToPage={onGoToPage} />
+    </>
+  );
+}
+
+// One entry in the register: the record's name, and the facts you scan a corpus
+// by. `meta` is the prototype's ledger pattern — monospace uppercase term over a
+// weighted value — so provenance reads as provenance and not as prose.
+export function Entry({
+  to,
+  title,
+  meta,
+}: {
+  to: string;
+  title: string;
+  meta: { term: string; value: ReactNode }[];
+}) {
+  return (
+    <li className="entry">
+      <Link className="entry-title" to={to}>
+        {title}
+      </Link>
+      <dl className="entry-register">
+        {meta.map(({ term, value }) => (
+          <div key={term}>
+            <dt>{term}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </li>
+  );
+}

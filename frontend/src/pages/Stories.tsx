@@ -1,15 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
 import { getStories, type StorySortField } from "../api/client";
+import { Entry, EntryRegister, FilterRegister, IndexPage } from "../components/indexArchetype";
 import {
   CategoryFilter,
   DateRangeFilter,
-  Pagination,
   SortDirectionFilter,
   useListQueryParams,
 } from "../components/listControls";
-import { EmptyState, EntryList, PendingState, RetryableError } from "../components/uiStates";
+import { EmptyState, PendingState, RetryableError } from "../components/uiStates";
 
+// The first page on the Index archetype (#31): filter register, ruled entries,
+// pagination. Everything shaped here is shared — see components/indexArchetype.
 export default function Stories() {
   const list = useListQueryParams();
   const sortField: StorySortField = list.sortField === "title" ? "title" : "firstSeenAt";
@@ -27,9 +28,8 @@ export default function Stories() {
   });
 
   return (
-    <main>
-      <h1>Stories</h1>
-      <form onSubmit={(e) => e.preventDefault()}>
+    <IndexPage title="Stories">
+      <FilterRegister label="Filter Stories">
         <CategoryFilter value={list.category} onChange={(value) => list.updateFilter("category", value)} />{" "}
         <label className="filter-field">
           Sort by{" "}
@@ -51,7 +51,7 @@ export default function Stories() {
           to={list.dateTo}
           onChange={list.updateFilter}
         />
-      </form>
+      </FilterRegister>
 
       {query.isPending && <PendingState>Loading Stories…</PendingState>}
       {query.isError && (
@@ -61,38 +61,50 @@ export default function Stories() {
           retrying={query.isFetching}
         />
       )}
+      {/* Two empty states, kept apart: filters that matched nothing are the
+          reader's to undo, an unseeded corpus is not. Saying "no Stories match
+          these filters" with no filters applied would misdescribe the cause. */}
       {query.isSuccess && query.data.items.length === 0 && (
         <EmptyState>
-          <p>No Stories match these filters.</p>
           {list.hasFilters ? (
-            <button type="button" onClick={list.clearFilters}>
-              Clear filters
-            </button>
+            <>
+              <p>No Stories match these filters.</p>
+              <button type="button" onClick={list.clearFilters}>
+                Clear filters
+              </button>
+            </>
           ) : (
             <p>
-              The corpus is empty — run <code>npm run seed</code> in <code>backend/</code> to load the demo Stories.
+              The corpus is empty — run <code>npm run seed</code> in <code>backend/</code> to load the demo
+              Stories.
             </p>
           )}
         </EmptyState>
       )}
       {query.isSuccess && query.data.items.length > 0 && (
-        <>
-          <EntryList>
-            {query.data.items.map((story) => (
-              <li key={story.id}>
-                <Link to={`/stories/${story.id}`}>{story.title}</Link> — {story.category},{" "}
-                {story.articleCount} article{story.articleCount === 1 ? "" : "s"}
-              </li>
-            ))}
-          </EntryList>
-          <Pagination
-            page={query.data.page}
-            totalPages={query.data.totalPages}
-            total={query.data.total}
-            onGoToPage={list.goToPage}
-          />
-        </>
+        <EntryRegister envelope={query.data} onGoToPage={list.goToPage}>
+          {query.data.items.map((story) => (
+            <Entry
+              key={story.id}
+              to={`/stories/${story.id}`}
+              title={story.title}
+              meta={[
+                { term: "Category", value: story.category },
+                {
+                  term: "Coverage",
+                  value: `${story.articleCount} article${story.articleCount === 1 ? "" : "s"}`,
+                },
+                {
+                  term: "First seen",
+                  value: (
+                    <time dateTime={story.firstSeenAt}>{new Date(story.firstSeenAt).toLocaleDateString()}</time>
+                  ),
+                },
+              ]}
+            />
+          ))}
+        </EntryRegister>
       )}
-    </main>
+    </IndexPage>
   );
 }

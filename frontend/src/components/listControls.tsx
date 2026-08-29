@@ -1,5 +1,5 @@
 import { useSearchParams } from "react-router-dom";
-import { isStoryCategory, STORY_CATEGORIES, type StoryCategory } from "../api/client";
+import { isStoryCategory, STORY_CATEGORIES, type ListEnvelope, type StoryCategory } from "../api/client";
 
 // URL search params double as the filter/sort/page state on every list page:
 // shareable links, and back/forward behaves the way a reader expects. The names
@@ -129,21 +129,26 @@ export function DateRangeFilter({
   );
 }
 
+// Takes the list envelope whole rather than four loose numbers: the page size is
+// what turns "page 2 of 5" into the reader's actual position in the result set,
+// and every caller already has the envelope in hand. Derived from the API's own
+// list contract so the shape isn't restated here.
+export type PaginationEnvelope = Omit<ListEnvelope<unknown>, "items">;
+
 export function Pagination({
-  page,
-  totalPages,
-  total,
+  envelope: { page, pageSize, total, totalPages },
   onGoToPage,
 }: {
-  page: number;
-  totalPages: number;
-  total: number;
+  envelope: PaginationEnvelope;
   onGoToPage: (page: number) => void;
 }) {
+  const first = (page - 1) * pageSize + 1;
+  const last = Math.min(page * pageSize, total);
+
   return (
     <div className="pagination">
       <p>
-        Page {page} of {totalPages} ({total} total)
+        Entries {first}–{last} of {total} · Page {page} of {totalPages}
       </p>
       <button type="button" disabled={page <= 1} onClick={() => onGoToPage(page - 1)}>
         Previous

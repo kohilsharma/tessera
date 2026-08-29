@@ -170,6 +170,51 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 }
 
 /* ============================================================
+   INDEX ARCHETYPE — filter register, ruled entry register, pagination
+   (see components/indexArchetype.tsx). Established on Stories; Briefs
+   and Search adopt it next (#32), so the corpus ends up scanned in one
+   vocabulary.
+   ============================================================ */
+.index h1 { margin: 0 0 26px; font-size: clamp(1.75rem, 3vw, 2.7rem); font-weight: 700; line-height: 1.05; letter-spacing: -.025em; text-wrap: balance; }
+
+/* The register reads as one band on the bench rather than fields floating on
+   paper: ink edge because a registered band is ruled in ink (the neutral dashed
+   rule is the unregistered-sheet vocabulary the empty state owns, and the two
+   sit adjacent when a filter matches nothing). The pills keep their paper stock,
+   so applied (ink-filled) still reads against it. Bottom padding is short by the
+   pills' own 9px margin. */
+.filter-register { display: flex; flex-wrap: wrap; align-items: center; margin: 0; padding: 15px 16px 6px; border: 1px solid var(--bureau-ink); background: var(--bench-stock); }
+
+/* An entry: the record's name against its ledger of scannable facts. Both
+   columns keep their gutters at every width, so nothing shifts as values
+   change length. */
+.entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 34px; align-items: baseline; }
+/* Ten rules under ten titles would read as noise, and in a register of nothing
+   but links the underline earns nothing — weight and scale already mark the
+   entry's name. It returns on hover and focus, where it means "this one". */
+.entry-title { font-size: 1.1rem; line-height: 1.35; max-width: 60ch; overflow-wrap: anywhere; text-decoration: none; }
+.entry-title:hover, .entry-title:focus-visible { text-decoration: underline; }
+.entry-register { display: flex; flex-wrap: wrap; justify-self: end; margin: 0; row-gap: 12px; }
+.entry-register > div { padding: 0 17px; border-left: 1px solid var(--registration-rule); }
+.entry-register > div:first-child { border-left: 0; }
+.entry-register > div:last-child { padding-right: 0; }
+.entry-register dt { margin: 0 0 5px; color: var(--quiet-ink); font: 500 .66rem/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.entry-register dd { margin: 0; font-size: .82rem; font-weight: 650; }
+
+/* Pagination brings its own top rule, so the register closes on that one rather
+   than ruling twice, 22px apart. Lists without pagination (a Story's Articles)
+   keep their closing rule. */
+.entry-list:has(+ .pagination) > li:last-child { border-bottom: 0; }
+
+@media (max-width: 560px) {
+  /* Stacked, the ledger loses its dividing rules rather than its cells: at this
+     width the cells wrap, and a wrapped left rule would rule against nothing. */
+  .entry { grid-template-columns: minmax(0, 1fr); }
+  .entry-register { justify-self: start; }
+  .entry-register > div, .entry-register > div:last-child { border-left: 0; padding: 0 24px 0 0; }
+}
+
+/* ============================================================
    BUREAU — Evidence Registration Bureau
    ============================================================ */
 .design-bureau {
