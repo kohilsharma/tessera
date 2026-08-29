@@ -5,10 +5,10 @@ import {
   CategoryFilter,
   DateRangeFilter,
   Pagination,
-  RetryableError,
   SortDirectionFilter,
   useListQueryParams,
 } from "../components/listControls";
+import { EmptyState, EntryList, PendingState, RetryableError } from "../components/uiStates";
 
 export default function Stories() {
   const list = useListQueryParams();
@@ -31,7 +31,7 @@ export default function Stories() {
       <h1>Stories</h1>
       <form onSubmit={(e) => e.preventDefault()}>
         <CategoryFilter value={list.category} onChange={(value) => list.updateFilter("category", value)} />{" "}
-        <label>
+        <label className="filter-field">
           Sort by{" "}
           <select
             value={sortField}
@@ -53,7 +53,7 @@ export default function Stories() {
         />
       </form>
 
-      {query.isPending && <p role="status">Loading Stories…</p>}
+      {query.isPending && <PendingState>Loading Stories…</PendingState>}
       {query.isError && (
         <RetryableError
           message={`Could not load Stories: ${(query.error as Error).message}`}
@@ -62,7 +62,7 @@ export default function Stories() {
         />
       )}
       {query.isSuccess && query.data.items.length === 0 && (
-        <div>
+        <EmptyState>
           <p>No Stories match these filters.</p>
           {list.hasFilters ? (
             <button type="button" onClick={list.clearFilters}>
@@ -73,18 +73,18 @@ export default function Stories() {
               The corpus is empty — run <code>npm run seed</code> in <code>backend/</code> to load the demo Stories.
             </p>
           )}
-        </div>
+        </EmptyState>
       )}
       {query.isSuccess && query.data.items.length > 0 && (
         <>
-          <ul>
+          <EntryList>
             {query.data.items.map((story) => (
               <li key={story.id}>
                 <Link to={`/stories/${story.id}`}>{story.title}</Link> — {story.category},{" "}
                 {story.articleCount} article{story.articleCount === 1 ? "" : "s"}
               </li>
             ))}
-          </ul>
+          </EntryList>
           <Pagination
             page={query.data.page}
             totalPages={query.data.totalPages}

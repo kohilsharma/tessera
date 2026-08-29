@@ -25,7 +25,9 @@ export default function AppShell() {
         </nav>
         <IdentityMenu />
       </header>
-      <Outlet />
+      <div className="page-ground">
+        <Outlet />
+      </div>
     </>
   );
 }

@@ -5,10 +5,10 @@ import {
   CategoryFilter,
   DateRangeFilter,
   Pagination,
-  RetryableError,
   SortDirectionFilter,
   useListQueryParams,
 } from "../components/listControls";
+import { EmptyState, EntryList, PendingState, RetryableError } from "../components/uiStates";
 
 // Story 34: the owned-entity list carries the same advanced controls as the
 // corpus lists — filter (category + date range), sort, and pagination.
@@ -37,7 +37,7 @@ export default function Briefs() {
       </p>
       <form onSubmit={(e) => e.preventDefault()}>
         <CategoryFilter value={list.category} onChange={(value) => list.updateFilter("category", value)} />{" "}
-        <label>
+        <label className="filter-field">
           Sort by{" "}
           <select
             value={sortField}
@@ -55,7 +55,7 @@ export default function Briefs() {
         <DateRangeFilter label="Created from" from={list.dateFrom} to={list.dateTo} onChange={list.updateFilter} />
       </form>
 
-      {query.isPending && <p role="status">Loading your Briefs…</p>}
+      {query.isPending && <PendingState>Loading your Briefs…</PendingState>}
       {query.isError && (
         <RetryableError
           message={`Could not load Briefs: ${(query.error as Error).message}`}
@@ -64,7 +64,7 @@ export default function Briefs() {
         />
       )}
       {query.isSuccess && query.data.items.length === 0 && (
-        <div>
+        <EmptyState>
           {list.hasFilters ? (
             <>
               <p>No Briefs match these filters.</p>
@@ -77,18 +77,18 @@ export default function Briefs() {
               You have no Briefs yet. <Link to="/briefs/new">Create one</Link>.
             </p>
           )}
-        </div>
+        </EmptyState>
       )}
       {query.isSuccess && query.data.items.length > 0 && (
         <>
-          <ul>
+          <EntryList>
             {query.data.items.map((brief) => (
               <li key={brief.id}>
                 <Link to={`/briefs/${brief.id}`}>{brief.title}</Link> — {brief.category}, {brief.articleCount}/
                 {brief.articleCapacityLimit} article{brief.articleCapacityLimit === 1 ? "" : "s"}
               </li>
             ))}
-          </ul>
+          </EntryList>
           <Pagination
             page={query.data.page}
             totalPages={query.data.totalPages}

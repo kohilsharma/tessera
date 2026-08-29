@@ -1,27 +1,37 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { getMe, logout } from "../api/client";
+import { PendingState, RetryableError } from "../components/uiStates";
 
 export default function Account() {
   const navigate = useNavigate();
-  const { data, error, isLoading } = useQuery({ queryKey: ["me"], queryFn: getMe });
+  const query = useQuery({ queryKey: ["me"], queryFn: getMe });
 
   function onLogout() {
     logout();
     navigate("/login");
   }
 
-  if (isLoading) return <p role="status">Loading account…</p>;
-  if (error) return <p role="alert">Could not load account: {(error as Error).message}</p>;
+  if (query.isPending) return <PendingState>Loading account…</PendingState>;
+  if (query.isError)
+    return (
+      <RetryableError
+        message={`Could not load account: ${query.error.message}`}
+        onRetry={() => query.refetch()}
+        retrying={query.isFetching}
+      />
+    );
+
+  const me = query.data;
 
   return (
     <main>
       <h1>Account</h1>
       <dl>
         <dt>Email</dt>
-        <dd>{data!.email}</dd>
+        <dd>{me.email}</dd>
         <dt>Role</dt>
-        <dd>{data!.role}</dd>
+        <dd>{me.role}</dd>
       </dl>
       <p>
         <Link to="/dashboard">Go to your dashboard</Link>

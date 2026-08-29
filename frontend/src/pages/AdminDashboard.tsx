@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { getAdminDashboard, USER_ROLES } from "../api/client";
 import DashboardShell from "./DashboardShell";
+import { EmptyState } from "../components/uiStates";
 
 export default function AdminDashboard() {
   const query = useQuery({ queryKey: ["dashboard", "admin"], queryFn: getAdminDashboard });
@@ -27,9 +28,9 @@ export default function AdminDashboard() {
               inspects them here; ingestion starts reading them in Phase 2. */}
           <h2>Ingestion connectors</h2>
           {data.connectors.length === 0 ? (
-            <p>
+            <EmptyState>
               No connectors — run <code>npm run seed</code> in <code>backend/</code>.
-            </p>
+            </EmptyState>
           ) : (
             <table>
               <thead>
@@ -57,9 +58,9 @@ export default function AdminDashboard() {
 
           <h2>Publishers</h2>
           {data.publishers.length === 0 ? (
-            <p>
+            <EmptyState>
               No publishers — run <code>npm run seed</code> in <code>backend/</code>.
-            </p>
+            </EmptyState>
           ) : (
             <table>
               <thead>

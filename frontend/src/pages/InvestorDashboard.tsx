@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { getInvestorDashboard } from "../api/client";
 import DashboardShell from "./DashboardShell";
+import { EmptyState } from "../components/uiStates";
 
 export default function InvestorDashboard() {
   const query = useQuery({ queryKey: ["dashboard", "investor"], queryFn: getInvestorDashboard });
@@ -13,9 +14,9 @@ export default function InvestorDashboard() {
           <h1>Investor dashboard</h1>
           <h2>Sectors</h2>
           {data.sectors.length === 0 ? (
-            <p>
+            <EmptyState>
               No sectors yet — run <code>npm run seed</code> in <code>backend/</code> to load the corpus.
-            </p>
+            </EmptyState>
           ) : (
             <table>
               <thead>

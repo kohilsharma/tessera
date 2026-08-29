@@ -61,9 +61,21 @@ export function useListQueryParams(preserveOnClear: readonly string[] = ["sort"]
   };
 }
 
+// Applied filters read differently from unapplied ones, and not by colour alone:
+// `.filter-field--applied` fills the pill with ink and weights its value, so the
+// distinction survives greyscale. Derived from the value the control already
+// receives, so no page passes anything new.
+//
+// The register also holds two controls that never enter the applied state: sort,
+// which always has a value and never narrows the result set, and Search's term,
+// which is what the results are *of* rather than a filter on them — which is why
+// clearing filters keeps it. Those wear a plain `.filter-field`.
+const filterFieldClass = (applied: boolean) =>
+  applied ? "filter-field filter-field--applied" : "filter-field";
+
 export function CategoryFilter({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   return (
-    <label>
+    <label className={filterFieldClass(Boolean(value))}>
       Category{" "}
       <select value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">All</option>
@@ -77,9 +89,11 @@ export function CategoryFilter({ value, onChange }: { value: string; onChange: (
   );
 }
 
+// Sort shares the register's pill, but never its applied state — see
+// filterFieldClass.
 export function SortDirectionFilter({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   return (
-    <label>
+    <label className="filter-field">
       Direction{" "}
       <select value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="desc">Descending</option>
@@ -104,11 +118,11 @@ export function DateRangeFilter({
 }) {
   return (
     <>
-      <label>
+      <label className={filterFieldClass(Boolean(from))}>
         {label}{" "}
         <input type="date" value={from} onChange={(e) => onChange("dateFrom", e.target.value)} />
       </label>{" "}
-      <label>
+      <label className={filterFieldClass(Boolean(to))}>
         to <input type="date" value={to} onChange={(e) => onChange("dateTo", e.target.value)} />
       </label>
     </>
@@ -127,7 +141,7 @@ export function Pagination({
   onGoToPage: (page: number) => void;
 }) {
   return (
-    <>
+    <div className="pagination">
       <p>
         Page {page} of {totalPages} ({total} total)
       </p>
@@ -136,27 +150,6 @@ export function Pagination({
       </button>{" "}
       <button type="button" disabled={page >= totalPages} onClick={() => onGoToPage(page + 1)}>
         Next
-      </button>
-    </>
-  );
-}
-
-// The error state every data screen shares: say what failed, and offer the one
-// action that can recover it.
-export function RetryableError({
-  message,
-  onRetry,
-  retrying,
-}: {
-  message: string;
-  onRetry: () => void;
-  retrying: boolean;
-}) {
-  return (
-    <div role="alert">
-      <p>{message}</p>
-      <button type="button" onClick={onRetry} disabled={retrying}>
-        {retrying ? "Retrying…" : "Retry"}
       </button>
     </div>
   );

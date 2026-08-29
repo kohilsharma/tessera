@@ -1,13 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { getStory } from "../api/client";
-import { RetryableError } from "../components/listControls";
+import { EmptyState, EntryList, PendingState, RetryableError } from "../components/uiStates";
 
 export default function StoryDetail() {
   const { id } = useParams();
   const query = useQuery({ queryKey: ["story", id], queryFn: () => getStory(id!), enabled: !!id });
 
-  if (query.isPending) return <p role="status">Loading Story…</p>;
+  if (query.isPending) return <PendingState>Loading Story…</PendingState>;
   if (query.isError)
     return (
       <RetryableError
@@ -32,16 +32,16 @@ export default function StoryDetail() {
 
       <h2>Articles</h2>
       {story.articles.length === 0 ? (
-        <p>No Articles yet.</p>
+        <EmptyState>No Articles yet.</EmptyState>
       ) : (
-        <ul>
+        <EntryList>
           {story.articles.map((article) => (
             <li key={article.id}>
               <Link to={`/articles/${article.id}`}>{article.title}</Link> — {article.publisher.name},{" "}
               {new Date(article.publishedAt).toLocaleDateString()}
             </li>
           ))}
-        </ul>
+        </EntryList>
       )}
     </main>
   );

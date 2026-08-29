@@ -1,13 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { getArticle } from "../api/client";
-import { RetryableError } from "../components/listControls";
+import { PendingState, RetryableError } from "../components/uiStates";
 
 export default function ArticleDetail() {
   const { id } = useParams();
   const query = useQuery({ queryKey: ["article", id], queryFn: () => getArticle(id!), enabled: !!id });
 
-  if (query.isPending) return <p role="status">Loading Article…</p>;
+  if (query.isPending) return <PendingState>Loading Article…</PendingState>;
   if (query.isError)
     return (
       <RetryableError

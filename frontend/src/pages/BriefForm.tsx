@@ -9,7 +9,7 @@ import {
   STORY_CATEGORIES,
   type StoryCategory,
 } from "../api/client";
-import { RetryableError } from "../components/listControls";
+import { PendingState, RetryableError } from "../components/uiStates";
 
 type FieldErrors = { title?: string; category?: string; articleCapacityLimit?: string; form?: string };
 
@@ -73,7 +73,7 @@ export default function BriefForm() {
     }
   }
 
-  if (isEdit && existing.isPending) return <p role="status">Loading Brief…</p>;
+  if (isEdit && existing.isPending) return <PendingState>Loading Brief…</PendingState>;
   if (isEdit && existing.isError) {
     return (
       <RetryableError

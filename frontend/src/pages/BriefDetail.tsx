@@ -9,7 +9,7 @@ import {
   getBrief,
   uploadBriefCoverImage,
 } from "../api/client";
-import { RetryableError } from "../components/listControls";
+import { EmptyState, EntryList, ErrorState, PendingState, RetryableError } from "../components/uiStates";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -44,8 +44,8 @@ function CoverImage({ url, cacheKey }: { url: string; cacheKey: string | null })
     // so this is what tells us to re-fetch after an upload.
   }, [url, cacheKey]);
 
-  if (failed) return <p role="alert">Could not load the cover image.</p>;
-  if (!src) return <p role="status">Loading cover image…</p>;
+  if (failed) return <ErrorState>Could not load the cover image.</ErrorState>;
+  if (!src) return <PendingState>Loading cover image…</PendingState>;
   return <img src={src} alt="" width={320} />;
 }
 
@@ -98,7 +98,7 @@ export default function BriefDetail() {
     attach.mutate(articleId);
   }
 
-  if (query.isPending) return <p role="status">Loading Brief…</p>;
+  if (query.isPending) return <PendingState>Loading Brief…</PendingState>;
   if (query.isError)
     return (
       <RetryableError
@@ -129,7 +129,7 @@ export default function BriefDetail() {
         </button>
       </p>
       {remove.isError && (
-        <p role="alert">Could not delete this Brief: {(remove.error as Error).message}</p>
+        <ErrorState>Could not delete this Brief: {(remove.error as Error).message}</ErrorState>
       )}
 
       <p>
@@ -138,16 +138,16 @@ export default function BriefDetail() {
           <input type="file" accept="image/jpeg,image/png,image/webp" onChange={onCoverImageChange} disabled={uploadCover.isPending} />
         </label>
       </p>
-      {uploadCover.isPending && <p role="status">Uploading…</p>}
+      {uploadCover.isPending && <PendingState>Uploading…</PendingState>}
       {uploadCover.isError && (
-        <p role="alert">Could not upload this cover image: {(uploadCover.error as Error).message}</p>
+        <ErrorState>Could not upload this cover image: {(uploadCover.error as Error).message}</ErrorState>
       )}
 
       <h2>Articles</h2>
       {brief.articles.length === 0 ? (
-        <p>No Articles attached yet.</p>
+        <EmptyState>No Articles attached yet.</EmptyState>
       ) : (
-        <ul>
+        <EntryList>
           {brief.articles.map((article) => (
             <li key={article.id}>
               <Link to={`/articles/${article.id}`}>{article.title}</Link> — {article.publisher.name}{" "}
@@ -156,9 +156,11 @@ export default function BriefDetail() {
               </button>
             </li>
           ))}
-        </ul>
+        </EntryList>
       )}
-      {detach.isError && <p role="alert">Could not remove this Article: {(detach.error as Error).message}</p>}
+      {detach.isError && (
+        <ErrorState>Could not remove this Article: {(detach.error as Error).message}</ErrorState>
+      )}
 
       <h3>Attach an Article</h3>
       <p>

@@ -1,23 +1,28 @@
 import { useQuery } from "@tanstack/react-query";
 import { getHealth } from "../api/client";
+import { PendingState, RetryableError } from "../components/uiStates";
 
 export default function HealthStatus() {
-  const { data, error, isLoading } = useQuery({
-    queryKey: ["health"],
-    queryFn: getHealth,
-  });
+  const query = useQuery({ queryKey: ["health"], queryFn: getHealth });
 
-  if (isLoading) return <p role="status">Checking system status…</p>;
-  if (error) return <p role="alert">System status unavailable: {(error as Error).message}</p>;
+  if (query.isPending) return <PendingState>Checking system status…</PendingState>;
+  if (query.isError)
+    return (
+      <RetryableError
+        message={`System status unavailable: ${query.error.message}`}
+        onRetry={() => query.refetch()}
+        retrying={query.isFetching}
+      />
+    );
 
   return (
     <dl>
       <dt>API status</dt>
-      <dd>{data!.status}</dd>
+      <dd>{query.data.status}</dd>
       <dt>Database</dt>
-      <dd>{data!.db}</dd>
+      <dd>{query.data.db}</dd>
       <dt>Checked at</dt>
-      <dd>{data!.timestamp}</dd>
+      <dd>{query.data.timestamp}</dd>
     </dl>
   );
 }

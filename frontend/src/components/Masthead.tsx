@@ -9,7 +9,9 @@ export default function Masthead() {
       <header className="site-header site-header--masthead">
         <Wordmark to="/login" />
       </header>
-      <Outlet />
+      <div className="page-ground">
+        <Outlet />
+      </div>
     </>
   );
 }
