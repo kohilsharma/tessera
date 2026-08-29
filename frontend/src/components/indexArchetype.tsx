@@ -70,9 +70,26 @@ export function EntryRegister({
   );
 }
 
+// The ledger a register row carries: the prototype's pattern — monospace
+// uppercase term over a weighted value — so provenance reads as provenance and
+// not as prose. One definition, because the Dashboard archetype's rows carry the
+// same ledger in the same geometry (#36); it lives here because `.entry-register`
+// is this archetype's own CSS.
+export function EntryLedger({ meta }: { meta: { term: string; value: ReactNode }[] }) {
+  return (
+    <dl className="entry-register">
+      {meta.map(({ term, value }) => (
+        <div key={term}>
+          <dt>{term}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 // One entry in the register: the record's name, and the facts you scan a corpus
-// by. `meta` is the prototype's ledger pattern — monospace uppercase term over a
-// weighted value — so provenance reads as provenance and not as prose.
+// by.
 //
 // `cover` is the plate a Brief's cover image sits on: passing it draws the plate,
 // omitting it is a record type that has no cover (a Story, a search result). The
@@ -101,14 +118,7 @@ export function Entry({
       <Link className="entry-title" to={to}>
         {title}
       </Link>
-      <dl className="entry-register">
-        {meta.map(({ term, value }) => (
-          <div key={term}>
-            <dt>{term}</dt>
-            <dd>{value}</dd>
-          </div>
-        ))}
-      </dl>
+      <EntryLedger meta={meta} />
       {action && <div className="entry-action">{action}</div>}
     </li>
   );

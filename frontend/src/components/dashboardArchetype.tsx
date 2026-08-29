@@ -1,19 +1,22 @@
 import { useId, type CSSProperties, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import type { UserRole } from "../api/client";
+import { EntryLedger } from "./indexArchetype";
 
 // The Dashboard archetype: a role-titled surface over one or more registers
 // (#28). Shared here so the three roles speak one vocabulary — but only the
 // vocabulary: ADR-0004 requires three genuinely distinct surfaces, so what each
 // role puts in its registers, and which shape it puts it in, stays the page's
-// own. The role's accent ink and the register shapes are what keep them
-// distinguishable; the head band and the rules are what keep them related.
+// own. What each register holds and the shape it holds it in are what keep the
+// three distinguishable; the head band and the rules are what keep them related.
 //
 // The four UI states stay the page's own (uiStates.tsx), as on every other
 // archetype: a dashboard picks its state before it has data to register.
 
-// `role` selects the surface's accent ink — one per role, and never the only
-// statement of whose surface this is: `folio` says it in words directly above
-// the title.
+// `role` is the surface's own class hook, and picks its edge ink where the design
+// gives that role one (styles.css) — never the only statement of whose surface
+// this is: `folio` says it in words directly above the title. Typed from the
+// API's role vocabulary, so a fourth role needs no edit here.
 export function DashboardPage({
   role,
   folio,
@@ -21,7 +24,7 @@ export function DashboardPage({
   dek,
   children,
 }: {
-  role: "student" | "investor" | "admin";
+  role: UserRole;
   folio: string;
   title: string;
   dek?: string;
@@ -111,14 +114,7 @@ export function RegisterRow({
           </div>
         )}
       </div>
-      <dl className="entry-register">
-        {meta.map(({ term, value }) => (
-          <div key={term}>
-            <dt>{term}</dt>
-            <dd>{value}</dd>
-          </div>
-        ))}
-      </dl>
+      <EntryLedger meta={meta} />
     </li>
   );
 }

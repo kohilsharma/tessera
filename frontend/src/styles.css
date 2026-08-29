@@ -527,21 +527,23 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    and shapes: ADR-0004 requires three distinct surfaces, so this is a
    vocabulary they share, not a template they collapse into.
    ============================================================ */
-/* One accent ink per role, set here and read by the head band and the measure
-   bars — so a role's identity is one token rather than a colour restated per
-   rule. Never the only statement of whose surface this is: .dash-folio names the
-   role in words directly above the title. Student Context green is DESIGN.md's
-   educational ink; the Investor rollup takes Proof Blue, the source ink read
-   here as volume; the operator console takes Registered Overlap, the ink the
-   design already spends on registration itself. */
-.dashboard { --role-ink: var(--proof-blue); }
+/* The surface's own edge ink. Student Context green on the Student desk, which
+   is the one thing DESIGN.md licenses it for ("isolated to educational
+   framing"); Bureau Ink everywhere else, because a *user* role is not one of the
+   things the Registered Color Rule lets colour identify (a source role, claim
+   type, selection, validation state) — and #28's story 14 requires an ink to
+   mean the same thing on every page, which Proof Blue (a source layer, and the
+   pending state's edge) and Registered Overlap (agreement and validated
+   registration) already do. So the three surfaces are told apart by what they
+   register and how — plates, coverage bars, collection rows — and the role is
+   stated in words by .dash-folio, not by a hue. */
+.dashboard { --role-ink: var(--bureau-ink); }
 .dashboard--student { --role-ink: var(--student-context); }
-.dashboard--admin { --role-ink: var(--registered-overlap); }
 
-/* The surface opens on its role's edge — the one place the accent is spent
-   structurally, at the weight the record mast gives a source edge. */
+/* The surface opens on its own edge, at a weight that reads as a registered edge
+   rather than one more hairline rule. */
 .dash-head { border-top: 5px solid var(--role-ink); padding-top: 18px; }
-.dash-folio { margin: 0 0 11px; color: var(--role-ink); font: 500 .66rem ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .08em; }
+.dash-folio { margin: 0 0 11px; color: var(--quiet-ink); font: 500 .66rem ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .08em; }
 .dash-dek { margin: 15px 0 0; max-width: 60ch; color: var(--quiet-ink); font-size: 1.02rem; line-height: 1.55; }
 
 /* A register: its heading and its own folio on one rule — the rule a record's
@@ -567,7 +569,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    is the one value here that can outrun its column. */
 .dash-entry-note { margin: 7px 0 0; color: var(--quiet-ink); font: 500 .74rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
 /* The measure: a rule as long as the value stated beside it, on the bench, in
-   the role's ink. It restates the count and says nothing the count does not —
+   the surface's ink. It restates the count and says nothing the count does not —
    DESIGN.md's Redundant Signal Rule, and no claim of certainty the data can't
    support. */
 .dash-measure { max-width: 260px; height: 6px; margin-top: 11px; background: var(--bench-stock); }

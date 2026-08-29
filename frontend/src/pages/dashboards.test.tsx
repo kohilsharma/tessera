@@ -96,15 +96,16 @@ describe("Admin dashboard", () => {
 });
 
 describe("Role dashboard routing", () => {
-  it("refuses a dashboard that is not the caller's, in the error treatment", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      jsonResponse({ id: "u1", email: "student@tessera.local", role: "student" }),
-    );
+  // Both article paths: the refusal names the caller's role, and "a investor"
+  // would be the first thing a reader notices about the message.
+  it.each([
+    ["student", "Your account is a student, so that dashboard is not yours."],
+    ["investor", "Your account is an investor, so that dashboard is not yours."],
+  ])("refuses a dashboard that is not the caller's, in the error treatment (%s)", async (role, message) => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ id: "u1", email: `${role}@tessera.local`, role }));
 
     renderWithProviders(<RoleDashboard />, { route: "/dashboard/admin", path: "/dashboard/:role" });
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Your account is a student, so that dashboard is not yours.",
-    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
   });
 });
