@@ -182,9 +182,17 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    Briefs and Search (#32), so the corpus is scanned in one vocabulary.
    ============================================================ */
 /* The headline scale a page-level title takes outside the record mast's display —
-   an index's, a form's (#35), and a dashboard's (#36) are the same title in
-   three archetypes. */
-.index h1, .form-page h1, .dashboard h1 { margin: 0; font-size: clamp(1.75rem, 3vw, 2.7rem); font-weight: 700; line-height: 1.05; letter-spacing: -.025em; text-wrap: balance; }
+   an index's, a form's (#35), a dashboard's (#36), and a stated page's (#37) are
+   the same title in four archetypes. */
+.index h1, .form-page h1, .dashboard h1, .stated-page h1 { margin: 0; font-size: clamp(1.75rem, 3vw, 2.7rem); font-weight: 700; line-height: 1.05; letter-spacing: -.025em; text-wrap: balance; }
+
+/* A stated page: a title over a register of facts, with nothing to filter, no
+   record to mast, and nothing to fill in — Account and the status page (#37).
+   Not a fifth archetype: it borrows the form's one-person measure and the record
+   page's note register (.record-note) and action band (.record-actions), which
+   is all a page of two facts needs. */
+.stated-page { max-width: 700px; }
+.stated-page .record-note { margin-top: 26px; }
 
 /* The title and the index's one action share a baseline band, and the band owns
    the space below it — the title and the action can't drift apart by editing one
@@ -225,7 +233,13 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .entry-register > div:first-child { border-left: 0; }
 .entry-register > div:last-child { padding-right: 0; }
 .entry-register dt { margin: 0 0 5px; color: var(--quiet-ink); font: 500 .66rem/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
-.entry-register dd { margin: 0; font-size: .82rem; font-weight: 650; }
+/* A value wraps inside its cell rather than setting the cell's width from its own
+   length: an unbounded cell (a search result's Story title, a Publisher's domain)
+   takes the row off the entry's name, and two rows whose longest value differs
+   wrap their ledgers into different shapes. Capped for every register — the
+   Dashboard's rows carried this cap alone until the sweep found the same fault on
+   Search (#37). */
+.entry-register dd { margin: 0; max-width: 32ch; font-size: .82rem; font-weight: 650; overflow-wrap: anywhere; }
 
 /* The cover plate. Always drawn on a Brief entry, so the register keeps one left
    edge whether or not an image landed — and one plate treatment, not two: a
@@ -574,9 +588,6 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    support. */
 .dash-measure { max-width: 260px; height: 6px; margin-top: 11px; background: var(--bench-stock); }
 .dash-measure i { display: block; height: 100%; width: calc(var(--share) * 100%); background: var(--role-ink); }
-/* A domain is a value of fixed identity too, and the register's cells stay
-   narrow enough that the short cells beside them keep their column. */
-.dash-register .entry-register dd { max-width: 32ch; overflow-wrap: anywhere; }
 
 /* Standing totals as plates rather than rows: the ledger's term over its number
    at the scale a total earns. Bench stock and neutral rules — a count is not a

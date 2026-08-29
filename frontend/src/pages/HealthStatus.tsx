@@ -15,14 +15,28 @@ export default function HealthStatus() {
       />
     );
 
+  // The same stated page as Account (#37): a title over a register of facts. It
+  // had no heading at all before the sweep, which left the one route a
+  // signed-out visitor can reach as an unlabelled list of values.
   return (
-    <dl>
-      <dt>API status</dt>
-      <dd>{query.data.status}</dd>
-      <dt>Database</dt>
-      <dd>{query.data.db}</dd>
-      <dt>Checked at</dt>
-      <dd>{query.data.timestamp}</dd>
-    </dl>
+    <main className="stated-page">
+      <h1>System status</h1>
+      <dl className="record-note">
+        <div>
+          <dt>API status</dt>
+          <dd>{query.data.status}</dd>
+        </div>
+        <div>
+          <dt>Database</dt>
+          <dd>{query.data.db}</dd>
+        </div>
+        <div>
+          <dt>Checked at</dt>
+          <dd>
+            <time dateTime={query.data.timestamp}>{query.data.timestamp}</time>
+          </dd>
+        </div>
+      </dl>
+    </main>
   );
 }
