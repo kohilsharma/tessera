@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { getStory } from "../api/client";
-import { Entry } from "../components/indexArchetype";
+import { ArticleEntry } from "../components/indexArchetype";
 import { RecordMasthead, RecordSection } from "../components/recordArchetype";
 import { EmptyState, EntryList, PendingState, RetryableError } from "../components/uiStates";
 
@@ -65,22 +65,7 @@ export default function StoryDetail() {
           // No pagination here — a Story's Articles arrive whole.
           <EntryList>
             {story.articles.map((article) => (
-              <Entry
-                key={article.id}
-                to={`/articles/${article.id}`}
-                title={article.title}
-                meta={[
-                  { term: "Publisher", value: article.publisher.name },
-                  {
-                    term: "Published",
-                    value: (
-                      <time dateTime={article.publishedAt}>
-                        {new Date(article.publishedAt).toLocaleDateString()}
-                      </time>
-                    ),
-                  },
-                ]}
-              />
+              <ArticleEntry key={article.id} article={article} />
             ))}
           </EntryList>
         )}

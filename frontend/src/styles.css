@@ -31,7 +31,11 @@ html { scroll-behavior: smooth; overflow-x: clip; }
 body { margin: 0; min-width: 320px; min-height: 100vh; overflow-x: clip; }
 button, a { font: inherit; }
 button { color: inherit; }
-button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px solid var(--focus-amber); outline-offset: 3px; }
+/* DESIGN.md: a three-pixel Focus Amber outline outside *every* interactive
+   control — fields included, which the browser's own ring would otherwise
+   handle in its own voice (and did before #34). */
+button:focus-visible, a:focus-visible, summary:focus-visible,
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid var(--focus-amber); outline-offset: 3px; }
 
 /* ============================================================
    APPLICATION SHELL — chrome shared by every live page, applied at
@@ -158,10 +162,13 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 .pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 22px 0 0; padding-top: 15px; border-top: 1px solid var(--registration-rule); }
 .pagination p { margin: 0 auto 0 0; color: var(--quiet-ink); font: 500 .68rem ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
 
-/* One button treatment for the actions the states and controls offer. */
-.state-empty button, .state-error button, .pagination button { border: 1px solid var(--bureau-ink); background: var(--stock-paper); color: var(--bureau-ink); padding: 9px 15px; font-size: .78rem; font-weight: 650; cursor: pointer; transition: color 140ms ease, background-color 140ms ease; }
-.state-empty button:hover:not(:disabled), .state-error button:hover:not(:disabled), .pagination button:hover:not(:disabled) { background: var(--bureau-ink); color: var(--stock-paper); }
-.state-empty button:disabled, .state-error button:disabled, .pagination button:disabled { border-color: var(--registration-rule); background: var(--bench-stock); color: var(--quiet-ink); cursor: default; }
+/* One button treatment for every action the states, controls, and records offer
+   that is not the page's one command (.index-action / .record-command): ruled
+   paper field, ink fill on hover, neutral stock and no implied interactivity when
+   disabled. Listed in one :is() so a new consumer is one word, not four rules. */
+:is(.state-empty, .state-error, .pagination, .record-actions, .entry-action, .record-attach) button { border: 1px solid var(--bureau-ink); background: var(--stock-paper); color: var(--bureau-ink); padding: 9px 15px; font-size: .78rem; font-weight: 650; cursor: pointer; transition: color 140ms ease, background-color 140ms ease; }
+:is(.state-empty, .state-error, .pagination, .record-actions, .entry-action, .record-attach) button:hover:not(:disabled) { background: var(--bureau-ink); color: var(--stock-paper); }
+:is(.state-empty, .state-error, .pagination, .record-actions, .entry-action, .record-attach) button:disabled { border-color: var(--registration-rule); background: var(--bench-stock); color: var(--quiet-ink); cursor: default; }
 
 @media (max-width: 560px) {
   .page-ground { padding: 26px 18px 60px; }
@@ -184,10 +191,12 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
    (.filter-field--applied), and the page's one command is not a selection. */
 .index-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px 24px; margin-bottom: 26px; }
 /* margin-right leaves the 5px the offset prints into, so the command's registered
-   block ends on the same edge as the rules below it. */
-.index-action { border: 1px solid var(--bureau-ink); background: var(--stock-paper); color: var(--bureau-ink); padding: 11px 18px; margin-right: 5px; font-size: .78rem; font-weight: 700; text-decoration: none; box-shadow: 5px 5px 0 var(--proof-magenta); transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease, transform 140ms ease; }
-.index-action:hover { background: var(--proof-blue); color: var(--stock-paper); }
-.index-action:active { transform: translate(3px, 3px); box-shadow: 2px 2px 0 var(--proof-magenta); }
+   block ends on the same edge as the rules below it. .record-command is the same
+   treatment on a record page (#34) — one command button, two vocabularies, not
+   two buttons that drift apart. */
+.index-action, .record-command { border: 1px solid var(--bureau-ink); background: var(--stock-paper); color: var(--bureau-ink); padding: 11px 18px; margin-right: 5px; font-size: .78rem; font-weight: 700; text-decoration: none; box-shadow: 5px 5px 0 var(--proof-magenta); transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease, transform 140ms ease; }
+.index-action:hover, .record-command:hover { background: var(--proof-blue); color: var(--stock-paper); }
+.index-action:active, .record-command:active { transform: translate(3px, 3px); box-shadow: 2px 2px 0 var(--proof-magenta); }
 
 /* The register reads as one band on the bench rather than fields floating on
    paper: ink edge because a registered band is ruled in ink (the neutral dashed
@@ -221,6 +230,11 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 .entry-cover { width: 78px; aspect-ratio: 3 / 2; border: 1px solid var(--registration-rule); background: var(--bench-stock); overflow: hidden; }
 .entry-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
+/* An entry's own action (detaching an Article from a Brief, #34) takes a third
+   ruled column at the end of the row, so the register's title and ledger keep
+   the geometry they have everywhere else. */
+.entry:has(.entry-action) { grid-template-columns: minmax(0, 1fr) auto auto; }
+
 /* Pagination brings its own top rule, so the register closes on that one rather
    than ruling twice, 22px apart. Lists without pagination (a Story's Articles)
    keep their closing rule. */
@@ -230,6 +244,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
   /* Stacked, the ledger loses its dividing rules rather than its cells: at this
      width the cells wrap, and a wrapped left rule would rule against nothing. */
   .entry { grid-template-columns: minmax(0, 1fr); }
+  .entry:has(.entry-action) { grid-template-columns: minmax(0, 1fr); }
   .entry-register { justify-self: start; }
   .entry-register > div, .entry-register > div:last-child { border-left: 0; padding: 0 24px 0 0; }
   /* The plate stays beside the title and the ledger drops under both, rather
@@ -242,7 +257,8 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 /* ============================================================
    RECORD ARCHETYPE — masthead over provenance ledger over body
    (see components/recordArchetype.tsx). Established on Story and
-   Article detail (#33), adopted by Brief detail next (#34).
+   Article detail (#33); Brief detail adopts it as the owned
+   registration (#34) — same sheet, bench stock instead of ink.
    ============================================================ */
 /* The mast is a registered dark sheet on the bench: the record's identity is
    the one place in the app that inverts, which is what makes a record read as
@@ -250,6 +266,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
    existing tokens rather than invented — no colour is added to the palette to
    put text on ink. */
 .record-mast {
+  --mast-stock: var(--bureau-ink);
   --mast-quiet: color-mix(in srgb, var(--stock-paper) 72%, var(--bureau-ink));
   --mast-rule: color-mix(in srgb, var(--stock-paper) 40%, var(--bureau-ink));
   position: relative; overflow: hidden;
@@ -275,6 +292,11 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
    the prototype's mast uses — the mast is a sheet with its own margins inside
    the ground, not a block flush with the sections below it. */
 .record-mast-body { position: relative; z-index: 1; padding: 26px 4vw 34px; }
+/* A record that carries an image gets a second column for it, and only then:
+   Story and Article keep the single column rather than a cover-shaped hole. The
+   identity column is minmax(0, 1fr) so a long unbroken title shrinks it instead
+   of pushing the plate off the sheet. */
+.record-mast-body:has(.record-cover) { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 24px 40px; align-items: start; }
 
 /* Kind and exit, in that order, on one left band: a record always states what
    it is and always offers the way back out. Left, not split to both edges —
@@ -288,11 +310,16 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 .record-mast h1 { margin: 0; font-size: clamp(1.95rem, 4.5vw, 3.9rem); font-weight: 800; line-height: .96; letter-spacing: -.035em; max-width: 22ch; text-wrap: balance; overflow-wrap: anywhere; }
 .record-dek { margin: 26px 0 0; max-width: 60ch; color: var(--mast-quiet); font-size: 1.05rem; line-height: 1.55; }
 
-/* The ledger spans the sheet rather than sitting inside its inset, and its
-   rules are the 1px gap the sheet shows through — so cells rule against each
-   other at any wrap, with no cell ruling against nothing. */
-.record-ledger { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 185px), 1fr)); gap: 1px; margin: 0; background: var(--mast-rule); border-top: 1px solid var(--mast-rule); }
-.record-ledger > div { background: var(--bureau-ink); padding: 15px 4vw 16px; }
+/* The ledger spans the sheet rather than sitting inside its inset. Its rules are
+   hairlines each cell draws onto the 1px gap above and to the left of it — a
+   zero-blur 1px shadow is a rule here, not depth (DESIGN.md's Structural Shadow
+   Rule governs elevation, and nothing here lifts). Drawn per cell so they rule
+   against each other at any wrap with no cell ruling against nothing, and so a
+   ledger whose cell count doesn't fill its last row leaves the sheet's own stock
+   there rather than a block of rule colour — which is what a container-background
+   gap did, visible on Article detail at 560px before #34. */
+.record-ledger { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 185px), 1fr)); gap: 1px; margin: 0; background: var(--mast-stock); border-top: 1px solid var(--mast-rule); }
+.record-ledger > div { background: var(--mast-stock); box-shadow: -1px 0 0 var(--mast-rule), 0 -1px 0 var(--mast-rule); padding: 15px 4vw 16px; }
 .record-ledger dt { margin: 0 0 6px; color: var(--mast-quiet); font: 500 .66rem/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
 .record-ledger dd { margin: 0; font-size: .82rem; font-weight: 650; overflow-wrap: anywhere; }
 
@@ -305,8 +332,10 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 .record-prose { max-width: 68ch; margin: 22px 0 0; font-size: 1rem; line-height: 1.65; }
 /* The heading's rule opens the register: the entry list's own top rule would be
    a second rule 22px under the first, the same double-ruling the index avoids
-   between its register and its pagination. */
+   between its register and its pagination. Unless prose stands between them, in
+   which case the register has to open its own edge (#34's Brief attachments). */
 .record-section .entry-list { margin-top: 0; border-top: 0; }
+.record-section .record-prose + .entry-list { margin-top: 22px; border-top: 1px solid var(--bureau-ink); }
 
 /* The rights note is a register of stated facts, not a small-print line: ruled
    rows, term in the measurement face, value in the reading face. */
@@ -316,11 +345,67 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 .record-note dd { margin: 0; max-width: 68ch; font-size: .9rem; line-height: 1.6; }
 .record-note a { color: var(--bureau-ink); font-weight: 700; text-underline-offset: 3px; overflow-wrap: anywhere; }
 
+/* ---- The owned registration (#34) ----------------------------------------
+   A Brief is the reader's own artefact; a Story and an Article are the corpus'.
+   So the owned mast is the same sheet on different stock: the bench it is worked
+   on rather than the ink the corpus is printed in, ruled in ink because a
+   registered band on the bench is ruled in ink (the index's filter register
+   already reads that way). Distinct at a glance, related by structure — and
+   never colour alone: the ledger states the owner in words. */
+.record-mast--owned {
+  --mast-stock: var(--bench-stock);
+  --mast-quiet: var(--quiet-ink);
+  --mast-rule: var(--bureau-ink);
+  background: var(--bench-stock); color: var(--bureau-ink);
+}
+/* The source inks stay — a Brief is assembled from registered layers too — but
+   far lighter: the mixes that read as a faint misregistration on the ink sheet
+   read as poster stripes on pale stock, and DESIGN.md forbids spending a source
+   ink on decoration. This also keeps Quiet Ink's contrast over the bands. */
+.record-mast--owned::before { opacity: .28; }
+.record-mast--owned .record-return:hover, .record-mast--owned .record-return:focus-visible { color: var(--bureau-ink); }
+
+/* The cover plate: the owner's own image, registered as a sheet beside the
+   identity. Always drawn, at a fixed 3:2 — an absent cover, one in flight, and
+   one that failed all leave the same box, so the mast never resizes under the
+   reader. Its states are the shared treatments, which is what the bench stock
+   buys: they are designed for paper, and the corpus' ink mast has nowhere to put
+   them. */
+.record-cover { min-width: 0; }
+.record-plate { border: 1px solid var(--bureau-ink); background: var(--stock-paper); aspect-ratio: 3 / 2; overflow: hidden; }
+.record-plate img { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* The control names itself in the measurement face, like a ledger term, and the
+   native file input stays native (#28: no custom widgets). */
+.record-cover-control { display: block; margin-top: 14px; color: var(--quiet-ink); font: 500 .66rem/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.record-cover-control input { display: block; max-width: 100%; margin-top: 8px; font-size: .76rem; }
+/* In a 260px column the shared state blocks would spend most of it on padding. */
+.record-cover :is(.state-pending, .state-error) { margin: 14px 0 0; padding: 13px 14px; font-size: .84rem; }
+
+/* What can be done to the record itself, on a band under it. */
+.record-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 13px 16px; margin-top: 28px; }
+
+/* The attach control: one field and its command, ruled in the record's own
+   vocabulary. The Form archetype (#35) owns the shared field treatment — this
+   stays the minimum that reads as designed rather than as a bare input. */
+.record-attach { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 16px; margin: 22px 0 0; }
+.record-attach label { display: flex; flex-direction: column; gap: 7px; color: var(--quiet-ink); font: 500 .66rem/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.record-attach input { width: min(38ch, 100%); border: 1px solid var(--bureau-ink); background: var(--stock-paper); padding: 9px 11px; color: var(--bureau-ink); font: 400 .88rem Arial, Helvetica, sans-serif; }
+.record-attach input:disabled { border-color: var(--registration-rule); background: var(--bench-stock); color: var(--quiet-ink); }
+/* The failure is stated in the error treatment below; the field marks itself as
+   the one that failed. Magenta is the app's error register (.state-error), which
+   DESIGN.md's Registered Color Rule licenses as a validation state — and the
+   heavier rule carries it too, so it survives greyscale. */
+.record-attach input[aria-invalid="true"] { border-width: 2px; border-color: var(--proof-magenta); }
+
 @media (max-width: 560px) {
   .record-mast-body { padding: 22px 20px 26px; }
   .record-mast h1 { font-size: 2.1rem; max-width: none; }
   .record-ledger > div { padding: 14px 20px; }
   .record-note > div { grid-template-columns: minmax(0, 1fr); }
+  /* The plate drops under the identity rather than squeezing it: 260px beside a
+     title has nothing left to give at this width. */
+  .record-mast-body:has(.record-cover) { grid-template-columns: minmax(0, 1fr); }
+  .record-plate { max-width: 320px; }
 }
 
 /* ============================================================

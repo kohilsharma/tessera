@@ -3,8 +3,8 @@ import { Link } from "react-router-dom";
 
 // The Record archetype: a masthead (folio, way back, title, dek) over a ledger
 // of provenance facts, over the record's body. Shared here rather than written
-// into Story detail, because Article detail wants the same one now and Brief
-// detail wants it next (#34) — one record vocabulary, not three.
+// into Story detail, because Article detail wants the same one and Brief detail
+// wants it too (#34) — one record vocabulary, not three.
 //
 // No page-root component: a record's root is a plain <main>, and a wrapper that
 // added nothing but a class no stylesheet reads would be one.
@@ -20,30 +20,49 @@ import { Link } from "react-router-dom";
 // `ledger` is the prototype's ledger pattern — monospace uppercase term over a
 // weighted value, hard rules between cells — carrying the facts about the
 // record, kept out of the body, which carries the record itself.
+//
+// `owned` registers the record as the reader's own artefact rather than a corpus
+// record (#34): a Brief is yours, a Story and an Article are the corpus'. The
+// difference is the mast's stock — the corpus record is the ink sheet, the owned
+// artefact is a sheet on the bench — and it is never the only statement of it:
+// the caller also says whose it is in the ledger.
+//
+// `plate` is the slot beside the identity for an image the record carries — a
+// Brief's cover. Omitting it leaves the mast one column, which is why Story and
+// Article need no cover-shaped hole in their layout.
 export function RecordMasthead({
   folio,
   back,
   title,
   dek,
+  plate,
+  owned = false,
   ledger,
 }: {
   folio: string;
   back: { to: string; label: string };
   title: string;
   dek?: ReactNode;
+  plate?: ReactNode;
+  owned?: boolean;
   ledger: { term: string; value: ReactNode }[];
 }) {
   return (
-    <section className="record-mast">
+    <section className={owned ? "record-mast record-mast--owned" : "record-mast"}>
       <div className="record-mast-body">
-        <div className="record-mast-head">
-          <p className="record-folio">{folio}</p>
-          <Link className="record-return" to={back.to}>
-            {back.label}
-          </Link>
+        {/* Identity and plate are the mast's two columns, so this wrapper is the
+            first of them — not a class the stylesheet reads. */}
+        <div>
+          <div className="record-mast-head">
+            <p className="record-folio">{folio}</p>
+            <Link className="record-return" to={back.to}>
+              {back.label}
+            </Link>
+          </div>
+          <h1>{title}</h1>
+          {dek && <p className="record-dek">{dek}</p>}
         </div>
-        <h1>{title}</h1>
-        {dek && <p className="record-dek">{dek}</p>}
+        {plate}
       </div>
       <dl className="record-ledger">
         {ledger.map(({ term, value }) => (

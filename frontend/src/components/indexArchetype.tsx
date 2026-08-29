@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import type { ArticleSummary } from "../api/client";
 import { Pagination, type PaginationEnvelope } from "./listControls";
 import { EntryList } from "./uiStates";
 
@@ -77,16 +78,22 @@ export function EntryRegister({
 // omitting it is a record type that has no cover (a Story, a search result). The
 // node inside may render nothing — a Brief with no image, or one still fetching —
 // and the row still holds its shape, which is the point of the plate.
+//
+// `action` is what can be done to this entry's membership of the list it is in —
+// detaching an Article from a Brief (#34). Not what can be done to the record:
+// the record's own actions live on its record page.
 export function Entry({
   to,
   title,
   cover,
   meta,
+  action,
 }: {
   to: string;
   title: string;
   cover?: ReactNode;
   meta: { term: string; value: ReactNode }[];
+  action?: ReactNode;
 }) {
   return (
     <li className="entry">
@@ -102,6 +109,29 @@ export function Entry({
           </div>
         ))}
       </dl>
+      {action && <div className="entry-action">{action}</div>}
     </li>
+  );
+}
+
+// A corpus Article listed under the record that holds it — a Story's coverage
+// (#33) or a Brief's attachments (#34). One definition because it is one row in
+// both: the same provenance, in the same order, linking to the same record page.
+// A search result is not this row — it carries its Story and its score, and
+// belongs to the index that ranked it.
+export function ArticleEntry({ article, action }: { article: ArticleSummary; action?: ReactNode }) {
+  return (
+    <Entry
+      to={`/articles/${article.id}`}
+      title={article.title}
+      meta={[
+        { term: "Publisher", value: article.publisher.name },
+        {
+          term: "Published",
+          value: <time dateTime={article.publishedAt}>{new Date(article.publishedAt).toLocaleDateString()}</time>,
+        },
+      ]}
+      action={action}
+    />
   );
 }
