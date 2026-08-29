@@ -4,6 +4,7 @@ import { IntelligenceBrief } from "../src/entities/IntelligenceBrief";
 import { User, USER_ROLES } from "../src/entities/User";
 import { Story } from "../src/entities/Story";
 import { BriefArticle } from "../src/entities/BriefArticle";
+import { IngestionConnector } from "../src/entities/IngestionConnector";
 import { LocalDiskFileStorageProvider } from "../src/storage/LocalDiskFileStorageProvider";
 import { seedAll } from "../src/seed";
 
@@ -40,6 +41,12 @@ describe("npm run seed", () => {
     expect(count).toBe(0);
   });
 
+  it("seeds the IngestionConnectors the Admin dashboard inspects", async () => {
+    const connectors = await AppDataSource.getRepository(IngestionConnector).find();
+    expect(connectors.length).toBeGreaterThan(0);
+    expect(connectors.map((c) => c.kind)).toContain("gdelt_gkg");
+  });
+
   it("creates one owned Brief complete on every mandated field, media included", async () => {
     const brief = await AppDataSource.getRepository(IntelligenceBrief).findOneOrFail({
       where: { title: SEED_BRIEF_TITLE },
@@ -70,6 +77,7 @@ describe("npm run seed", () => {
 
     expect(await repo.count()).toBe(1);
     expect(await AppDataSource.getRepository(User).count()).toBe(USER_ROLES.length);
+    expect(await AppDataSource.getRepository(IngestionConnector).count()).toBe(3);
     // A second cover image would orphan the first file on disk and churn the key
     // the frontend just cached, so the backfill must not fire on a Brief that
     // already has one.

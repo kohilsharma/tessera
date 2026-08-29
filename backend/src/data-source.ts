@@ -6,12 +6,14 @@ import { CreateUsers1755741000000 } from "./migrations/1755741000000-CreateUsers
 import { CreateCorpus1755742000000 } from "./migrations/1755742000000-CreateCorpus";
 import { CreateBriefs1755743000000 } from "./migrations/1755743000000-CreateBriefs";
 import { AddSearchVectors1755744000000 } from "./migrations/1755744000000-AddSearchVectors";
+import { CreateIngestionConnectors1755745000000 } from "./migrations/1755745000000-CreateIngestionConnectors";
 import { User } from "./entities/User";
 import { Publisher } from "./entities/Publisher";
 import { Story } from "./entities/Story";
 import { Article } from "./entities/Article";
 import { IntelligenceBrief } from "./entities/IntelligenceBrief";
 import { BriefArticle } from "./entities/BriefArticle";
+import { IngestionConnector } from "./entities/IngestionConnector";
 
 const url = process.env.DATABASE_URL;
 
@@ -29,13 +31,14 @@ export const AppDataSource = new DataSource({
   // require()/import() on the file path, which can't parse raw .ts outside a
   // ts-node/tsx-registered process (e.g. inside Vitest workers). Add entity
   // classes to the array above the same way.
-  entities: [User, Publisher, Story, Article, IntelligenceBrief, BriefArticle],
+  entities: [User, Publisher, Story, Article, IntelligenceBrief, BriefArticle, IngestionConnector],
   migrations: [
     InitPgvector1755740000000,
     CreateUsers1755741000000,
     CreateCorpus1755742000000,
     CreateBriefs1755743000000,
     AddSearchVectors1755744000000,
+    CreateIngestionConnectors1755745000000,
   ],
   synchronize: false,
   logging: false,

@@ -9,6 +9,7 @@ import {
   getBrief,
   uploadBriefCoverImage,
 } from "../api/client";
+import { RetryableError } from "../components/listControls";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -100,12 +101,11 @@ export default function BriefDetail() {
   if (query.isPending) return <p role="status">Loading Brief…</p>;
   if (query.isError)
     return (
-      <div role="alert">
-        <p>Could not load this Brief: {(query.error as Error).message}</p>
-        <button type="button" onClick={() => query.refetch()} disabled={query.isFetching}>
-          {query.isFetching ? "Retrying…" : "Retry"}
-        </button>
-      </div>
+      <RetryableError
+        message={`Could not load this Brief: ${(query.error as Error).message}`}
+        onRetry={() => query.refetch()}
+        retrying={query.isFetching}
+      />
     );
 
   const brief = query.data;

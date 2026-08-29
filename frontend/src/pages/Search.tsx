@@ -1,61 +1,35 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useSearchParams } from "react-router-dom";
-import { search, isStoryCategory, STORY_CATEGORIES, type SearchSortField } from "../api/client";
+import { Link } from "react-router-dom";
+import { search, type SearchSortField } from "../api/client";
+import {
+  CategoryFilter,
+  DateRangeFilter,
+  Pagination,
+  RetryableError,
+  SortDirectionFilter,
+  useListQueryParams,
+} from "../components/listControls";
 
-// URL search params double as the query/filter/sort/page state, same convention
-// as Stories — shareable links, and back/forward behaves as expected.
-// ponytail: updateFilter/clearFilters/goToPage and the filter-form JSX below
-// are near-duplicates of Stories.tsx's — a second real consumer now exists, so
-// a shared useListQueryParams hook would pay for itself; deferred since this
-// ticket doesn't touch Stories.tsx, extract when a third list page needs it.
 export default function Search() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const q = searchParams.get("q") ?? "";
-  const rawCategory = searchParams.get("category") ?? "";
-  const category = isStoryCategory(rawCategory) ? rawCategory : "";
-  const [rawSortField, rawSortDir] = (searchParams.get("sort") ?? "").split(":");
-  const sortField: SearchSortField = rawSortField === "publishedAt" ? "publishedAt" : "relevance";
-  const sortDir = rawSortDir === "asc" ? "asc" : "desc";
-  const dateFrom = searchParams.get("dateFrom") ?? "";
-  const dateTo = searchParams.get("dateTo") ?? "";
-  const page = Number(searchParams.get("page") ?? "1") || 1;
-  const hasFilters = Boolean(category || dateFrom || dateTo);
+  // "q" survives Clear filters: clearing the category on a search must not also
+  // throw away the term the results are for.
+  const list = useListQueryParams(["q", "sort"]);
+  const q = list.get("q");
+  const sortField: SearchSortField = list.sortField === "publishedAt" ? "publishedAt" : "relevance";
 
   const query = useQuery({
-    queryKey: ["search", { q, category, sortField, sortDir, dateFrom, dateTo, page }],
+    queryKey: ["search", { ...list, q, sortField }],
     queryFn: () =>
       search({
         q,
-        category: category || undefined,
-        sort: `${sortField}:${sortDir}`,
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
-        page,
+        category: list.category || undefined,
+        sort: `${sortField}:${list.sortDir}`,
+        dateFrom: list.dateFrom || undefined,
+        dateTo: list.dateTo || undefined,
+        page: list.page,
       }),
     enabled: q.trim().length > 0,
   });
-
-  function updateFilter(key: string, value: string) {
-    const next = new URLSearchParams(searchParams);
-    if (value) next.set(key, value);
-    else next.delete(key);
-    next.delete("page");
-    setSearchParams(next);
-  }
-
-  function clearFilters() {
-    const next = new URLSearchParams();
-    next.set("q", q);
-    const sort = searchParams.get("sort");
-    if (sort) next.set("sort", sort);
-    setSearchParams(next);
-  }
-
-  function goToPage(next: number) {
-    const params = new URLSearchParams(searchParams);
-    params.set("page", String(next));
-    setSearchParams(params);
-  }
 
   return (
     <main>
@@ -67,58 +41,46 @@ export default function Search() {
             type="search"
             value={q}
             placeholder="Search Articles…"
-            onChange={(e) => updateFilter("q", e.target.value)}
+            onChange={(e) => list.updateFilter("q", e.target.value)}
           />
         </label>{" "}
-        <label>
-          Category{" "}
-          <select value={category} onChange={(e) => updateFilter("category", e.target.value)}>
-            <option value="">All</option>
-            {STORY_CATEGORIES.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-        </label>{" "}
+        <CategoryFilter value={list.category} onChange={(value) => list.updateFilter("category", value)} />{" "}
         <label>
           Sort by{" "}
-          <select value={sortField} onChange={(e) => updateFilter("sort", `${e.target.value}:${sortDir}`)}>
+          <select
+            value={sortField}
+            onChange={(e) => list.updateFilter("sort", `${e.target.value}:${list.sortDir}`)}
+          >
             <option value="relevance">Relevance</option>
             <option value="publishedAt">Date published</option>
           </select>
         </label>{" "}
-        <label>
-          Direction{" "}
-          <select value={sortDir} onChange={(e) => updateFilter("sort", `${sortField}:${e.target.value}`)}>
-            <option value="desc">Descending</option>
-            <option value="asc">Ascending</option>
-          </select>
-        </label>{" "}
-        <label>
-          Published from{" "}
-          <input type="date" value={dateFrom} onChange={(e) => updateFilter("dateFrom", e.target.value)} />
-        </label>{" "}
-        <label>
-          to <input type="date" value={dateTo} onChange={(e) => updateFilter("dateTo", e.target.value)} />
-        </label>
+        <SortDirectionFilter
+          value={list.sortDir}
+          onChange={(value) => list.updateFilter("sort", `${sortField}:${value}`)}
+        />{" "}
+        <DateRangeFilter
+          label="Published from"
+          from={list.dateFrom}
+          to={list.dateTo}
+          onChange={list.updateFilter}
+        />
       </form>
 
       {!q.trim() && <p>Enter a search term to find Articles across the corpus.</p>}
       {query.isPending && q.trim() && <p role="status">Searching…</p>}
       {query.isError && (
-        <div role="alert">
-          <p>Could not run this search: {(query.error as Error).message}</p>
-          <button type="button" onClick={() => query.refetch()} disabled={query.isFetching}>
-            {query.isFetching ? "Retrying…" : "Retry"}
-          </button>
-        </div>
+        <RetryableError
+          message={`Could not run this search: ${(query.error as Error).message}`}
+          onRetry={() => query.refetch()}
+          retrying={query.isFetching}
+        />
       )}
       {query.isSuccess && query.data.items.length === 0 && (
         <div>
           <p>No Articles match &ldquo;{q}&rdquo;.</p>
-          {hasFilters && (
-            <button type="button" onClick={clearFilters}>
+          {list.hasFilters && (
+            <button type="button" onClick={list.clearFilters}>
               Clear filters
             </button>
           )}
@@ -135,19 +97,12 @@ export default function Search() {
               </li>
             ))}
           </ul>
-          <p>
-            Page {query.data.page} of {query.data.totalPages} ({query.data.total} total)
-          </p>
-          <button type="button" disabled={query.data.page <= 1} onClick={() => goToPage(query.data.page - 1)}>
-            Previous
-          </button>{" "}
-          <button
-            type="button"
-            disabled={query.data.page >= query.data.totalPages}
-            onClick={() => goToPage(query.data.page + 1)}
-          >
-            Next
-          </button>
+          <Pagination
+            page={query.data.page}
+            totalPages={query.data.totalPages}
+            total={query.data.total}
+            onGoToPage={list.goToPage}
+          />
         </>
       )}
     </main>

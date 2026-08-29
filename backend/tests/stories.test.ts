@@ -49,7 +49,7 @@ beforeAll(async () => {
     title: "Alpha, from Publisher A",
     url: "https://publisher-a.example/alpha",
     analysisText: "Alpha coverage from Publisher A.",
-    analysisTextType: "manual_fixture",
+    analysisTextMode: "manual_fixture",
     publishedAt: new Date("2026-01-01T00:00:00Z"),
   });
   articleAlphaOneId = articleAlphaOne.id;
@@ -59,7 +59,7 @@ beforeAll(async () => {
     title: "Alpha, from Publisher B",
     url: "https://publisher-b.example/alpha",
     analysisText: "Alpha coverage from Publisher B.",
-    analysisTextType: "manual_fixture",
+    analysisTextMode: "manual_fixture",
     publishedAt: new Date("2026-01-01T12:00:00Z"),
   });
 
@@ -77,7 +77,7 @@ beforeAll(async () => {
     title: "Beta, from Publisher A",
     url: "https://publisher-a.example/beta",
     analysisText: "Beta coverage.",
-    analysisTextType: "manual_fixture",
+    analysisTextMode: "manual_fixture",
     publishedAt: new Date("2026-01-03T00:00:00Z"),
   });
   // A body we hold for analysis but may not redistribute (ADR-0018).
@@ -87,7 +87,7 @@ beforeAll(async () => {
     title: "Beta, from Publisher B",
     url: "https://publisher-b.example/beta",
     analysisText: "Licensed body text that must never leave the API.",
-    analysisTextType: "api_content",
+    analysisTextMode: "api_content",
     publishedAt: new Date("2026-01-03T06:00:00Z"),
   });
   internalTextArticleId = internalTextArticle.id;
@@ -106,7 +106,7 @@ beforeAll(async () => {
     title: "Gamma, from Publisher A",
     url: "https://publisher-a.example/gamma",
     analysisText: "Gamma coverage.",
-    analysisTextType: "manual_fixture",
+    analysisTextMode: "manual_fixture",
     publishedAt: new Date("2026-01-02T00:00:00Z"),
   });
 
@@ -124,7 +124,7 @@ beforeAll(async () => {
     title: "Delta, from Publisher A",
     url: "https://publisher-a.example/delta",
     analysisText: "Delta coverage.",
-    analysisTextType: "manual_fixture",
+    analysisTextMode: "manual_fixture",
     publishedAt: new Date("2026-01-05T00:00:00Z"),
   });
 
@@ -142,7 +142,7 @@ beforeAll(async () => {
     title: "Echo, from Publisher A",
     url: "https://publisher-a.example/echo",
     analysisText: "Echo coverage.",
-    analysisTextType: "manual_fixture",
+    analysisTextMode: "manual_fixture",
     publishedAt: new Date("2026-01-04T00:00:00Z"),
   });
 
@@ -168,7 +168,7 @@ beforeAll(async () => {
       title: `Tied ${suffix}, from Publisher A`,
       url: `https://publisher-a.example/tied-${suffix.toLowerCase()}`,
       analysisText: `Tied ${suffix} coverage.`,
-      analysisTextType: "manual_fixture",
+      analysisTextMode: "manual_fixture",
       publishedAt: new Date("2025-12-01T00:00:00Z"),
     });
     tied.push(tiedStory.id);
@@ -189,7 +189,7 @@ beforeAll(async () => {
     title: "Late In Day, from Publisher A",
     url: "https://publisher-a.example/late-in-day",
     analysisText: "Late-in-day coverage.",
-    analysisTextType: "manual_fixture",
+    analysisTextMode: "manual_fixture",
     publishedAt: new Date("2025-11-15T18:30:00Z"),
   });
 });
@@ -418,7 +418,7 @@ describe("GET /api/v1/articles/:id", () => {
       .set("Authorization", `Bearer ${token}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.analysisTextType).toBe("api_content");
+    expect(res.body.analysisTextMode).toBe("api_content");
     expect(res.body.analysisText).toBeNull();
     expect(JSON.stringify(res.body)).not.toContain("must never leave the API");
   });

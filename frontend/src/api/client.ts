@@ -101,8 +101,35 @@ export type StudentDashboardData = {
   role: "student";
   studyCollections: { id: string; title: string; category: StoryCategory }[];
 };
-export type InvestorDashboardData = { role: "investor"; watchlist: unknown[] };
-export type AdminDashboardData = { role: "admin"; userCounts: Record<UserRole, number> };
+export type Sector = { category: StoryCategory; storyCount: number; articleCount: number };
+export type InvestorDashboardData = { role: "investor"; sectors: Sector[] };
+
+export type ConnectorKind = "gdelt_gkg" | "gdelt_doc" | "rss";
+export type ConnectorSummary = {
+  id: string;
+  name: string;
+  kind: ConnectorKind;
+  endpoint: string;
+  enabled: boolean;
+};
+export type PublisherSummary = { id: string; name: string; domain: string; articleCount: number };
+export type AdminDashboardData = {
+  role: "admin";
+  userCounts: Record<UserRole, number>;
+  connectors: ConnectorSummary[];
+  publishers: PublisherSummary[];
+};
+
+// Every list endpoint takes the same optional filter/sort/page params, so they
+// serialise the same way: skip undefined, stringify the rest.
+function toQueryString(params: Record<string, unknown>): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) query.set(key, String(value));
+  }
+  const suffix = query.toString();
+  return suffix ? `?${suffix}` : "";
+}
 
 async function getJson<T>(path: string, errorMessage: string): Promise<T> {
   const res = await authFetch(path);
@@ -141,6 +168,10 @@ export function isStoryCategory(value: string): value is StoryCategory {
 
 export type ListEnvelope<T> = { items: T[]; page: number; pageSize: number; total: number; totalPages: number };
 
+// CONTEXT.md "Analysis Text Mode" — mirrors backend/src/entities/Article.ts's
+// ANALYSIS_TEXT_MODES, same as STORY_CATEGORIES mirrors the Story vocabulary.
+export type AnalysisTextMode = "feed_excerpt" | "api_content" | "licensed_full_text" | "manual_fixture";
+
 export type StorySummary = {
   id: string;
   slug: string;
@@ -157,7 +188,7 @@ export type ArticleSummary = {
   title: string;
   url: string;
   publishedAt: string;
-  analysisTextType: string;
+  analysisTextMode: AnalysisTextMode;
   publisher: { id: string; name: string; domain: string };
 };
 
@@ -170,7 +201,7 @@ export type ArticleDetail = {
   // null when the Article's Analysis Text Mode is not ours to redistribute
   // (ADR-0018) — the body is held for analysis but never served.
   analysisText: string | null;
-  analysisTextType: string;
+  analysisTextMode: AnalysisTextMode;
   publishedAt: string;
   publisher: { id: string; name: string; domain: string };
   story: { id: string; slug: string; title: string };
@@ -189,12 +220,7 @@ export type StoryListParams = {
 
 // Mirrors backend/src/lib/listQuery.ts's shared filter+sort+pagination contract.
 export function getStories(params: StoryListParams = {}): Promise<ListEnvelope<StorySummary>> {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined) query.set(key, String(value));
-  }
-  const suffix = query.toString();
-  return getJson(`/api/v1/stories${suffix ? `?${suffix}` : ""}`, "Could not load Stories");
+  return getJson(`/api/v1/stories${toQueryString(params)}`, "Could not load Stories");
 }
 
 export function getStory(id: string): Promise<StoryDetail> {
@@ -226,11 +252,7 @@ export type SearchParams = {
 };
 
 export function search(params: SearchParams): Promise<ListEnvelope<SearchResult>> {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined) query.set(key, String(value));
-  }
-  return getJson(`/api/v1/search?${query.toString()}`, "Could not run this search");
+  return getJson(`/api/v1/search${toQueryString(params)}`, "Could not run this search");
 }
 
 // #20: mirrors backend/src/entities/IntelligenceBrief.ts + routes/briefs.ts.
@@ -287,12 +309,7 @@ async function sendJson<T>(
 }
 
 export function getBriefs(params: BriefListParams = {}): Promise<ListEnvelope<BriefSummary>> {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined) query.set(key, String(value));
-  }
-  const suffix = query.toString();
-  return getJson(`/api/v1/briefs${suffix ? `?${suffix}` : ""}`, "Could not load Briefs");
+  return getJson(`/api/v1/briefs${toQueryString(params)}`, "Could not load Briefs");
 }
 
 export function getBrief(id: string): Promise<BriefDetail> {

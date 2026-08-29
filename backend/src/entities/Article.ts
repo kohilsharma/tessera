@@ -37,7 +37,7 @@ export class Article {
   analysisText!: string;
 
   @Column({ type: "varchar" })
-  analysisTextType!: AnalysisTextMode;
+  analysisTextMode!: AnalysisTextMode;
 
   @Column({ type: "timestamptz" })
   publishedAt!: Date;

@@ -7,11 +7,12 @@ import { Publisher } from "./entities/Publisher";
 import { Story } from "./entities/Story";
 import { Article } from "./entities/Article";
 import { BriefArticle } from "./entities/BriefArticle";
+import { IngestionConnector } from "./entities/IngestionConnector";
 import { DEFAULT_ARTICLE_CAPACITY_LIMIT, IntelligenceBrief } from "./entities/IntelligenceBrief";
 import type { StoryCategory } from "./entities/Story";
 import { createEmbeddingProvider } from "./embeddings";
 import { toVectorLiteral } from "./embeddings/pgvector";
-import { SEED_PUBLISHERS, SEED_STORIES } from "./seedData/corpus";
+import { SEED_CONNECTORS, SEED_PUBLISHERS, SEED_STORIES } from "./seedData/corpus";
 import { seedCoverImagePng } from "./seedData/coverImage";
 import { LocalDiskFileStorageProvider } from "./storage/LocalDiskFileStorageProvider";
 
@@ -89,7 +90,7 @@ async function seedCorpus(): Promise<void> {
         title: seedArticle.title,
         url: seedArticle.url,
         analysisText: seedArticle.analysisText,
-        analysisTextType: "manual_fixture",
+        analysisTextMode: "manual_fixture",
         publishedAt: new Date(seedArticle.publishedAt),
       });
 
@@ -100,6 +101,20 @@ async function seedCorpus(): Promise<void> {
       ]);
     }
     console.log(`+ story ${seedStory.slug} (${seedStory.articles.length} articles)`);
+  }
+}
+
+// Seed-only in Phase 1 (ADR-0022): these give the Admin dashboard real
+// connectors to inspect. Ingestion reads them in Phase 2.
+async function seedConnectors(): Promise<void> {
+  const connectors = AppDataSource.getRepository(IngestionConnector);
+  for (const seedConnector of SEED_CONNECTORS) {
+    if (await connectors.findOne({ where: { name: seedConnector.name } })) {
+      console.log(`= connector ${seedConnector.name} already seeded`);
+      continue;
+    }
+    await connectors.save(seedConnector);
+    console.log(`+ connector ${seedConnector.name} (${seedConnector.kind})`);
   }
 }
 
@@ -169,6 +184,7 @@ async function seedBrief(): Promise<void> {
 export async function seedAll(): Promise<void> {
   await seedUsers();
   await seedCorpus();
+  await seedConnectors();
   await seedBrief();
 }
 

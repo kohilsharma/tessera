@@ -1,6 +1,9 @@
 import { EMBEDDING_DIMENSIONS, EmbeddingProvider } from "./EmbeddingProvider";
 
-const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+// ADR-0003 wants the endpoint env-configurable for the same reason as the
+// model: an OpenAI-compatible gateway or a regional host is a config change,
+// not a code change. `||` for the same empty-string reason as `model` below.
+const API_BASE = process.env.EMBEDDING_API_BASE || "https://generativelanguage.googleapis.com/v1beta/models";
 
 // ADR-0023: hosted default. Model is env-configurable, never hardcoded in
 // callers (ADR-0003) — this class just supplies the fallback literal.

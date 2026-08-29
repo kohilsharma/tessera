@@ -61,7 +61,7 @@ beforeAll(async () => {
     title: "Quantum computers reach a new milestone",
     url: "https://publisher-a.example/quantum",
     analysisText: "Researchers report a breakthrough in quantum computing error correction.",
-    analysisTextType: "manual_fixture",
+    analysisTextMode: "manual_fixture",
     publishedAt: new Date("2026-01-01T00:00:00Z"),
   });
   quantumArticleId = quantumArticle.id;
@@ -77,7 +77,7 @@ beforeAll(async () => {
     title: "Quantum computing licensed deep-dive",
     url: "https://publisher-a.example/quantum-licensed",
     analysisText: "Licensed body text about quantum computing that must never leave the API.",
-    analysisTextType: "api_content",
+    analysisTextMode: "api_content",
     publishedAt: new Date("2026-01-02T00:00:00Z"),
   });
   internalTextArticleId = internalTextArticle.id;
@@ -97,7 +97,7 @@ beforeAll(async () => {
     title: "Markets rally on earnings",
     url: "https://publisher-a.example/markets",
     analysisText: "Stock markets rallied after strong quarterly earnings reports.",
-    analysisTextType: "manual_fixture",
+    analysisTextMode: "manual_fixture",
     publishedAt: new Date("2026-02-01T00:00:00Z"),
   });
   marketsArticleId = marketsArticle.id;
@@ -119,7 +119,7 @@ beforeAll(async () => {
     title: "Space telescope captures new deep-field photo",
     url: "https://publisher-a.example/deep-field",
     analysisText: "The telescope captured unprecedented detail in a distant galaxy cluster.",
-    analysisTextType: "manual_fixture",
+    analysisTextMode: "manual_fixture",
     publishedAt: new Date("2026-03-01T00:00:00Z"),
   });
   nebulaArticleId = nebulaArticle.id;
@@ -142,7 +142,7 @@ beforeAll(async () => {
     title: "Supply chains adjust to new tariffs",
     url: "https://publisher-a.example/tariffs",
     analysisText: "Importers redraw logistics routes after the latest tariff schedule.",
-    analysisTextType: "manual_fixture",
+    analysisTextMode: "manual_fixture",
     publishedAt: new Date("2026-04-01T00:00:00Z"),
   });
   semanticOnlyArticleId = semanticOnlyArticle.id;
@@ -208,7 +208,7 @@ describe("GET /api/v1/search", () => {
     expect(res.status).toBe(200);
     const licensed = res.body.items.find((a: { id: string }) => a.id === internalTextArticleId);
     expect(licensed).toBeDefined();
-    expect(licensed.analysisTextType).toBe("api_content");
+    expect(licensed.analysisTextMode).toBe("api_content");
     expect(licensed).not.toHaveProperty("analysisText");
     expect(JSON.stringify(res.body)).not.toContain("must never leave the API");
     expect(JSON.stringify(res.body)).not.toContain("error correction");

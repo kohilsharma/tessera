@@ -5,13 +5,13 @@ import { REGISTRABLE_ROLES, RegistrableRole, User } from "../entities/User";
 import { signToken } from "../auth/jwt";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
+import { isPgError, PG_UNIQUE_VIOLATION } from "../lib/pgError";
 
 export const authRouter = Router();
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 8;
 const DEFAULT_ROLE: RegistrableRole = "student";
-const PG_UNIQUE_VIOLATION = "23505";
 
 function userRepo() {
   return AppDataSource.getRepository(User);
@@ -21,13 +21,6 @@ function userRepo() {
 // constraint is on the stored value, so every read and write must agree on case.
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
-}
-
-// TypeORM wraps the driver error but also copies its properties onto
-// QueryFailedError; read both so this does not depend on which.
-function isUniqueViolation(err: unknown): boolean {
-  const e = err as { code?: string; driverError?: { code?: string } } | null;
-  return (e?.code ?? e?.driverError?.code) === PG_UNIQUE_VIOLATION;
 }
 
 function toPublicUser(user: User) {
@@ -67,8 +60,11 @@ authRouter.post(
         role: role as RegistrableRole,
       });
     } catch (err) {
-      if (!isUniqueViolation(err)) throw err;
-      res.status(409).json({ error: "Email is already registered" });
+      if (!isPgError(err, PG_UNIQUE_VIOLATION)) throw err;
+      // 422, not 409: the spec's error contract is 401/403/404/422 and a
+      // duplicate email is an invalid value for a field the form already
+      // validates inline (story 3), not a separate conflict code.
+      res.status(422).json({ error: "Email is already registered" });
       return;
     }
 

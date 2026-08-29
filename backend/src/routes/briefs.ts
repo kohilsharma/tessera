@@ -13,6 +13,7 @@ import { requireRole } from "../middleware/requireRole";
 import { toPublicArticle } from "../lib/articleView";
 import { IMAGE_MIME_TYPES, sniffImageType } from "../lib/imageValidation";
 import { paginate, parseListQuery, toEnvelope } from "../lib/listQuery";
+import { isPgError, PG_CHECK_VIOLATION } from "../lib/pgError";
 import { isUuid } from "../lib/uuid";
 import { LocalDiskFileStorageProvider } from "../storage/LocalDiskFileStorageProvider";
 import type { FileStorageProvider } from "../storage/FileStorageProvider";
@@ -53,15 +54,24 @@ async function deleteQuietly(key: string): Promise<void> {
   }
 }
 
-// Mirrors routes/auth.ts's isUniqueViolation: parseBriefInput mirrors every one
-// of the migration's CHECK constraints, so this path is a backstop, not the
-// primary gate — but the acceptance criteria calls out "backed by DB
-// constraints" explicitly, so a constraint that does fire must still 422.
-const PG_CHECK_VIOLATION = "23514";
-
+// parseBriefInput mirrors every one of the migration's CHECK constraints, so
+// this path is a backstop, not the primary gate — but the acceptance criteria
+// calls out "backed by DB constraints" explicitly, so a constraint that does
+// fire must still 422.
 function isCheckViolation(err: unknown): boolean {
-  const e = err as { code?: string; driverError?: { code?: string } } | null;
-  return (e?.code ?? e?.driverError?.code) === PG_CHECK_VIOLATION;
+  return isPgError(err, PG_CHECK_VIOLATION);
+}
+
+// What a transaction below hands back when it decides not to commit. Carrying
+// the status beside the message keeps the two from drifting: re-deriving 404 vs
+// 422 by matching on the message turns an edit to that wording into a silent
+// change of status code.
+type BriefWriteFailure = { status: 404 | 422; message: string };
+
+const BRIEF_NOT_FOUND: BriefWriteFailure = { status: 404, message: "Brief not found" };
+
+function unprocessable(message: string): BriefWriteFailure {
+  return { status: 422, message };
 }
 
 function briefRepo() {
@@ -250,17 +260,19 @@ briefsRouter.patch(
     }
 
     try {
-      const error = await AppDataSource.transaction(async (manager) => {
+      const failure = await AppDataSource.transaction<BriefWriteFailure | null>(async (manager) => {
         const lockedBrief = await manager.getRepository(IntelligenceBrief).findOne({
           where: { id: brief.id },
           lock: { mode: "pessimistic_write" },
         });
-        if (!lockedBrief) return "Brief not found";
+        if (!lockedBrief) return BRIEF_NOT_FOUND;
 
         if (parsed.value.articleCapacityLimit !== undefined) {
           const attachedCount = await manager.getRepository(BriefArticle).count({ where: { briefId: brief.id } });
           if (parsed.value.articleCapacityLimit < attachedCount) {
-            return `articleCapacityLimit cannot be below the ${attachedCount} Article(s) already attached`;
+            return unprocessable(
+              `articleCapacityLimit cannot be below the ${attachedCount} Article(s) already attached`,
+            );
           }
         }
 
@@ -270,8 +282,8 @@ briefsRouter.patch(
         }
         return null;
       });
-      if (error) {
-        res.status(error === "Brief not found" ? 404 : 422).json({ error });
+      if (failure) {
+        res.status(failure.status).json({ error: failure.message });
         return;
       }
     } catch (err) {
@@ -377,26 +389,26 @@ briefsRouter.post(
       return;
     }
 
-    const error = await AppDataSource.transaction(async (manager) => {
+    const failure = await AppDataSource.transaction<BriefWriteFailure | null>(async (manager) => {
       const lockedBrief = await manager.getRepository(IntelligenceBrief).findOne({
         where: { id: brief.id },
         lock: { mode: "pessimistic_write" },
       });
-      if (!lockedBrief) return "Brief not found";
+      if (!lockedBrief) return BRIEF_NOT_FOUND;
 
       const joins = manager.getRepository(BriefArticle);
       if (await joins.findOne({ where: { briefId: brief.id, articleId } })) {
-        return "This Article is already attached to the Brief";
+        return unprocessable("This Article is already attached to the Brief");
       }
       const attachedCount = await joins.count({ where: { briefId: brief.id } });
       if (attachedCount >= lockedBrief.articleCapacityLimit) {
-        return `Brief has reached its capacity of ${lockedBrief.articleCapacityLimit} Article(s)`;
+        return unprocessable(`Brief has reached its capacity of ${lockedBrief.articleCapacityLimit} Article(s)`);
       }
       await joins.save({ briefId: brief.id, articleId });
       return null;
     });
-    if (error) {
-      res.status(error === "Brief not found" ? 404 : 422).json({ error });
+    if (failure) {
+      res.status(failure.status).json({ error: failure.message });
       return;
     }
     res.status(201).json(toPublicArticle(article));

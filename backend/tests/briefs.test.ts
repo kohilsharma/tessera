@@ -50,7 +50,7 @@ beforeAll(async () => {
     title: "Briefs Article One",
     url: "https://briefs-publisher.example/one",
     analysisText: "One.",
-    analysisTextType: "manual_fixture",
+    analysisTextMode: "manual_fixture",
     publishedAt: new Date("2026-01-01T00:00:00Z"),
   });
   articleOneId = articleOne.id;
@@ -60,7 +60,7 @@ beforeAll(async () => {
     title: "Briefs Article Two",
     url: "https://briefs-publisher.example/two",
     analysisText: "Two.",
-    analysisTextType: "manual_fixture",
+    analysisTextMode: "manual_fixture",
     publishedAt: new Date("2026-01-01T01:00:00Z"),
   });
   articleTwoId = articleTwo.id;
@@ -71,7 +71,7 @@ beforeAll(async () => {
       title: `Concurrent Briefs Article ${index}`,
       url: `https://briefs-publisher.example/concurrent-${index}`,
       analysisText: `${index}.`,
-      analysisTextType: "manual_fixture",
+      analysisTextMode: "manual_fixture",
       publishedAt: new Date(`2026-01-02T0${index}:00:00Z`),
     });
     concurrentArticleIds.push(article.id);

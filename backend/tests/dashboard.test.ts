@@ -5,6 +5,10 @@ import request from "supertest";
 import { createApp } from "../src/app";
 import { AppDataSource } from "../src/data-source";
 import { User } from "../src/entities/User";
+import { Article } from "../src/entities/Article";
+import { IngestionConnector } from "../src/entities/IngestionConnector";
+import { Publisher } from "../src/entities/Publisher";
+import { Story } from "../src/entities/Story";
 import { signToken } from "../src/auth/jwt";
 import { setupTestDb } from "./setupTestDb";
 
@@ -58,13 +62,44 @@ describe("dashboard RBAC", () => {
 
     const own = await request(app()).get("/api/v1/dashboard/investor").set("Authorization", `Bearer ${token}`);
     expect(own.status).toBe(200);
-    expect(own.body).toMatchObject({ role: "investor", watchlist: [] });
+    expect(own.body.role).toBe("investor");
+    expect(own.body.sectors).toEqual([]);
 
     const student = await request(app()).get("/api/v1/dashboard/student").set("Authorization", `Bearer ${token}`);
     expect(student.status).toBe(403);
 
     const admin = await request(app()).get("/api/v1/dashboard/admin").set("Authorization", `Bearer ${token}`);
     expect(admin.status).toBe(403);
+  });
+
+  it("rolls the corpus up by sector for an Investor", async () => {
+    const token = await registerAndLogin("investor-sectors@example.com", "investor");
+    const publisher = await AppDataSource.getRepository(Publisher).save({
+      name: "Sector Wire",
+      domain: "sector-wire.example",
+    });
+    const story = await AppDataSource.getRepository(Story).save({
+      slug: "sector-rollup-story",
+      title: "Chip capacity expands",
+      summary: null,
+      category: "technology",
+      firstSeenAt: new Date("2026-01-02T00:00:00Z"),
+      lastSeenAt: new Date("2026-01-02T00:00:00Z"),
+    });
+    await AppDataSource.getRepository(Article).save({
+      storyId: story.id,
+      publisherId: publisher.id,
+      title: "Fab announces new line",
+      url: "https://sector-wire.example/fab-line",
+      analysisText: "A new packaging line.",
+      analysisTextMode: "manual_fixture",
+      publishedAt: new Date("2026-01-02T00:00:00Z"),
+    });
+
+    const res = await request(app()).get("/api/v1/dashboard/investor").set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.sectors).toContainEqual({ category: "technology", storyCount: 1, articleCount: 1 });
   });
 
   // requireAuth resolves identity and role from the users row, not the token's
@@ -108,5 +143,34 @@ describe("dashboard RBAC", () => {
 
     const investor = await request(app()).get("/api/v1/dashboard/investor").set("Authorization", `Bearer ${token}`);
     expect(investor.status).toBe(403);
+  });
+
+  // Story 12: the Admin dashboard is an operator surface over seeded connectors
+  // and publishers, not just a user-count readout.
+  it("lists seeded connectors and publishers for an Admin", async () => {
+    const token = await createAdminToken("admin-operator@example.com");
+    await AppDataSource.getRepository(IngestionConnector).save({
+      name: "Operator RSS",
+      kind: "rss",
+      endpoint: "https://operator.example/feed.xml",
+      enabled: false,
+    });
+    const publisher = await AppDataSource.getRepository(Publisher).save({
+      name: "Operator Press",
+      domain: "operator-press.example",
+    });
+
+    const res = await request(app()).get("/api/v1/dashboard/admin").set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.connectors).toContainEqual(
+      expect.objectContaining({ name: "Operator RSS", kind: "rss", enabled: false }),
+    );
+    expect(res.body.publishers).toContainEqual({
+      id: publisher.id,
+      name: "Operator Press",
+      domain: "operator-press.example",
+      articleCount: 0,
+    });
   });
 });

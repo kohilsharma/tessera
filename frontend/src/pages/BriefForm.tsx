@@ -9,6 +9,7 @@ import {
   STORY_CATEGORIES,
   type StoryCategory,
 } from "../api/client";
+import { RetryableError } from "../components/listControls";
 
 type FieldErrors = { title?: string; category?: string; articleCapacityLimit?: string; form?: string };
 
@@ -75,12 +76,11 @@ export default function BriefForm() {
   if (isEdit && existing.isPending) return <p role="status">Loading Brief…</p>;
   if (isEdit && existing.isError) {
     return (
-      <div role="alert">
-        <p>Could not load this Brief: {(existing.error as Error).message}</p>
-        <button type="button" onClick={() => existing.refetch()} disabled={existing.isFetching}>
-          {existing.isFetching ? "Retrying…" : "Retry"}
-        </button>
-      </div>
+      <RetryableError
+        message={`Could not load this Brief: ${(existing.error as Error).message}`}
+        onRetry={() => existing.refetch()}
+        retrying={existing.isFetching}
+      />
     );
   }
 

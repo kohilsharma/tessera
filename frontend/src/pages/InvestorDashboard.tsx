@@ -11,7 +11,33 @@ export default function InvestorDashboard() {
       {(data) => (
         <main>
           <h1>Investor dashboard</h1>
-          <p>Watchlist: {data.watchlist.length === 0 ? "none yet" : data.watchlist.length}</p>
+          <h2>Sectors</h2>
+          {data.sectors.length === 0 ? (
+            <p>
+              No sectors yet — run <code>npm run seed</code> in <code>backend/</code> to load the corpus.
+            </p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Sector</th>
+                  <th scope="col">Stories</th>
+                  <th scope="col">Articles</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.sectors.map((sector) => (
+                  <tr key={sector.category}>
+                    <th scope="row">
+                      <Link to={`/stories?category=${sector.category}`}>{sector.category}</Link>
+                    </th>
+                    <td>{sector.storyCount}</td>
+                    <td>{sector.articleCount}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
           <p>
             <Link to="/stories">Browse Stories</Link> · <Link to="/search">Search</Link> ·{" "}
             <Link to="/briefs">My Briefs</Link>

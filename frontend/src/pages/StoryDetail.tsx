@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { getStory } from "../api/client";
+import { RetryableError } from "../components/listControls";
 
 export default function StoryDetail() {
   const { id } = useParams();
@@ -9,12 +10,11 @@ export default function StoryDetail() {
   if (query.isPending) return <p role="status">Loading Story…</p>;
   if (query.isError)
     return (
-      <div role="alert">
-        <p>Could not load Story: {(query.error as Error).message}</p>
-        <button type="button" onClick={() => query.refetch()} disabled={query.isFetching}>
-          {query.isFetching ? "Retrying…" : "Retry"}
-        </button>
-      </div>
+      <RetryableError
+        message={`Could not load Story: ${(query.error as Error).message}`}
+        onRetry={() => query.refetch()}
+        retrying={query.isFetching}
+      />
     );
 
   const story = query.data;

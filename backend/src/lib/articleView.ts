@@ -25,7 +25,7 @@ export function toPublicArticle(article: Article) {
     title: article.title,
     url: article.url,
     publishedAt: article.publishedAt,
-    analysisTextType: article.analysisTextType,
+    analysisTextMode: article.analysisTextMode,
     publisher: { id: article.publisher.id, name: article.publisher.name, domain: article.publisher.domain },
   };
 }

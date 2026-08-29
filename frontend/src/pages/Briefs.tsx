@@ -1,36 +1,33 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useSearchParams } from "react-router-dom";
-import { getBriefs, isStoryCategory, STORY_CATEGORIES, type BriefSortField } from "../api/client";
+import { Link } from "react-router-dom";
+import { getBriefs, type BriefSortField } from "../api/client";
+import {
+  CategoryFilter,
+  DateRangeFilter,
+  Pagination,
+  RetryableError,
+  SortDirectionFilter,
+  useListQueryParams,
+} from "../components/listControls";
 
-// Mirrors src/pages/Stories.tsx's URL-as-state pattern, filtered server-side to
-// the caller's own Briefs (see backend/src/routes/briefs.ts).
+// Story 34: the owned-entity list carries the same advanced controls as the
+// corpus lists — filter (category + date range), sort, and pagination.
 export default function Briefs() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const rawCategory = searchParams.get("category") ?? "";
-  const category = isStoryCategory(rawCategory) ? rawCategory : "";
-  const [rawSortField, rawSortDir] = (searchParams.get("sort") ?? "").split(":");
-  const sortField: BriefSortField = rawSortField === "title" ? "title" : "createdAt";
-  const sortDir = rawSortDir === "asc" ? "asc" : "desc";
-  const page = Number(searchParams.get("page") ?? "1") || 1;
+  const list = useListQueryParams();
+  const sortField: BriefSortField =
+    list.sortField === "title" || list.sortField === "updatedAt" ? list.sortField : "createdAt";
 
   const query = useQuery({
-    queryKey: ["briefs", { category, sortField, sortDir, page }],
-    queryFn: () => getBriefs({ category: category || undefined, sort: `${sortField}:${sortDir}`, page }),
+    queryKey: ["briefs", { ...list, sortField }],
+    queryFn: () =>
+      getBriefs({
+        category: list.category || undefined,
+        sort: `${sortField}:${list.sortDir}`,
+        dateFrom: list.dateFrom || undefined,
+        dateTo: list.dateTo || undefined,
+        page: list.page,
+      }),
   });
-
-  function updateFilter(key: string, value: string) {
-    const next = new URLSearchParams(searchParams);
-    if (value) next.set(key, value);
-    else next.delete(key);
-    next.delete("page");
-    setSearchParams(next);
-  }
-
-  function goToPage(next: number) {
-    const params = new URLSearchParams(searchParams);
-    params.set("page", String(next));
-    setSearchParams(params);
-  }
 
   return (
     <main>
@@ -39,47 +36,48 @@ export default function Briefs() {
         <Link to="/briefs/new">+ New Brief</Link>
       </p>
       <form onSubmit={(e) => e.preventDefault()}>
-        <label>
-          Category{" "}
-          <select value={category} onChange={(e) => updateFilter("category", e.target.value)}>
-            <option value="">All</option>
-            {STORY_CATEGORIES.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-        </label>{" "}
+        <CategoryFilter value={list.category} onChange={(value) => list.updateFilter("category", value)} />{" "}
         <label>
           Sort by{" "}
-          <select value={sortField} onChange={(e) => updateFilter("sort", `${e.target.value}:${sortDir}`)}>
+          <select
+            value={sortField}
+            onChange={(e) => list.updateFilter("sort", `${e.target.value}:${list.sortDir}`)}
+          >
             <option value="createdAt">Date created</option>
+            <option value="updatedAt">Last updated</option>
             <option value="title">Title</option>
           </select>
         </label>{" "}
-        <label>
-          Direction{" "}
-          <select value={sortDir} onChange={(e) => updateFilter("sort", `${sortField}:${e.target.value}`)}>
-            <option value="desc">Descending</option>
-            <option value="asc">Ascending</option>
-          </select>
-        </label>
+        <SortDirectionFilter
+          value={list.sortDir}
+          onChange={(value) => list.updateFilter("sort", `${sortField}:${value}`)}
+        />{" "}
+        <DateRangeFilter label="Created from" from={list.dateFrom} to={list.dateTo} onChange={list.updateFilter} />
       </form>
 
       {query.isPending && <p role="status">Loading your Briefs…</p>}
       {query.isError && (
-        <div role="alert">
-          <p>Could not load Briefs: {(query.error as Error).message}</p>
-          <button type="button" onClick={() => query.refetch()} disabled={query.isFetching}>
-            {query.isFetching ? "Retrying…" : "Retry"}
-          </button>
-        </div>
+        <RetryableError
+          message={`Could not load Briefs: ${(query.error as Error).message}`}
+          onRetry={() => query.refetch()}
+          retrying={query.isFetching}
+        />
       )}
       {query.isSuccess && query.data.items.length === 0 && (
-        <p>
-          {category ? "No Briefs match this filter." : "You have no Briefs yet."}{" "}
-          <Link to="/briefs/new">Create one</Link>.
-        </p>
+        <div>
+          {list.hasFilters ? (
+            <>
+              <p>No Briefs match these filters.</p>
+              <button type="button" onClick={list.clearFilters}>
+                Clear filters
+              </button>
+            </>
+          ) : (
+            <p>
+              You have no Briefs yet. <Link to="/briefs/new">Create one</Link>.
+            </p>
+          )}
+        </div>
       )}
       {query.isSuccess && query.data.items.length > 0 && (
         <>
@@ -91,19 +89,12 @@ export default function Briefs() {
               </li>
             ))}
           </ul>
-          <p>
-            Page {query.data.page} of {query.data.totalPages} ({query.data.total} total)
-          </p>
-          <button type="button" disabled={query.data.page <= 1} onClick={() => goToPage(query.data.page - 1)}>
-            Previous
-          </button>{" "}
-          <button
-            type="button"
-            disabled={query.data.page >= query.data.totalPages}
-            onClick={() => goToPage(query.data.page + 1)}
-          >
-            Next
-          </button>
+          <Pagination
+            page={query.data.page}
+            totalPages={query.data.totalPages}
+            total={query.data.total}
+            onGoToPage={list.goToPage}
+          />
         </>
       )}
     </main>

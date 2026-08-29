@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { getArticle } from "../api/client";
+import { RetryableError } from "../components/listControls";
 
 export default function ArticleDetail() {
   const { id } = useParams();
@@ -9,12 +10,11 @@ export default function ArticleDetail() {
   if (query.isPending) return <p role="status">Loading Article…</p>;
   if (query.isError)
     return (
-      <div role="alert">
-        <p>Could not load Article: {(query.error as Error).message}</p>
-        <button type="button" onClick={() => query.refetch()} disabled={query.isFetching}>
-          {query.isFetching ? "Retrying…" : "Retry"}
-        </button>
-      </div>
+      <RetryableError
+        message={`Could not load Article: ${(query.error as Error).message}`}
+        onRetry={() => query.refetch()}
+        retrying={query.isFetching}
+      />
     );
 
   const article = query.data;
@@ -36,7 +36,7 @@ export default function ArticleDetail() {
       ) : (
         <p>
           This Article&rsquo;s text is held for analysis only and is not shown here (
-          {article.analysisTextType}). Read it at the original source above.
+          {article.analysisTextMode}). Read it at the original source above.
         </p>
       )}
     </main>

@@ -43,10 +43,10 @@ describe("POST /api/v1/auth/register", () => {
       .post("/api/v1/auth/register")
       .send({ email: "mixedcase@example.com", password: "correct-horse" });
 
-    expect(again.status).toBe(409);
+    expect(again.status).toBe(422);
   });
 
-  it("rejects a duplicate email with 409", async () => {
+  it("rejects a duplicate email with 422", async () => {
     await request(app())
       .post("/api/v1/auth/register")
       .send({ email: "dupe@example.com", password: "correct-horse", role: "student" });
@@ -55,10 +55,10 @@ describe("POST /api/v1/auth/register", () => {
       .post("/api/v1/auth/register")
       .send({ email: "dupe@example.com", password: "another-password", role: "investor" });
 
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(422);
   });
 
-  it("answers concurrent duplicate registrations with 201 + 409, not a crash", async () => {
+  it("answers concurrent duplicate registrations with 201 + 422, not a crash", async () => {
     const send = () =>
       request(app())
         .post("/api/v1/auth/register")
@@ -66,7 +66,7 @@ describe("POST /api/v1/auth/register", () => {
 
     const statuses = (await Promise.all([send(), send()])).map((res) => res.status).sort();
 
-    expect(statuses).toEqual([201, 409]);
+    expect(statuses).toEqual([201, 422]);
   });
 
   it("rejects an invalid email with 422", async () => {

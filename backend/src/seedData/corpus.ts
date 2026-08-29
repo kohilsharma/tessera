@@ -17,6 +17,32 @@ export const SEED_PUBLISHERS: SeedPublisher[] = [
   { name: "Fielding Times", domain: "fieldingtimes.example" },
 ];
 
+// ADR-0018's ingestion surfaces, seeded so the Admin dashboard has real
+// connectors to inspect. Seed-only in Phase 1: nothing reads `endpoint` until
+// ingestion lands (ADR-0022).
+export type SeedConnector = { name: string; kind: "gdelt_gkg" | "gdelt_doc" | "rss"; endpoint: string; enabled: boolean };
+
+export const SEED_CONNECTORS: SeedConnector[] = [
+  {
+    name: "GDELT GKG firehose",
+    kind: "gdelt_gkg",
+    endpoint: "http://data.gdeltproject.org/gdeltv2/lastupdate.txt",
+    enabled: true,
+  },
+  {
+    name: "GDELT DOC API",
+    kind: "gdelt_doc",
+    endpoint: "https://api.gdeltproject.org/api/v2/doc/doc",
+    enabled: true,
+  },
+  {
+    name: "Meridian Wire RSS",
+    kind: "rss",
+    endpoint: "https://meridianwire.example/feed.xml",
+    enabled: false,
+  },
+];
+
 export type SeedArticle = {
   title: string;
   url: string;

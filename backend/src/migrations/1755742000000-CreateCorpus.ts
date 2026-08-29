@@ -37,7 +37,7 @@ export class CreateCorpus1755742000000 implements MigrationInterface {
         "title" varchar NOT NULL,
         "url" varchar NOT NULL UNIQUE,
         "analysisText" text NOT NULL,
-        "analysisTextType" varchar NOT NULL CHECK ("analysisTextType" IN
+        "analysisTextMode" varchar NOT NULL CHECK ("analysisTextMode" IN
           ('feed_excerpt', 'api_content', 'licensed_full_text', 'manual_fixture')),
         "publishedAt" timestamptz NOT NULL,
         "embedding" vector(1024),

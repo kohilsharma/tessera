@@ -29,6 +29,7 @@ npm install
 cp .env.example .env
 npm run migrate   # applies migrations, incl. `CREATE EXTENSION vector`
 npm run seed      # demo users for all three roles (ADR-0015) + a Story/Article corpus
+                  # + seed-only IngestionConnectors + one owned Brief
 npm run dev       # http://localhost:4000
 npm run build     # type-check + compile to dist/ (`npm start` runs the build)
 ```
@@ -37,7 +38,8 @@ npm run build     # type-check + compile to dist/ (`npm start` runs the build)
 
 `npm run seed` is idempotent — re-run it after any migration. It creates one user
 per role, all sharing the same password, a Publisher/Story/Article corpus (browsable
-at `/stories` once the frontend is running), and one owned Brief for the Student user
+at `/stories` once the frontend is running), the IngestionConnectors the Admin
+dashboard inspects, and one owned Brief for the Student user
 with Articles and a cover image already attached (browsable at `/briefs`) — so the
 demo has a populated Brief to show without building one live.
 
@@ -61,7 +63,8 @@ The corpus and every search query are embedded with whichever `EmbeddingProvider
 - **Set — the intended configuration (ADR-0023):** the hosted
   `gemini-embedding-001` (Google AI Studio, free tier), truncated to
   `vector(1024)`. Get a free key at https://aistudio.google.com/apikey and put it
-  in `.env`; `EMBEDDING_MODEL` overrides the model id if needed.
+  in `.env`; `EMBEDDING_MODEL` overrides the model id and `EMBEDDING_API_BASE`
+  the endpoint if needed (ADR-0003: no hardcoded model ids or hosts).
 - **Unset — fallback:** the deterministic Mock provider. No network, no API key,
   works offline, and it is what every backend test uses (ADR-0003) — but its
   vectors carry no meaning, so the *semantic* half of hybrid search returns
@@ -119,4 +122,13 @@ cd backend
 npm test
 ```
 
-There is no frontend test script yet — `npm run build` is the only frontend check.
+Frontend tests are the secondary seam — Vitest + jsdom + React Testing Library over
+the components carrying real state logic (the list and search views, the Brief
+create/edit form, the auth flow), asserting the four UI states and form-submission
+behaviour. No database or running backend needed; only `fetch` is stubbed.
+
+```bash
+cd frontend
+npm test
+npm run build     # type-check + production build
+```

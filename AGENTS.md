@@ -22,12 +22,14 @@ cover images (#20, #21), hybrid search over the corpus (#22 — Postgres FTS + p
 fused by RRF), and Phase-1 demo hardening (#23 — finalized Compose, hosted EmbeddingProvider,
 a seeded owned Brief) are live; `GET /api/v1/health` from the walking skeleton (#16) too.
 Ingestion, the flagship generation pipeline, and Phase 3.5 (graph/timeline) are not built yet.
-**frontend/** — still mostly the **design prototype**: `src/App.tsx` renders
-`src/versions/bureau.tsx` against `src/styles.css` with hardcoded `src/data.ts` at `/`. Live,
-`fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`, `/register`,
-`/account`), role dashboards (`/dashboard/:role`), browsing the corpus (`/stories`,
-`/stories/:id`, `/articles/:id`), IntelligenceBriefs (`/briefs`, `/briefs/:id`), and search
-(`/search`) — all plain unstyled markup, not yet run through the Bureau design system.
+**frontend/** — `src/App.tsx` is the route table alone. Live, `fetch`-based pages
+(`src/api/client.ts`) cover health (`/status`), auth (`/login`, `/register`, `/account`), role
+dashboards (`/dashboard/:role`), browsing the corpus (`/stories`, `/stories/:id`,
+`/articles/:id`), IntelligenceBriefs (`/briefs`, `/briefs/:id`), and search (`/search`) — all
+plain unstyled markup, not yet run through the Bureau design system. `/` redirects to the
+caller's own dashboard. The **design prototype** for the Phase-3 flagship
+(`src/versions/BureauPrototype.tsx` + `bureau.tsx` over hardcoded `src/data.ts`, styled by
+`src/styles.css`) sits at `/design-prototype`, out of the Phase-1 path.
 
 `npm run migrate` (backend) applies migrations; `npm test` (backend) is the API-seam test
 pattern (supertest + an ephemeral Testcontainers Postgres) later Foundation tickets extend.
@@ -150,9 +152,11 @@ Frontend commands (run from `frontend/`):
 ```bash
 npm run build
 npm run dev
+npm test          # vitest + jsdom + React Testing Library; the secondary seam
+                  # (list/search views, Brief form, auth flow) over the four UI states
 ```
 
-No frontend test or lint script exists yet. Do not claim either passes until implemented.
+No frontend lint script exists yet. Do not claim it passes until implemented.
 
 Backend commands (run from `backend/`, after `docker compose up -d` — see `SETUP.md`):
 

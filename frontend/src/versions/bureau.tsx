@@ -2,7 +2,7 @@ import { useState } from "react";
 import { flushSync } from "react-dom";
 import { evidence, filters, modeDescription } from "../data";
 import type { Claim } from "../data";
-import type { SharedState } from "../App";
+import type { SharedState } from "./BureauPrototype";
 
 export default function Bureau({
   filter,
