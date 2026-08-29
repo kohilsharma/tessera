@@ -7,9 +7,17 @@ import { getMe, logout } from "../api/client";
 // up Stories/Search/My Briefs.
 export default function IdentityMenu() {
   const navigate = useNavigate();
-  const { data, isPending } = useQuery({ queryKey: ["me"], queryFn: getMe });
+  const { data, error, isPending, refetch } = useQuery({ queryKey: ["me"], queryFn: getMe });
 
-  if (isPending || !data) return <span className="identity-placeholder" role="status">…</span>;
+  if (isPending) return <span className="identity-placeholder" role="status">…</span>;
+  if (error || !data) {
+    return (
+      <span className="identity-error" role="alert">
+        Identity unavailable
+        <button type="button" onClick={() => void refetch()}>Retry</button>
+      </span>
+    );
+  }
 
   function onLogout() {
     logout();

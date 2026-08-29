@@ -50,4 +50,17 @@ describe("AppShell", () => {
     expect(getToken()).toBeNull();
     expect(await screen.findByText("Login page")).toBeInTheDocument();
   });
+
+  it("shows a retry when /auth/me fails", async () => {
+    setToken("a.jwt.token");
+    vi.mocked(fetch)
+      .mockRejectedValueOnce(new Error("server unavailable"))
+      .mockResolvedValueOnce(jsonResponse({ id: "u1", email: "student@tessera.local", role: "student" }));
+
+    renderShell("/stories");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Identity unavailable");
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("student@tessera.local")).toBeInTheDocument();
+  });
 });
