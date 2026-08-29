@@ -240,6 +240,90 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 }
 
 /* ============================================================
+   RECORD ARCHETYPE — masthead over provenance ledger over body
+   (see components/recordArchetype.tsx). Established on Story and
+   Article detail (#33), adopted by Brief detail next (#34).
+   ============================================================ */
+/* The mast is a registered dark sheet on the bench: the record's identity is
+   the one place in the app that inverts, which is what makes a record read as
+   substantial next to an index of them. The two inks on it are mixed from the
+   existing tokens rather than invented — no colour is added to the palette to
+   put text on ink. */
+.record-mast {
+  --mast-quiet: color-mix(in srgb, var(--stock-paper) 72%, var(--bureau-ink));
+  --mast-rule: color-mix(in srgb, var(--stock-paper) 40%, var(--bureau-ink));
+  position: relative; overflow: hidden;
+  border: 1px solid var(--bureau-ink); background: var(--bureau-ink); color: var(--stock-paper);
+}
+/* The offset inks registering out of true: carried from the prototype's own
+   Story mast, which is this archetype's reference — the inks name the source
+   layers a record is assembled from, the mark the north star calls structural
+   rather than decorative. Mixed from the palette tokens, not restated as
+   literals. The registration cross stays the empty state's: a second mark here
+   would only compete with the return link for the same corner. Static —
+   DESIGN.md spends motion on evidence registration, not page entry. */
+.record-mast::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(115deg,
+    transparent 0 63%,
+    color-mix(in srgb, var(--proof-blue) 34%, transparent) 63% 70%,
+    color-mix(in srgb, var(--registered-overlap) 45%, transparent) 70% 75%,
+    color-mix(in srgb, var(--proof-magenta) 33%, transparent) 75% 82%,
+    transparent 82%);
+}
+/* 4vw is DESIGN.md's major sheet inset (~58px at the 1600px cap), the same one
+   the prototype's mast uses — the mast is a sheet with its own margins inside
+   the ground, not a block flush with the sections below it. */
+.record-mast-body { position: relative; z-index: 1; padding: 26px 4vw 34px; }
+
+/* Kind and exit, in that order, on one left band: a record always states what
+   it is and always offers the way back out. Left, not split to both edges —
+   the exit names its destination, and a long name right-aligned would run
+   under the mast's ink band. Capped and wrapping for the same reason. */
+.record-mast-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; margin-bottom: 24px; }
+.record-folio { margin: 0; color: var(--mast-quiet); font: 500 .66rem ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .08em; }
+.record-return { max-width: 46ch; color: var(--mast-quiet); font-size: .8rem; line-height: 1.45; text-underline-offset: 3px; }
+.record-return:hover, .record-return:focus-visible { color: var(--stock-paper); }
+
+.record-mast h1 { margin: 0; font-size: clamp(1.95rem, 4.5vw, 3.9rem); font-weight: 800; line-height: .96; letter-spacing: -.035em; max-width: 22ch; text-wrap: balance; overflow-wrap: anywhere; }
+.record-dek { margin: 26px 0 0; max-width: 60ch; color: var(--mast-quiet); font-size: 1.05rem; line-height: 1.55; }
+
+/* The ledger spans the sheet rather than sitting inside its inset, and its
+   rules are the 1px gap the sheet shows through — so cells rule against each
+   other at any wrap, with no cell ruling against nothing. */
+.record-ledger { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 185px), 1fr)); gap: 1px; margin: 0; background: var(--mast-rule); border-top: 1px solid var(--mast-rule); }
+.record-ledger > div { background: var(--bureau-ink); padding: 15px 4vw 16px; }
+.record-ledger dt { margin: 0 0 6px; color: var(--mast-quiet); font: 500 .66rem/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.record-ledger dd { margin: 0; font-size: .82rem; font-weight: 650; overflow-wrap: anywhere; }
+
+/* The body: sections of substance under the identity, each opening on a rule so
+   the record reads as a stack of registered parts. */
+.record-section { margin-top: 44px; }
+.record-section h2 { margin: 0 0 4px; padding-bottom: 13px; border-bottom: 1px solid var(--bureau-ink); font-size: clamp(1.2rem, 2vw, 1.6rem); font-weight: 700; line-height: 1.1; letter-spacing: -.02em; }
+/* The reading measure DESIGN.md sets for prose — the register above is compact,
+   the record's own text is not. */
+.record-prose { max-width: 68ch; margin: 22px 0 0; font-size: 1rem; line-height: 1.65; }
+/* The heading's rule opens the register: the entry list's own top rule would be
+   a second rule 22px under the first, the same double-ruling the index avoids
+   between its register and its pagination. */
+.record-section .entry-list { margin-top: 0; border-top: 0; }
+
+/* The rights note is a register of stated facts, not a small-print line: ruled
+   rows, term in the measurement face, value in the reading face. */
+.record-note { margin: 22px 0 0; }
+.record-note > div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 4px 24px; padding: 13px 2px; border-bottom: 1px solid var(--registration-rule); }
+.record-note dt { color: var(--quiet-ink); font: 500 .66rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.record-note dd { margin: 0; max-width: 68ch; font-size: .9rem; line-height: 1.6; }
+.record-note a { color: var(--bureau-ink); font-weight: 700; text-underline-offset: 3px; overflow-wrap: anywhere; }
+
+@media (max-width: 560px) {
+  .record-mast-body { padding: 22px 20px 26px; }
+  .record-mast h1 { font-size: 2.1rem; max-width: none; }
+  .record-ledger > div { padding: 14px 20px; }
+  .record-note > div { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ============================================================
    BUREAU — Evidence Registration Bureau
    ============================================================ */
 .design-bureau {
