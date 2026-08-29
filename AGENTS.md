@@ -30,8 +30,10 @@ and search (`/search`). The **Bureau rollout** (#28) is mid-flight: root design 
 application shell (#29), the four shared UI-state treatments and restyled list controls (#30),
 and the Index archetype across all three of its consumers — `/stories` (#31), `/briefs` and
 `/search` (#32) — are done, as is the Record archetype across all three of its consumers:
-Story and Article detail (#33) and Brief detail as the owned artefact (#34); the form pages and
-the dashboards are still plain markup awaiting their archetype (#35–#37). `/` redirects to the caller's own dashboard. The
+Story and Article detail (#33) and Brief detail as the owned artefact (#34), and the Form
+archetype across registration, sign-in, and the Brief form — which gained its own
+cover-image control (#35); the three dashboards are still plain markup awaiting their
+archetype (#36–#37). `/` redirects to the caller's own dashboard. The
 **design prototype** for the Phase-3 flagship (`src/versions/BureauPrototype.tsx` +
 `bureau.tsx` over hardcoded `src/data.ts`, styled by `src/styles.css`) sits at
 `/design-prototype`, out of the Phase-1 path.
