@@ -90,7 +90,32 @@ export function CategoryFilter({ value, onChange }: { value: string; onChange: (
 }
 
 // Sort shares the register's pill, but never its applied state — see
-// filterFieldClass.
+// filterFieldClass. The field and the direction are two controls because they are
+// two decisions; `options` differ per page (a Story is first seen, a Brief is
+// created, a result is relevant) but the control is one.
+export function SortFieldFilter({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="filter-field">
+      Sort by{" "}
+      <select value={value} onChange={(e) => onChange(e.target.value)}>
+        {options.map(({ value: option, label }) => (
+          <option key={option} value={option}>
+            {label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export function SortDirectionFilter({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   return (
     <label className="filter-field">

@@ -5,6 +5,7 @@ import {
   CategoryFilter,
   DateRangeFilter,
   SortDirectionFilter,
+  SortFieldFilter,
   useListQueryParams,
 } from "../components/listControls";
 import { EmptyState, PendingState, RetryableError } from "../components/uiStates";
@@ -31,16 +32,14 @@ export default function Stories() {
     <IndexPage title="Stories">
       <FilterRegister label="Filter Stories">
         <CategoryFilter value={list.category} onChange={(value) => list.updateFilter("category", value)} />{" "}
-        <label className="filter-field">
-          Sort by{" "}
-          <select
-            value={sortField}
-            onChange={(e) => list.updateFilter("sort", `${e.target.value}:${list.sortDir}`)}
-          >
-            <option value="firstSeenAt">Date first seen</option>
-            <option value="title">Title</option>
-          </select>
-        </label>{" "}
+        <SortFieldFilter
+          value={sortField}
+          options={[
+            { value: "firstSeenAt", label: "Date first seen" },
+            { value: "title", label: "Title" },
+          ]}
+          onChange={(value) => list.updateFilter("sort", `${value}:${list.sortDir}`)}
+        />{" "}
         <SortDirectionFilter
           value={list.sortDir}
           onChange={(value) => list.updateFilter("sort", `${sortField}:${value}`)}

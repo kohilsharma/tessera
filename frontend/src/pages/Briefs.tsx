@@ -1,17 +1,22 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { getBriefs, type BriefSortField } from "../api/client";
+import { BriefCoverThumbnail } from "../components/coverImage";
+import { Entry, EntryRegister, FilterRegister, IndexPage } from "../components/indexArchetype";
 import {
   CategoryFilter,
   DateRangeFilter,
-  Pagination,
   SortDirectionFilter,
+  SortFieldFilter,
   useListQueryParams,
 } from "../components/listControls";
-import { EmptyState, EntryList, PendingState, RetryableError } from "../components/uiStates";
+import { EmptyState, PendingState, RetryableError } from "../components/uiStates";
 
-// Story 34: the owned-entity list carries the same advanced controls as the
-// corpus lists — filter (category + date range), sort, and pagination.
+// Story 34's advanced controls, now on the Index archetype (#32): the owned list
+// reads in the same vocabulary as the corpus it draws from, so a reader learns
+// one layout. The only thing a Brief entry has that a Story's doesn't is its
+// cover plate — always drawn, so the register doesn't step in and out as it
+// scrolls past Briefs with and without an image.
 export default function Briefs() {
   const list = useListQueryParams();
   const sortField: BriefSortField =
@@ -30,30 +35,31 @@ export default function Briefs() {
   });
 
   return (
-    <main>
-      <h1>My Briefs</h1>
-      <p>
-        <Link to="/briefs/new">+ New Brief</Link>
-      </p>
-      <form onSubmit={(e) => e.preventDefault()}>
+    <IndexPage
+      title="My Briefs"
+      action={
+        <Link className="index-action" to="/briefs/new">
+          New Brief
+        </Link>
+      }
+    >
+      <FilterRegister label="Filter your Briefs">
         <CategoryFilter value={list.category} onChange={(value) => list.updateFilter("category", value)} />{" "}
-        <label className="filter-field">
-          Sort by{" "}
-          <select
-            value={sortField}
-            onChange={(e) => list.updateFilter("sort", `${e.target.value}:${list.sortDir}`)}
-          >
-            <option value="createdAt">Date created</option>
-            <option value="updatedAt">Last updated</option>
-            <option value="title">Title</option>
-          </select>
-        </label>{" "}
+        <SortFieldFilter
+          value={sortField}
+          options={[
+            { value: "createdAt", label: "Date created" },
+            { value: "updatedAt", label: "Last updated" },
+            { value: "title", label: "Title" },
+          ]}
+          onChange={(value) => list.updateFilter("sort", `${value}:${list.sortDir}`)}
+        />{" "}
         <SortDirectionFilter
           value={list.sortDir}
           onChange={(value) => list.updateFilter("sort", `${sortField}:${value}`)}
         />{" "}
         <DateRangeFilter label="Created from" from={list.dateFrom} to={list.dateTo} onChange={list.updateFilter} />
-      </form>
+      </FilterRegister>
 
       {query.isPending && <PendingState>Loading your Briefs…</PendingState>}
       {query.isError && (
@@ -63,6 +69,9 @@ export default function Briefs() {
           retrying={query.isFetching}
         />
       )}
+      {/* The same two empty states Stories keeps apart: filters that matched
+          nothing are the owner's to undo, an owner with no Briefs yet has
+          nothing to clear and wants the way to their first one. */}
       {query.isSuccess && query.data.items.length === 0 && (
         <EmptyState>
           {list.hasFilters ? (
@@ -80,18 +89,30 @@ export default function Briefs() {
         </EmptyState>
       )}
       {query.isSuccess && query.data.items.length > 0 && (
-        <>
-          <EntryList>
-            {query.data.items.map((brief) => (
-              <li key={brief.id}>
-                <Link to={`/briefs/${brief.id}`}>{brief.title}</Link> — {brief.category}, {brief.articleCount}/
-                {brief.articleCapacityLimit} article{brief.articleCapacityLimit === 1 ? "" : "s"}
-              </li>
-            ))}
-          </EntryList>
-          <Pagination envelope={query.data} onGoToPage={list.goToPage} />
-        </>
+        <EntryRegister envelope={query.data} onGoToPage={list.goToPage}>
+          {query.data.items.map((brief) => (
+            <Entry
+              key={brief.id}
+              to={`/briefs/${brief.id}`}
+              title={brief.title}
+              cover={<BriefCoverThumbnail url={brief.coverImageUrl} cacheKey={brief.coverImageKey} />}
+              meta={[
+                { term: "Category", value: brief.category },
+                {
+                  term: "Capacity",
+                  value: `${brief.articleCount}/${brief.articleCapacityLimit} article${
+                    brief.articleCapacityLimit === 1 ? "" : "s"
+                  }`,
+                },
+                {
+                  term: "Created",
+                  value: <time dateTime={brief.createdAt}>{new Date(brief.createdAt).toLocaleDateString()}</time>,
+                },
+              ]}
+            />
+          ))}
+        </EntryRegister>
       )}
-    </main>
+    </IndexPage>
   );
 }

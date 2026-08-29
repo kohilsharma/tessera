@@ -12,10 +12,24 @@ import { EntryList } from "./uiStates";
 // state has no equivalent on Stories, so the archetype holds the frame and the
 // entry, not the state machine.
 
-export function IndexPage({ title, children }: { title: string; children: ReactNode }) {
+// `action` is the one thing an index can offer besides its list — Briefs' "New
+// Brief". It sits with the title rather than floating above the register,
+// because the register is about narrowing what is already there.
+export function IndexPage({
+  title,
+  action,
+  children,
+}: {
+  title: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <main className="index">
-      <h1>{title}</h1>
+      <div className="index-head">
+        <h1>{title}</h1>
+        {action}
+      </div>
       {children}
     </main>
   );
@@ -58,17 +72,25 @@ export function EntryRegister({
 // One entry in the register: the record's name, and the facts you scan a corpus
 // by. `meta` is the prototype's ledger pattern — monospace uppercase term over a
 // weighted value — so provenance reads as provenance and not as prose.
+//
+// `cover` is the plate a Brief's cover image sits on: passing it draws the plate,
+// omitting it is a record type that has no cover (a Story, a search result). The
+// node inside may render nothing — a Brief with no image, or one still fetching —
+// and the row still holds its shape, which is the point of the plate.
 export function Entry({
   to,
   title,
+  cover,
   meta,
 }: {
   to: string;
   title: string;
+  cover?: ReactNode;
   meta: { term: string; value: ReactNode }[];
 }) {
   return (
     <li className="entry">
+      {cover !== undefined && <div className="entry-cover">{cover}</div>}
       <Link className="entry-title" to={to}>
         {title}
       </Link>

@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Briefs from "./Briefs";
 import { jsonResponse, listEnvelope, renderWithProviders } from "../test/renderWithProviders";
@@ -73,8 +73,45 @@ describe("Briefs list — UI states", () => {
 
     renderWithProviders(<Briefs />);
 
-    expect(await screen.findByRole("link", { name: "Supply chain watch" })).toHaveAttribute("href", "/briefs/b1");
-    expect(screen.getByRole("listitem")).toHaveTextContent("technology, 3/20 articles");
+    const entry = await screen.findByRole("listitem");
+    expect(within(entry).getByRole("link", { name: "Supply chain watch" })).toHaveAttribute("href", "/briefs/b1");
+    expect(within(entry).getByText("technology")).toBeInTheDocument();
+    expect(within(entry).getByText("3/20 articles")).toBeInTheDocument();
+  });
+});
+
+// jsdom does no layout, so "the row holds its shape" is a browser check, not a
+// test. What it can hold is the content contract either side of it: a cover
+// appears where the Brief has one and nothing is rendered where it doesn't.
+describe("Briefs list — cover images", () => {
+  // jsdom implements no object URLs, and the cover endpoint is owner-only so its
+  // bytes arrive as a blob rather than as an <img src>.
+  const covered = {
+    ...brief,
+    id: "b2",
+    title: "Grid watch",
+    coverImageKey: "briefs/b2/cover.png",
+    coverImageUrl: "/api/v1/briefs/b2/cover-image",
+  };
+
+  beforeEach(() => {
+    // jsdom implements neither object-URL method, and the two the hook calls are
+    // the only ones anything here uses — so they are assigned rather than the
+    // whole URL global stubbed, which would take the constructor with it.
+    URL.createObjectURL = () => "blob:cover";
+    URL.revokeObjectURL = () => {};
+  });
+
+  it("shows a cover where the Brief has one and none where it does not", async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(listEnvelope([brief, covered])));
+
+    renderWithProviders(<Briefs />);
+
+    const [plain, withCover] = await screen.findAllByRole("listitem");
+    // querySelector because a cover is decorative (alt=""), so it has no
+    // accessible role to query by — the entry's title names the record.
+    await waitFor(() => expect(withCover.querySelector("img")).toBeInTheDocument());
+    expect(plain.querySelector("img")).not.toBeInTheDocument();
   });
 });
 

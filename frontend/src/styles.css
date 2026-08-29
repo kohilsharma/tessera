@@ -171,11 +171,23 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 
 /* ============================================================
    INDEX ARCHETYPE — filter register, ruled entry register, pagination
-   (see components/indexArchetype.tsx). Established on Stories; Briefs
-   and Search adopt it next (#32), so the corpus ends up scanned in one
-   vocabulary.
+   (see components/indexArchetype.tsx). Established on Stories, adopted by
+   Briefs and Search (#32), so the corpus is scanned in one vocabulary.
    ============================================================ */
-.index h1 { margin: 0 0 26px; font-size: clamp(1.75rem, 3vw, 2.7rem); font-weight: 700; line-height: 1.05; letter-spacing: -.025em; text-wrap: balance; }
+.index h1 { margin: 0; font-size: clamp(1.75rem, 3vw, 2.7rem); font-weight: 700; line-height: 1.05; letter-spacing: -.025em; text-wrap: balance; }
+
+/* The title and the index's one action share a baseline band, and the band owns
+   the space below it — the title and the action can't drift apart by editing one
+   of two margins. The action is DESIGN.md's command button (paper field, hard
+   Proof Magenta offset, Proof Blue on hover, offset collapsing on press), not
+   the ink fill: ink fill is already the register's *applied* signal
+   (.filter-field--applied), and the page's one command is not a selection. */
+.index-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px 24px; margin-bottom: 26px; }
+/* margin-right leaves the 5px the offset prints into, so the command's registered
+   block ends on the same edge as the rules below it. */
+.index-action { border: 1px solid var(--bureau-ink); background: var(--stock-paper); color: var(--bureau-ink); padding: 11px 18px; margin-right: 5px; font-size: .78rem; font-weight: 700; text-decoration: none; box-shadow: 5px 5px 0 var(--proof-magenta); transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease, transform 140ms ease; }
+.index-action:hover { background: var(--proof-blue); color: var(--stock-paper); }
+.index-action:active { transform: translate(3px, 3px); box-shadow: 2px 2px 0 var(--proof-magenta); }
 
 /* The register reads as one band on the bench rather than fields floating on
    paper: ink edge because a registered band is ruled in ink (the neutral dashed
@@ -201,6 +213,14 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 .entry-register dt { margin: 0 0 5px; color: var(--quiet-ink); font: 500 .66rem/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
 .entry-register dd { margin: 0; font-size: .82rem; font-weight: 650; }
 
+/* The cover plate. Always drawn on a Brief entry, so the register keeps one left
+   edge whether or not an image landed — and one plate treatment, not two: a
+   dashed plate would spend the rule DESIGN.md reserves for Evidence outside the
+   active claim, and it would have to lie about a cover still in flight. */
+.entry:has(.entry-cover) { grid-template-columns: 78px minmax(0, 1fr) auto; }
+.entry-cover { width: 78px; aspect-ratio: 3 / 2; border: 1px solid var(--registration-rule); background: var(--bench-stock); overflow: hidden; }
+.entry-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
 /* Pagination brings its own top rule, so the register closes on that one rather
    than ruling twice, 22px apart. Lists without pagination (a Story's Articles)
    keep their closing rule. */
@@ -212,6 +232,11 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
   .entry { grid-template-columns: minmax(0, 1fr); }
   .entry-register { justify-self: start; }
   .entry-register > div, .entry-register > div:last-child { border-left: 0; padding: 0 24px 0 0; }
+  /* The plate stays beside the title and the ledger drops under both, rather
+     than the plate taking a row of its own above a wrapped title. */
+  .entry:has(.entry-cover) { grid-template-columns: 58px minmax(0, 1fr); }
+  .entry:has(.entry-cover) .entry-register { grid-column: 2; }
+  .entry-cover { width: 58px; }
 }
 
 /* ============================================================

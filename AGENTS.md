@@ -28,8 +28,9 @@ Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (
 (`/stories`, `/stories/:id`, `/articles/:id`), IntelligenceBriefs (`/briefs`, `/briefs/:id`),
 and search (`/search`). The **Bureau rollout** (#28) is mid-flight: root design tokens and the
 application shell (#29), the four shared UI-state treatments and restyled list controls (#30),
-and the Index archetype on `/stories` (#31) are done; the remaining pages are still plain
-markup awaiting their archetype (#32–#37). `/` redirects to the caller's own dashboard. The
+and the Index archetype across all three of its consumers — `/stories` (#31), `/briefs` and
+`/search` (#32) — are done; the record, form, and dashboard pages are still plain markup
+awaiting their archetype (#33–#37). `/` redirects to the caller's own dashboard. The
 **design prototype** for the Phase-3 flagship (`src/versions/BureauPrototype.tsx` +
 `bureau.tsx` over hardcoded `src/data.ts`, styled by `src/styles.css`) sits at
 `/design-prototype`, out of the Phase-1 path.

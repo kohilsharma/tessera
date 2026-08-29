@@ -1,48 +1,23 @@
-import { ChangeEvent, FormEvent, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   attachArticleToBrief,
   deleteBrief,
   detachArticleFromBrief,
-  fetchBriefCoverImage,
   getBrief,
   uploadBriefCoverImage,
 } from "../api/client";
+import { useBriefCoverImage } from "../components/coverImage";
 import { EmptyState, EntryList, ErrorState, PendingState, RetryableError } from "../components/uiStates";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// The cover image endpoint is owner-only, so the bytes need the bearer token an
-// <img src> can't send: fetch them, then point the <img> at an object URL.
+// The record page's cover: full width, and it says what it is doing while it
+// waits. The token-and-object-URL dance itself is shared with the index's
+// thumbnail (components/coverImage.tsx).
 function CoverImage({ url, cacheKey }: { url: string; cacheKey: string | null }) {
-  const [src, setSrc] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let objectUrl: string | null = null;
-    let cancelled = false;
-    setSrc(null);
-    setFailed(false);
-
-    fetchBriefCoverImage(url)
-      .then((blob) => {
-        if (cancelled) return;
-        objectUrl = URL.createObjectURL(blob);
-        setSrc(objectUrl);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-
-    return () => {
-      cancelled = true;
-      // Without this the blob stays in memory for the life of the document.
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-    // cacheKey too: replacing the image keeps the same URL but changes the key,
-    // so this is what tells us to re-fetch after an upload.
-  }, [url, cacheKey]);
+  const { src, failed } = useBriefCoverImage(url, cacheKey);
 
   if (failed) return <ErrorState>Could not load the cover image.</ErrorState>;
   if (!src) return <PendingState>Loading cover image…</PendingState>;
