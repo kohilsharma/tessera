@@ -36,9 +36,10 @@ npm run build     # type-check + compile to dist/ (`npm start` runs the build)
 ### Demo logins
 
 `npm run seed` is idempotent — re-run it after any migration. It creates one user
-per role, all sharing the same password, plus a Publisher/Story/Article corpus
-(browsable at `/stories` once the frontend is running) embedded with the deterministic
-Mock EmbeddingProvider (ADR-0003's Mock-provider rule, ADR-0017 interface).
+per role, all sharing the same password, a Publisher/Story/Article corpus (browsable
+at `/stories` once the frontend is running), and one owned Brief for the Student user
+with Articles already attached (browsable at `/briefs`) — so the demo has a populated
+Brief to show without building one live.
 
 | Email | Role |
 |---|---|
@@ -51,6 +52,20 @@ Password: `tessera-demo`, or whatever `SEED_PASSWORD` is set to when you run it.
 **Seeding is the only way an Admin exists.** `POST /auth/register` accepts Student
 and Investor only — Admin is assigned, never self-served (ADR-0004) — so without
 this step `/dashboard/admin` has no one who can reach it.
+
+### Embeddings
+
+The corpus and every search query are embedded with whichever `EmbeddingProvider`
+`GEMINI_API_KEY` selects (ADR-0017/0023's interface):
+
+- **Unset (default):** the deterministic Mock provider — no network, no API key,
+  works offline. This is also what every backend test uses (ADR-0003).
+- **Set:** the hosted `gemini-embedding-001` (Google AI Studio, free tier),
+  truncated to `vector(1024)`. Get a free key at https://aistudio.google.com/apikey
+  and put it in `.env`; `EMBEDDING_MODEL` overrides the model id if needed.
+
+Re-run `npm run seed` after changing `GEMINI_API_KEY` — search compares the query's
+vector against whatever embedded the corpus, so both sides must match.
 
 `.env` must set `JWT_SECRET` to a long random string — there is no built-in
 fallback, so the API refuses to sign or verify a token without it (ADR-0013).

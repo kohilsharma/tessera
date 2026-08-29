@@ -5,7 +5,9 @@ import { User, USER_ROLES } from "./entities/User";
 import { Publisher } from "./entities/Publisher";
 import { Story } from "./entities/Story";
 import { Article } from "./entities/Article";
-import { MockEmbeddingProvider } from "./embeddings/MockEmbeddingProvider";
+import { BriefArticle } from "./entities/BriefArticle";
+import { DEFAULT_ARTICLE_CAPACITY_LIMIT, IntelligenceBrief } from "./entities/IntelligenceBrief";
+import { createEmbeddingProvider } from "./embeddings";
 import { toVectorLiteral } from "./embeddings/pgvector";
 import { SEED_PUBLISHERS, SEED_STORIES } from "./seedData/corpus";
 
@@ -33,14 +35,14 @@ async function seedUsers(): Promise<void> {
   }
 }
 
-// #19: seeds the browsable corpus with the deterministic Mock EmbeddingProvider
-// (ADR-0017/0023 interface, in the spirit of ADR-0003's Mock-provider rule) so the
-// app is never empty and re-running is reproducible.
+// #19/#23: seeds the browsable corpus, embedded with whichever EmbeddingProvider
+// createEmbeddingProvider() selects (hosted if GEMINI_API_KEY is set, Mock
+// otherwise) so the app is never empty and re-running is reproducible.
 async function seedCorpus(): Promise<void> {
   const publishers = AppDataSource.getRepository(Publisher);
   const stories = AppDataSource.getRepository(Story);
   const articles = AppDataSource.getRepository(Article);
-  const embedder = new MockEmbeddingProvider();
+  const embedder = createEmbeddingProvider();
 
   const publisherByDomain = new Map<string, Publisher>();
   for (const seedPublisher of SEED_PUBLISHERS) {
@@ -92,10 +94,46 @@ async function seedCorpus(): Promise<void> {
   }
 }
 
+// #23: the Phase-1 exit criterion needs at least one owned Brief with Articles
+// already attached, not just an empty shell a demoer has to fill in live.
+const SEED_BRIEF_TITLE = "AI Accelerator Supply Chain Watch";
+const SEED_BRIEF_STORY_SLUG = "advanced-packaging-capacity-race";
+
+async function seedBrief(): Promise<void> {
+  const briefs = AppDataSource.getRepository(IntelligenceBrief);
+  const briefArticles = AppDataSource.getRepository(BriefArticle);
+  const users = AppDataSource.getRepository(User);
+  const articles = AppDataSource.getRepository(Article);
+
+  if (await briefs.findOne({ where: { title: SEED_BRIEF_TITLE } })) {
+    console.log(`= brief "${SEED_BRIEF_TITLE}" already seeded`);
+    return;
+  }
+
+  const owner = await users.findOneOrFail({ where: { email: "student@tessera.local" } });
+  const storyArticles = await articles.find({
+    where: { story: { slug: SEED_BRIEF_STORY_SLUG } },
+    relations: { story: true },
+  });
+
+  const brief = await briefs.save({
+    title: SEED_BRIEF_TITLE,
+    note: "Tracking packaging capacity announcements across the AI-accelerator supply chain.",
+    category: "technology",
+    articleCapacityLimit: DEFAULT_ARTICLE_CAPACITY_LIMIT,
+    ownerId: owner.id,
+  });
+  for (const article of storyArticles) {
+    await briefArticles.save({ briefId: brief.id, articleId: article.id });
+  }
+  console.log(`+ brief "${SEED_BRIEF_TITLE}" (${storyArticles.length} articles)`);
+}
+
 async function seed(): Promise<void> {
   await AppDataSource.initialize();
   await seedUsers();
   await seedCorpus();
+  await seedBrief();
   console.log(`\nDemo login password for all seeded users: ${SEED_PASSWORD}`);
   await AppDataSource.destroy();
 }

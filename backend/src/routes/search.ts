@@ -8,15 +8,14 @@ import { requireAuth } from "../middleware/requireAuth";
 import { toPublicArticle } from "../lib/articleView";
 import { parseListQuery, toEnvelope } from "../lib/listQuery";
 import { hybridSearchArticleIds } from "../lib/hybridSearch";
-import { MockEmbeddingProvider } from "../embeddings/MockEmbeddingProvider";
+import { createEmbeddingProvider } from "../embeddings";
 
 export const searchRouter = Router();
 
-// ponytail: hardcoded to the Mock provider, same as seed.ts — the corpus was
-// itself embedded with Mock, so a query embedded by anything else wouldn't be
-// comparable. Swapping in the hosted provider behind this interface for both
-// sides together is #23's job, not this ticket's.
-const embedder = new MockEmbeddingProvider();
+// ADR-0023: hosted provider once GEMINI_API_KEY is configured, Mock otherwise
+// (tests, and any dev machine without a key) — seed.ts selects the same way,
+// so a query is always embedded comparably to the corpus it searches.
+const embedder = createEmbeddingProvider();
 
 searchRouter.get(
   "/search",

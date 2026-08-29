@@ -18,8 +18,9 @@
 
 **backend/** — Express + TypeORM. Auth (#17), role-guard middleware + dashboards (#18), a
 seeded Publisher/Story/Article corpus with browse endpoints (#19), IntelligenceBrief CRUD with
-cover images (#20, #21), and hybrid search over the corpus (#22 — Postgres FTS + pgvector
-cosine, fused by RRF) are live; `GET /api/v1/health` from the walking skeleton (#16) too.
+cover images (#20, #21), hybrid search over the corpus (#22 — Postgres FTS + pgvector cosine,
+fused by RRF), and Phase-1 demo hardening (#23 — finalized Compose, hosted EmbeddingProvider,
+a seeded owned Brief) are live; `GET /api/v1/health` from the walking skeleton (#16) too.
 Ingestion, the flagship generation pipeline, and Phase 3.5 (graph/timeline) are not built yet.
 **frontend/** — still mostly the **design prototype**: `src/App.tsx` renders
 `src/versions/bureau.tsx` against `src/styles.css` with hardcoded `src/data.ts` at `/`. Live,
@@ -160,7 +161,8 @@ npm run dev       # tsx watch, http://localhost:4000
 npm run build     # tsc -> dist/
 npm run migrate   # apply TypeORM migrations
 npm run seed      # demo users for all three roles (only path to an Admin, ADR-0015) + the
-                  # Story/Article/Publisher corpus, embedded with the Mock EmbeddingProvider
+                  # Story/Article/Publisher corpus + one owned Brief; embedded with the
+                  # Mock EmbeddingProvider unless GEMINI_API_KEY is set (ADR-0023)
 npm test          # vitest; spins up an ephemeral Postgres via Testcontainers, needs docker access
 ```
 
