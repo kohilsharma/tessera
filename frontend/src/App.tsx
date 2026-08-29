@@ -1,5 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import BureauPrototype from "./versions/BureauPrototype";
+import AppShell from "./components/AppShell";
+import Masthead from "./components/Masthead";
 import HealthStatus from "./pages/HealthStatus";
 import Register from "./pages/Register";
 import Login from "./pages/Login";
@@ -15,105 +17,41 @@ import Briefs from "./pages/Briefs";
 import BriefForm from "./pages/BriefForm";
 import BriefDetail from "./pages/BriefDetail";
 
-// The route table, and nothing else. `/` lands on the user's own dashboard
+// The route table, and nothing else. Chrome comes from AppShell (authenticated
+// routes) and Masthead (sign-in/register/status), applied once here per
+// variant rather than by each page. `/` lands on the user's own dashboard
 // (RequireAuth bounces a signed-out visitor to /login); the Phase-3 design
-// prototype keeps its own route rather than standing in as the front door.
+// prototype keeps its own route, with no chrome, rather than standing in as
+// the front door.
 function App() {
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="/design-prototype" element={<BureauPrototype />} />
-      <Route path="/status" element={<HealthStatus />} />
-      <Route path="/register" element={<Register />} />
-      <Route path="/login" element={<Login />} />
+      <Route element={<Masthead />}>
+        <Route path="/status" element={<HealthStatus />} />
+        <Route path="/register" element={<Register />} />
+        <Route path="/login" element={<Login />} />
+      </Route>
       <Route
-        path="/account"
         element={
           <RequireAuth>
-            <Account />
+            <AppShell />
           </RequireAuth>
         }
-      />
-      <Route
-        path="/dashboard"
-        element={
-          <RequireAuth>
-            <DashboardRedirect />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/dashboard/:role"
-        element={
-          <RequireAuth>
-            <RoleDashboard />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/stories"
-        element={
-          <RequireAuth>
-            <Stories />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/stories/:id"
-        element={
-          <RequireAuth>
-            <StoryDetail />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/articles/:id"
-        element={
-          <RequireAuth>
-            <ArticleDetail />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/search"
-        element={
-          <RequireAuth>
-            <Search />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/briefs"
-        element={
-          <RequireAuth>
-            <Briefs />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/briefs/new"
-        element={
-          <RequireAuth>
-            <BriefForm />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/briefs/:id"
-        element={
-          <RequireAuth>
-            <BriefDetail />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/briefs/:id/edit"
-        element={
-          <RequireAuth>
-            <BriefForm />
-          </RequireAuth>
-        }
-      />
+      >
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/account" element={<Account />} />
+        <Route path="/dashboard" element={<DashboardRedirect />} />
+        <Route path="/dashboard/:role" element={<RoleDashboard />} />
+        <Route path="/stories" element={<Stories />} />
+        <Route path="/stories/:id" element={<StoryDetail />} />
+        <Route path="/articles/:id" element={<ArticleDetail />} />
+        <Route path="/search" element={<Search />} />
+        <Route path="/briefs" element={<Briefs />} />
+        <Route path="/briefs/new" element={<BriefForm />} />
+        <Route path="/briefs/:id" element={<BriefDetail />} />
+        <Route path="/briefs/:id/edit" element={<BriefForm />} />
+      </Route>
     </Routes>
   );
 }

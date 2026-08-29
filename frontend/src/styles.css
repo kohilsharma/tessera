@@ -5,12 +5,75 @@
   font-synthesis: none;
 }
 
+/* Bureau palette, promoted from the prototype's .design-bureau namespace so
+   every page can consume it. Distinct custom-property names from the block
+   below (not reused), so a root-token edit can never change how
+   /design-prototype renders — see .design-bureau further down. */
+:root {
+  --proof-blue: #1458a6;
+  --proof-magenta: #c51d62;
+  --registered-overlap: #492e84;
+  --student-context: #315f35;
+  --bureau-ink: #171715;
+  --stock-paper: #f2f0e9;
+  --bench-stock: #dedbd2;
+  --quiet-ink: #55534e;
+  --registration-rule: #b8b5ac;
+  --proof-blue-stock: #e1e9f2;
+  --proof-magenta-stock: #f3e2e9;
+  --registered-overlap-stock: #e7e2ef;
+  --student-context-stock: #e3ebe1;
+}
+
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; overflow-x: clip; }
 body { margin: 0; min-width: 320px; min-height: 100vh; overflow-x: clip; }
 button, a { font: inherit; }
 button { color: inherit; }
-button:focus-visible, a:focus-visible { outline: 3px solid #f0a800; outline-offset: 3px; }
+button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px solid #f0a800; outline-offset: 3px; }
+
+/* ============================================================
+   APPLICATION SHELL — chrome shared by every live page, applied at
+   the route table (App.tsx) rather than declared per page.
+   ============================================================ */
+.site-header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 58px; padding: 0 3.5vw; border-bottom: 1px solid var(--bureau-ink); background: rgba(242, 240, 233, .96); position: sticky; top: 0; z-index: 20; }
+.site-header--masthead { grid-template-columns: 1fr; }
+
+.site-wordmark { color: var(--bureau-ink); text-decoration: none; font-weight: 800; font-size: 1rem; display: inline-flex; gap: 10px; align-items: center; width: max-content; }
+.site-mark { width: 22px; height: 22px; position: relative; display: inline-block; }
+.site-mark::before, .site-mark::after, .site-mark i { content: ""; position: absolute; border: 2px solid var(--bureau-ink); width: 11px; height: 11px; }
+.site-mark::before { inset: 0 auto auto 0; border-color: var(--proof-blue); }
+.site-mark::after { inset: auto 0 0 auto; border-color: var(--proof-magenta); }
+.site-mark i:first-child { inset: 0 0 auto auto; }
+.site-mark i:last-child { inset: auto auto 0 0; }
+
+.site-nav { display: flex; align-self: stretch; }
+.site-nav a { color: var(--quiet-ink); text-decoration: none; padding: 19px 20px 0; font-size: .82rem; font-weight: 650; transition: color 140ms ease; }
+.site-nav a:hover { color: var(--bureau-ink); }
+.site-nav a[aria-current="page"] { color: var(--bureau-ink); box-shadow: inset 0 -3px var(--bureau-ink); }
+
+.identity-menu { justify-self: end; position: relative; }
+.identity-menu summary { list-style: none; border: 1px solid var(--registration-rule); background: none; font: 500 .78rem ui-monospace, SFMono-Regular, Consolas, monospace; cursor: pointer; padding: 7px 12px; color: var(--bureau-ink); transition: border-color 140ms ease; }
+.identity-menu summary::-webkit-details-marker { display: none; }
+.identity-menu summary:hover, .identity-menu[open] summary { border-color: var(--bureau-ink); }
+.identity-menu .role-tag { border-left: 1px solid var(--registration-rule); margin-left: 8px; padding-left: 8px; color: var(--quiet-ink); }
+.identity-menu .identity-panel { position: absolute; right: 0; top: calc(100% + 6px); display: flex; flex-direction: column; min-width: 160px; border: 1px solid var(--bureau-ink); background: var(--stock-paper); padding: 6px; gap: 2px; }
+.identity-menu .identity-panel a, .identity-menu .identity-panel button { text-align: left; border: 0; background: none; padding: 8px 10px; font-size: .8rem; cursor: pointer; color: var(--bureau-ink); text-decoration: none; }
+.identity-menu .identity-panel a:hover, .identity-menu .identity-panel button:hover { background: var(--bench-stock); }
+.identity-placeholder { justify-self: end; color: var(--quiet-ink); font-size: .78rem; }
+
+@media (max-width: 560px) {
+  .site-header { grid-template-columns: 1fr auto; grid-template-rows: auto auto; padding: 10px 18px; row-gap: 8px; }
+  .site-wordmark { grid-row: 1; grid-column: 1; }
+  .site-nav { grid-row: 2; grid-column: 1 / -1; justify-content: space-between; border-top: 1px solid var(--registration-rule); padding-top: 6px; }
+  .identity-menu, .identity-placeholder { grid-row: 1; grid-column: 2; justify-self: end; }
+}
+
+@media (max-width: 390px) {
+  .site-header { padding: 8px 12px; }
+  .site-nav a { padding: 8px 4px 0; font-size: .74rem; }
+  .identity-menu .role-tag { display: none; }
+}
 
 /* ============================================================
    BUREAU — Evidence Registration Bureau
