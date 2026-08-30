@@ -4,7 +4,7 @@ import { Article, isStrongerAnalysisTextMode } from "../entities/Article";
 import type { AnalysisTextMode } from "../entities/Article";
 import { IngestionConnector } from "../entities/IngestionConnector";
 import { IngestionRun } from "../entities/IngestionRun";
-import { Publisher } from "../entities/Publisher";
+import { Publisher, mayStoreText } from "../entities/Publisher";
 import { canonicalizeUrl, normalizeTitle, publisherDomain } from "./canonicalUrl";
 import { parseRssFeed, type FeedItem } from "./rss";
 
@@ -56,8 +56,8 @@ function fail(reason: string): never {
 // domain. orIgnore + read-back rather than an upsert: two connectors can sight a
 // new publisher at the same moment, and an upsert would overwrite the name of a
 // publisher someone had already curated by hand.
-// (#40 is what gives a new Publisher its Terms Class, defaulting to
-// internal_only so the rights gate fails closed.)
+// A new Publisher takes the column's `internal_only` default (#40), so its text
+// is held for analysis but never served until an Admin classifies it.
 async function resolvePublisher(domain: string, name: string): Promise<Publisher> {
   const publishers = AppDataSource.getRepository(Publisher);
   await publishers.createQueryBuilder().insert().values({ domain, name }).orIgnore().execute();
@@ -166,6 +166,14 @@ async function ingestItem(
   const mode: AnalysisTextMode = "feed_excerpt";
   const domain = publisherDomain(url);
   const publisher = await resolvePublisher(domain, channelTitle ?? domain);
+  // The rights gate (#40). A publisher classed `open_metadata` has cleared its
+  // metadata and nothing else, and an RSS item's whole contribution is its
+  // excerpt — so there is nothing here Tessera may keep, and the item goes with
+  // its text rather than landing as a text-free row. Rejected on rights grounds
+  // and counted, which is what an operator reads that counter for.
+  // (A text-free sighting is unaffected: the metadata_only rung is #41's path,
+  // where there is no text to reject.)
+  if (!mayStoreText(publisher.termsClass)) return "rejectedByPolicy";
   const dedupeKey = `${publisher.id}\n${publishedAt.toISOString().slice(0, 10)}\n${normalizeTitle(item.title)}`;
 
   return AppDataSource.transaction(async (manager) => {

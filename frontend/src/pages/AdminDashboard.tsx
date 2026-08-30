@@ -5,6 +5,7 @@ import {
   setConnectorEnabled,
   USER_ROLES,
   type IngestionRunSummary,
+  type TermsClass,
 } from "../api/client";
 import DashboardShell from "./DashboardShell";
 import {
@@ -30,6 +31,15 @@ const RUN_STATUS_LABEL: Record<IngestionRunSummary["status"], string> = {
   running: "Running",
   succeeded: "Succeeded",
   failed: "Failed",
+};
+
+// A Terms Class read as an operator reads it: what this publisher's text is
+// cleared for, not the enum spelling (#40).
+const TERMS_CLASS_LABEL: Record<TermsClass, string> = {
+  open_metadata: "Metadata only",
+  syndicated_excerpt: "Excerpt cleared",
+  internal_only: "Internal only",
+  licensed: "Licensed",
 };
 
 // The Admin surface (#36, #39): four operator registers, in three shapes, so they
@@ -185,6 +195,7 @@ export default function AdminDashboard() {
                       measure={publisher.articleCount / widest}
                       meta={[
                         { term: "Domain", value: <code>{publisher.domain}</code> },
+                        { term: "Terms", value: TERMS_CLASS_LABEL[publisher.termsClass] },
                         { term: "Articles", value: publisher.articleCount },
                       ]}
                     />

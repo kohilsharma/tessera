@@ -3,7 +3,8 @@ import { AppDataSource } from "../data-source";
 import { Article } from "../entities/Article";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
-import { mayRedistribute, toPublicArticle } from "../lib/articleView";
+import { mayServeText } from "../entities/Publisher";
+import { toPublicArticle } from "../lib/articleView";
 import { isUuid } from "../lib/uuid";
 
 export const articlesRouter = Router();
@@ -34,9 +35,13 @@ articlesRouter.get(
 
     res.json({
       ...toPublicArticle(article),
-      // Until Publisher Terms Class lands in #40, the mode gate fails closed:
-      // only our own manual fixtures are redistributable.
-      analysisText: mayRedistribute(article.analysisTextMode) ? article.analysisText : null,
+      // CONTEXT.md "Terms Class" (#40): the Publisher's rights class decides
+      // whether its text may be served, so rights enforcement is one rule in one
+      // place. Anything a connector created is `internal_only` until someone
+      // classifies it by hand, so the gate fails closed.
+      analysisText: mayServeText(article.publisher.termsClass, article.analysisTextMode)
+        ? article.analysisText
+        : null,
       story: { id: article.story.id, slug: article.story.slug, title: article.story.title },
     });
   }),

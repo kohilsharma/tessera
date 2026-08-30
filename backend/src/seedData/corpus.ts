@@ -1,20 +1,25 @@
+import type { TermsClass } from "../entities/Publisher";
 import { StoryCategory } from "../entities/Story";
 
 // Hand-authored fixtures (ADR-0007): a reproducible, guaranteed-clean, known
 // multi-source corpus for the demo — not live-clustered, so the browse
 // experience never depends on ingestion or clustering quality.
 
-export type SeedPublisher = { name: string; domain: string };
+export type SeedPublisher = { name: string; domain: string; termsClass: TermsClass };
 
+// `licensed` across the board: every word of fixture text below is our own
+// synthetic writing (ADR-0007), so serving it is a rights decision we can
+// actually make. Live publishers a connector discovers get the fail-closed
+// `internal_only` default instead, until an Admin classifies them by hand (#40).
 export const SEED_PUBLISHERS: SeedPublisher[] = [
-  { name: "Meridian Wire", domain: "meridianwire.example" },
-  { name: "Harbor Press", domain: "harborpress.example" },
-  { name: "Lattice Daily", domain: "latticedaily.example" },
-  { name: "Northfield Record", domain: "northfieldrecord.example" },
-  { name: "Cascade Bulletin", domain: "cascadebulletin.example" },
-  { name: "Verity News", domain: "veritynews.example" },
-  { name: "Outpost Journal", domain: "outpostjournal.example" },
-  { name: "Fielding Times", domain: "fieldingtimes.example" },
+  { name: "Meridian Wire", domain: "meridianwire.example", termsClass: "licensed" },
+  { name: "Harbor Press", domain: "harborpress.example", termsClass: "licensed" },
+  { name: "Lattice Daily", domain: "latticedaily.example", termsClass: "licensed" },
+  { name: "Northfield Record", domain: "northfieldrecord.example", termsClass: "licensed" },
+  { name: "Cascade Bulletin", domain: "cascadebulletin.example", termsClass: "licensed" },
+  { name: "Verity News", domain: "veritynews.example", termsClass: "licensed" },
+  { name: "Outpost Journal", domain: "outpostjournal.example", termsClass: "licensed" },
+  { name: "Fielding Times", domain: "fieldingtimes.example", termsClass: "licensed" },
 ];
 
 // ADR-0018's ingestion surfaces, seeded so the Admin dashboard has real

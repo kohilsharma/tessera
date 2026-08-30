@@ -112,7 +112,17 @@ export type ConnectorSummary = {
   endpoint: string;
   enabled: boolean;
 };
-export type PublisherSummary = { id: string; name: string; domain: string; articleCount: number };
+// #40: mirrors backend/src/entities/Publisher.ts. CONTEXT.md "Terms Class" — the
+// per-Publisher rights vocabulary deciding whether text may be served.
+export const TERMS_CLASSES = ["open_metadata", "syndicated_excerpt", "internal_only", "licensed"] as const;
+export type TermsClass = (typeof TERMS_CLASSES)[number];
+export type PublisherSummary = {
+  id: string;
+  name: string;
+  domain: string;
+  termsClass: TermsClass;
+  articleCount: number;
+};
 
 // #39: mirrors backend/src/entities/IngestionRun.ts. CONTEXT.md "IngestionRun" —
 // one invocation of one connector, read from Postgres rather than the queue, so

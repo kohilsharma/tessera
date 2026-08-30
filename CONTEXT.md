@@ -84,9 +84,14 @@ Terms are canonical: use these words in code, docs, and conversation.
   claim on its own. (ADR-0024)
 - **Terms Class** — The per-Publisher rights vocabulary governing whether Tessera may
   *serve* that publisher's text: `open_metadata`, `syndicated_excerpt`, `internal_only`,
-  `licensed`. Storing bodies for internal analysis is governed globally instead (bodies are
-  never redistributed, ADR-0018). Assigned by hand; publishers auto-created by a connector
-  default to `internal_only` — the gate fails closed. (ADR-0024)
+  `licensed`. `api_content` — a body Tessera extracted from the page itself — is never served
+  whatever the class, because no publisher's terms grant text they never handed us (ADR-0018).
+  Storing bodies for internal analysis is governed globally instead (ADR-0018), with one
+  exception: `open_metadata` has cleared its metadata and nothing else, so text-bearing
+  reporting from such a publisher is not stored and is counted on the IngestionRun as rejected
+  on rights grounds. Reclassifying a publisher governs what is served and what arrives next; it
+  does not purge text already stored. Assigned by hand; publishers auto-created by a connector
+  default to `internal_only` — the gate fails closed. (ADR-0018, ADR-0024)
 - **Enrichment** — A second connector finding an Article Tessera already holds (same
   canonical URL) and contributing what it carries: GKG Annotations, or text further up the
   ladder. A same-canonical-URL sighting that contributes *nothing* — re-running an unchanged

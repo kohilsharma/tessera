@@ -27,6 +27,10 @@ Phase 2 has started: the **RSS connector tracer bullet** (#39) is in — `src/in
 #42 makes it an enqueue), an `ingestion_runs` table, and 10 curated real RSS feeds in the
 seed. Ingested reporting lands as **Unclustered Articles** (`articles.storyId` is nullable and
 ingestion leaves it null), so it is invisible to browse and search by construction.
+Each Publisher now carries a **Terms Class** (#40) and *that* decides whether the API serves
+its text: fixture Publishers are `licensed` (the text is ours), anything a connector creates
+defaults to `internal_only`, and an `open_metadata` publisher's text-bearing items are rejected
+on rights grounds and counted on the run.
 The GKG/DOC connectors, the worker, and Phase 3.5 (graph/timeline) are not built yet.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
@@ -43,7 +47,8 @@ The cross-route responsive and accessibility sweep (#37) closed it out: `/accoun
 `/status` became stated pages in the same vocabulary, and every route's screenshots at both
 breakpoints sit in `docs/verification/bureau-rollout/`. `/` redirects to the caller's own
 dashboard. The Admin console gained a fourth register for **IngestionRun** history and Run /
-Enable-Disable commands on each connector row (#39). The
+Enable-Disable commands on each connector row (#39), and each publisher row shows its Terms
+Class beside its article count (#40). The
 **design prototype** for the Phase-3 flagship (`src/versions/BureauPrototype.tsx` +
 `bureau.tsx` over hardcoded `src/data.ts`, styled by `src/styles.css`) sits at
 `/design-prototype`, out of the Phase-1 path.
@@ -102,9 +107,11 @@ pattern (supertest + an ephemeral Testcontainers Postgres) later Foundation tick
 - Entity resolution uses a **confidence threshold**; borderline merges queue for Admin review.
 - EntityEdges are **co-occurrence**, not typed relations (typed relations deferred).
 - Cache LLM calls by `content_hash`; batch where possible.
-- GDELT/API **metadata** is storable; article **bodies** are internal only, never redistributed.
-  One documented exception: the hosted embedding provider (ADR-0023). Synthesis evidence text
-  goes only to the paid, contractually no-training provider (ADR-0003).
+- GDELT/API **metadata** is storable; article **bodies** are internal only, and are served
+  only where a Publisher's **Terms Class** clears them by hand (#40) — never for
+  `api_content`, which Tessera extracted itself. Two documented exceptions to bodies staying
+  internal: the hosted embedding provider (ADR-0023), and synthesis evidence text, which goes
+  only to the paid, contractually no-training provider (ADR-0003).
 
 ## Working conventions
 

@@ -60,6 +60,14 @@ async function seedCorpus(): Promise<void> {
     if (!publisher) {
       publisher = await publishers.save(seedPublisher);
       console.log(`+ publisher ${seedPublisher.domain}`);
+    } else if (publisher.termsClass !== seedPublisher.termsClass) {
+      // A database seeded before #40 has every Publisher at the fail-closed
+      // `internal_only` default, which would stop the demo corpus serving its own
+      // fixture text. Converge, the same way seedBrief converges a missing cover
+      // image — and only for these fixture domains, which the seed owns.
+      await publishers.update({ id: publisher.id }, { termsClass: seedPublisher.termsClass });
+      publisher.termsClass = seedPublisher.termsClass;
+      console.log(`~ publisher ${seedPublisher.domain} terms class -> ${seedPublisher.termsClass}`);
     }
     publisherByDomain.set(seedPublisher.domain, publisher);
   }

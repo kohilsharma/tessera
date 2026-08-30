@@ -76,7 +76,9 @@ describe("Admin dashboard", () => {
       },
     ],
     ingestionRuns: [],
-    publishers: [{ id: "p1", name: "The Ledger", domain: "ledger.example", articleCount: 7 }],
+    publishers: [
+      { id: "p1", name: "The Ledger", domain: "ledger.example", termsClass: "internal_only", articleCount: 7 },
+    ],
     ...overrides,
   });
 
@@ -112,6 +114,9 @@ describe("Admin dashboard", () => {
     const publishers = screen.getByRole("region", { name: "Publishers" });
     expect(within(publishers).getByText("ledger.example")).toBeInTheDocument();
     expect(within(publishers).getByText("7")).toBeInTheDocument();
+    // Story 20: the Terms Class sits beside the article count, so an operator can
+    // see which sources are cleared to serve text (#40).
+    expect(within(publishers).getByText("Internal only")).toBeInTheDocument();
   });
 
   // #39: the ingestion panel across the four shared UI states. Loading and error

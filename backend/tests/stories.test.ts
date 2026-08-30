@@ -18,7 +18,10 @@ const unknownArticleId = "00000000-0000-0000-0000-000000000000";
 let token: string;
 let storyAlphaId: string;
 let articleAlphaOneId: string;
+let fixtureTextWithheldArticleId: string;
 let internalTextArticleId: string;
+let licensedFullTextArticleId: string;
+let extractedTextArticleId: string;
 let tiedStoryIds: string[];
 
 beforeAll(async () => {
@@ -31,7 +34,13 @@ beforeAll(async () => {
   const stories = AppDataSource.getRepository(Story);
   const articles = AppDataSource.getRepository(Article);
 
-  const publisherA = await publishers.save({ name: "Publisher A", domain: "publisher-a.example" });
+  const publisherA = await publishers.save({
+    name: "Publisher A",
+    domain: "publisher-a.example",
+    // Cleared to serve its text (#40); Publisher B is left at the fail-closed
+    // `internal_only` default, so the two cover both sides of the rights gate.
+    termsClass: "licensed",
+  });
   const publisherB = await publishers.save({ name: "Publisher B", domain: "publisher-b.example" });
 
   const storyAlpha = await stories.save({
@@ -53,7 +62,7 @@ beforeAll(async () => {
     publishedAt: new Date("2026-01-01T00:00:00Z"),
   });
   articleAlphaOneId = articleAlphaOne.id;
-  await articles.save({
+  const articleAlphaTwo = await articles.save({
     storyId: storyAlpha.id,
     publisherId: publisherB.id,
     title: "Alpha, from Publisher B",
@@ -62,6 +71,7 @@ beforeAll(async () => {
     analysisTextMode: "manual_fixture",
     publishedAt: new Date("2026-01-01T12:00:00Z"),
   });
+  fixtureTextWithheldArticleId = articleAlphaTwo.id;
 
   const storyBeta = await stories.save({
     slug: "story-beta",
@@ -80,17 +90,42 @@ beforeAll(async () => {
     analysisTextMode: "manual_fixture",
     publishedAt: new Date("2026-01-03T00:00:00Z"),
   });
-  // A body we hold for analysis but may not redistribute (ADR-0018).
+  // A body we hold for analysis but may not serve: its Publisher's Terms Class
+  // is the fail-closed default (#40).
   const internalTextArticle = await articles.save({
     storyId: storyBeta.id,
     publisherId: publisherB.id,
     title: "Beta, from Publisher B",
     url: "https://publisher-b.example/beta",
     analysisText: "Licensed body text that must never leave the API.",
-    analysisTextMode: "api_content",
+    analysisTextMode: "licensed_full_text",
     publishedAt: new Date("2026-01-03T06:00:00Z"),
   });
   internalTextArticleId = internalTextArticle.id;
+  // The same mode from a Publisher that *is* cleared to serve text: the Terms
+  // Class decides, not the Analysis Text Mode allowlist it replaced (#40).
+  const licensedFullTextArticle = await articles.save({
+    storyId: storyBeta.id,
+    publisherId: publisherA.id,
+    title: "Beta follow-up, from Publisher A",
+    url: "https://publisher-a.example/beta-follow-up",
+    analysisText: "Licensed body text Publisher A cleared for redistribution.",
+    analysisTextMode: "licensed_full_text",
+    publishedAt: new Date("2026-01-03T09:00:00Z"),
+  });
+  licensedFullTextArticleId = licensedFullTextArticle.id;
+  // A body Tessera extracted from the page itself, under a cleared Publisher:
+  // ADR-0018's floor, which no Terms Class lifts.
+  const extractedTextArticle = await articles.save({
+    storyId: storyBeta.id,
+    publisherId: publisherA.id,
+    title: "Beta extraction, from Publisher A",
+    url: "https://publisher-a.example/beta-extraction",
+    analysisText: "Body text Tessera extracted from the page itself.",
+    analysisTextMode: "api_content",
+    publishedAt: new Date("2026-01-03T10:00:00Z"),
+  });
+  extractedTextArticleId = extractedTextArticle.id;
 
   const storyGamma = await stories.save({
     slug: "story-gamma",
@@ -412,15 +447,48 @@ describe("GET /api/v1/articles/:id", () => {
     });
   });
 
-  it("withholds analysisText for a mode we may not redistribute (ADR-0018)", async () => {
+  it("withholds analysisText when the Publisher's Terms Class does not allow serving it (#40)", async () => {
     const res = await request(app())
       .get(`/api/v1/articles/${internalTextArticleId}`)
       .set("Authorization", `Bearer ${token}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.analysisTextMode).toBe("api_content");
+    expect(res.body.analysisTextMode).toBe("licensed_full_text");
     expect(res.body.analysisText).toBeNull();
     expect(JSON.stringify(res.body)).not.toContain("must never leave the API");
+  });
+
+  // Both directions, because the Terms Class replaced an Analysis Text Mode
+  // allowlist: a cleared publisher's non-fixture text is served, and an
+  // unclassified publisher's fixture-mode text is not.
+  it("serves a cleared Publisher's licensed body text", async () => {
+    const res = await request(app())
+      .get(`/api/v1/articles/${licensedFullTextArticleId}`)
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.analysisTextMode).toBe("licensed_full_text");
+    expect(res.body.analysisText).toBe("Licensed body text Publisher A cleared for redistribution.");
+  });
+
+  it("withholds analysisText for an unclassified Publisher even in manual_fixture mode", async () => {
+    const res = await request(app())
+      .get(`/api/v1/articles/${fixtureTextWithheldArticleId}`)
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.analysisTextMode).toBe("manual_fixture");
+    expect(res.body.analysisText).toBeNull();
+  });
+
+  it("never serves text Tessera extracted itself, even for a cleared Publisher (ADR-0018)", async () => {
+    const res = await request(app())
+      .get(`/api/v1/articles/${extractedTextArticleId}`)
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.analysisTextMode).toBe("api_content");
+    expect(res.body.analysisText).toBeNull();
   });
 
   it("returns 404 for a well-formed but unknown Article id", async () => {

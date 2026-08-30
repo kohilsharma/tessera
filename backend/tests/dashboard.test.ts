@@ -170,6 +170,9 @@ describe("dashboard RBAC", () => {
       id: publisher.id,
       name: "Operator Press",
       domain: "operator-press.example",
+      // Story 20: an operator can see which sources are cleared, and this one is
+      // at the fail-closed default (#40).
+      termsClass: "internal_only",
       articleCount: 0,
     });
   });

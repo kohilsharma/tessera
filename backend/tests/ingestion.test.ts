@@ -139,6 +139,9 @@ describe("runConnector over an RSS feed", () => {
       expect(article.publisher.domain).toBe("npr.org");
       // Named from the feed's channel title, keyed on the unique domain.
       expect(article.publisher.name).toBe("NPR Topics: World");
+      // #40: a Publisher nobody has classified is `internal_only`, so its text is
+      // held for analysis and never served — the rights gate fails closed.
+      expect(article.publisher.termsClass).toBe("internal_only");
     }
 
     // content:encoded is HTML in a CDATA block: what lands is the text, not the
@@ -360,6 +363,27 @@ describe("runConnector over an RSS feed", () => {
     expect(after.analysisTextMode).toBe("licensed_full_text");
     expect(after.analysisText).toBe("The licensed full text we already hold.");
     expect(after.discoveredByConnectorId).toBeNull();
+  });
+
+  it("rejects text-bearing items from a metadata-only Publisher on rights grounds", async () => {
+    const connector = await createRssConnector("https://bbc-metadata-only.example/feed.xml");
+    // Hand-classified: this publisher has cleared its metadata and nothing else,
+    // so an RSS excerpt is text Tessera may not keep at all (#40).
+    await AppDataSource.getRepository(Publisher).save({
+      name: "BBC News",
+      domain: "bbc.co.uk",
+      termsClass: "open_metadata",
+    });
+
+    const run = await runConnector(connector, { fetchText: fixture("bbc-world.xml") });
+
+    expect(run!.status).toBe("succeeded");
+    expect(run!.discovered).toBe(3);
+    expect(run!.rejectedByPolicy).toBe(3);
+    expect(run!.inserted).toBe(0);
+    expect(run!.failed).toBe(0);
+    expect(countersSumToDiscovered(run!)).toBe(true);
+    expect(await AppDataSource.getRepository(Article).count()).toBe(0);
   });
 
   it("fails a malformed item and not the run, and says why", async () => {

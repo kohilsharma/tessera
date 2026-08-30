@@ -118,6 +118,10 @@ dashboardRouter.get(
         id: publisher.id,
         name: publisher.name,
         domain: publisher.domain,
+        // CONTEXT.md "Terms Class" (#40): assigned by hand, so an operator has to
+        // be able to see which sources are cleared and which are still at the
+        // fail-closed default.
+        termsClass: publisher.termsClass,
         articleCount: publisher.articleCount ?? 0,
       })),
     });
