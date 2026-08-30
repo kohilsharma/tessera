@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:npr="https://www.npr.org/rss/" xmlns:nprml="https://api.npr.org/nprml" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:media="http://search.yahoo.com/mrss/" version="2.0">
+  <channel>
+    <title>NPR Topics: World</title>
+    <link>https://www.npr.org/templates/story/story.php?storyId=1004</link>
+    <description>NPR world news, international art and culture, world business and financial markets, world economy, and global trends in health, science and technology. Subscribe to the World Story of the Day podcast and RSS feed.</description>
+    <language>en</language>
+    <copyright>Copyright 2024 NPR - For Personal Use Only</copyright>
+    <generator>Story API Shim 1.2.24</generator>
+    <lastBuildDate>Sun, 30 Aug 2026 11:23:58 -0400</lastBuildDate>
+    <image>
+      <url>https://media.npr.org/images/podcasts/primary/npr_generic_image_300.jpg?s=200</url>
+      <title>NPR Topics: World</title>
+      <link>https://www.npr.org/sections/world/</link>
+    </image>
+    <item>
+      <title>Canada claps back at Trump&apos;s efforts to rename Lake Ontario as &apos;Lake America&apos;</title>
+      <description>Ontario Premier Doug Ford has unveiled a giant billboard reading: &quot;Lake Ontario — Now and Always.&quot; But tech giant Google has said it is renaming the lake for U.S. users, as President Trump demanded.</description>
+      <pubDate>Sun, 30 Aug 2026 10:36:44 -0400</pubDate>
+      <link>https://www.npr.org/2026/08/30/nx-s1-5949254/lake-ontario-america-doug-ford-trump-sign-google</link>
+      <guid>https://www.npr.org/2026/08/30/nx-s1-5949254/lake-ontario-america-doug-ford-trump-sign-google</guid>
+      <content:encoded><![CDATA[<img src='https://npr.brightspotcdn.com/dims3/default/strip/false/crop/4969x3313+0+0/resize/4969x3313!/?url=http%3A%2F%2Fnpr-brightspot.s3.amazonaws.com%2F7c%2Fd3%2F34edc3ed470abb1249553419ff38%2Fap26241611483319.jpg' alt='Ontario Premier Doug Ford, right, and Niagara West Member of Provincial Parliament Sam Oosterhoff unveil a sign for Lake Ontario at the Fifty Point Conservation Area in Grimsby, Ontario, Canada, on Saturday, Aug. 29, 2026. (Keito Newman/The Canadian Press via AP)'/><p>Ontario Premier Doug Ford has unveiled a giant billboard reading: "Lake Ontario — Now and Always." But tech giant Google has said it is renaming the lake for U.S. users, as President Trump demanded.</p><p>(Image credit: Keito Newman/The Canadian Press)</p><img src='https://media.npr.org/include/images/tracking/npr-rss-pixel.png?story=nx-s1-5949254' />]]></content:encoded>
+      <dc:creator>Fatima Al-Kassab</dc:creator>
+    </item>
+    <item>
+      <title>The Trump administration claims America will soon get a majority of its oil from Venezuela with new deal</title>
+      <description>There are many reasons to be skeptical of the Trump administration&apos;s announcement that the U.S. will develop Venezuelan oil.</description>
+      <pubDate>Sun, 30 Aug 2026 08:02:27 -0400</pubDate>
+      <link>https://www.npr.org/2026/08/30/nx-s1-5948708/the-trump-administration-claims-america-will-soon-get-a-majority-of-its-oil-from-venezuela-with-new-deal</link>
+      <guid>https://www.npr.org/2026/08/30/nx-s1-5948708/the-trump-administration-claims-america-will-soon-get-a-majority-of-its-oil-from-venezuela-with-new-deal</guid>
+      <content:encoded><![CDATA[<p>There are many reasons to be skeptical of the Trump administration's announcement that the U.S. will develop Venezuelan oil.</p><img src='https://media.npr.org/include/images/tracking/npr-rss-pixel.png?story=nx-s1-5948708' />]]></content:encoded>
+      <dc:creator>Julia Simon</dc:creator>
+    </item>
+    <item>
+      <title>From Appalachia to Africa: Why Dolly Parton was beloved across the continent</title>
+      <description>Dolly Parton&apos;s songs traveled far beyond Nashville. Across Africa, musicians embraced her stories of hardship, heartbreak and humble beginnings — and made them their own.</description>
+      <pubDate>Sun, 30 Aug 2026 06:00:00 -0400</pubDate>
+      <link>https://www.npr.org/2026/08/30/nx-s1-5946399/africa-dolly-parton-fans</link>
+      <guid>https://www.npr.org/2026/08/30/nx-s1-5946399/africa-dolly-parton-fans</guid>
+      <content:encoded><![CDATA[<img src='https://npr.brightspotcdn.com/dims3/default/strip/false/crop/5000x3335+0+0/resize/5000x3335!/?url=http%3A%2F%2Fnpr-brightspot.s3.amazonaws.com%2F38%2F49%2F8eafbc484b7a8dad967be0d67348%2Fgettyimages-2287054395.jpg' alt='Nigerian country singer Ochiora Okogeri, popularly known as The Country Man, performs Dolly Parton songs during International Cowboy Day celebrations in Nairobi in July 2026.'/><p>Dolly Parton's songs traveled far beyond Nashville. Across Africa, musicians embraced her stories of hardship, heartbreak and humble beginnings — and made them their own.</p><p>(Image credit: Luis Tato)</p><img src='https://media.npr.org/include/images/tracking/npr-rss-pixel.png?story=nx-s1-5946399' />]]></content:encoded>
+      <dc:creator>Kate Bartlett</dc:creator>
+    </item>
+    </channel>
+</rss>

@@ -1,5 +1,6 @@
 import "reflect-metadata";
 import { readdir, rm } from "node:fs/promises";
+import bcrypt from "bcryptjs";
 import { afterAll, describe, expect, it, beforeAll } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app";
@@ -7,6 +8,8 @@ import { AppDataSource } from "../src/data-source";
 import { Publisher } from "../src/entities/Publisher";
 import { Story } from "../src/entities/Story";
 import { Article } from "../src/entities/Article";
+import { User } from "../src/entities/User";
+import { signToken } from "../src/auth/jwt";
 import { setupTestDb } from "./setupTestDb";
 
 setupTestDb();
@@ -82,6 +85,30 @@ describe("POST /api/v1/briefs", () => {
   it("rejects an unauthenticated request with 401", async () => {
     const res = await request(app()).post("/api/v1/briefs").send({ title: "x", category: "technology" });
     expect(res.status).toBe(401);
+  });
+
+  // The Brief router's Student/Investor guard is router-level, and an *unpathed*
+  // router-level guard runs for every request Express routes into that router —
+  // including paths it does not serve — so it silently 403'd Admins on every
+  // endpoint mounted after it in app.ts (search, then ingestion). Scoping it to
+  // /briefs is the fix; this pins both halves of it.
+  it("refuses an Admin a Brief without guarding endpoints mounted after this router", async () => {
+    const passwordHash = await bcrypt.hash("correct-horse", 10);
+    const admin = await AppDataSource.getRepository(User).save({
+      email: "brief-admin-scope@example.com",
+      passwordHash,
+      role: "admin",
+    });
+    const token = signToken({ sub: admin.id, role: admin.role });
+
+    const brief = await request(app())
+      .post("/api/v1/briefs")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ title: "Admins own no Briefs", category: "technology" });
+    expect(brief.status).toBe(403);
+
+    const search = await request(app()).get("/api/v1/search?q=briefs").set("Authorization", `Bearer ${token}`);
+    expect(search.status).toBe(200);
   });
 
   it("creates a Brief owned by the caller, defaulting note and capacity", async () => {

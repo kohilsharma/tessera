@@ -113,10 +113,32 @@ export type ConnectorSummary = {
   enabled: boolean;
 };
 export type PublisherSummary = { id: string; name: string; domain: string; articleCount: number };
+
+// #39: mirrors backend/src/entities/IngestionRun.ts. CONTEXT.md "IngestionRun" —
+// one invocation of one connector, read from Postgres rather than the queue, so
+// this panel renders with the worker down (ADR-0024).
+export type IngestionRunStatus = "running" | "succeeded" | "failed";
+export type IngestionRunSummary = {
+  id: string;
+  connectorId: string;
+  connectorName: string;
+  status: IngestionRunStatus;
+  startedAt: string;
+  completedAt: string | null;
+  discovered: number;
+  inserted: number;
+  enriched: number;
+  duplicate: number;
+  rejectedByPolicy: number;
+  failed: number;
+  errorSummary: string | null;
+};
+
 export type AdminDashboardData = {
   role: "admin";
   userCounts: Record<UserRole, number>;
   connectors: ConnectorSummary[];
+  ingestionRuns: IngestionRunSummary[];
   publishers: PublisherSummary[];
 };
 
@@ -359,4 +381,16 @@ export async function fetchBriefCoverImage(coverImageUrl: string): Promise<Blob>
   const res = await authFetch(coverImageUrl);
   if (!res.ok) throw new Error(await parseErrorMessage(res, "Could not load this cover image"));
   return res.blob();
+}
+
+
+// #39: the Admin ingestion surface. Both are Admin-only server-side
+// (backend/src/routes/ingestion.ts) — the console is only ever rendered for an
+// Admin, so the client does not re-check what the API enforces.
+export function runIngestionConnector(connectorId: string): Promise<IngestionRunSummary> {
+  return sendJson("POST", `/api/v1/ingestion/connectors/${connectorId}/run`, undefined, "Could not run this connector");
+}
+
+export function setConnectorEnabled(connectorId: string, enabled: boolean): Promise<ConnectorSummary> {
+  return sendJson("PATCH", `/api/v1/ingestion/connectors/${connectorId}`, { enabled }, "Could not update this connector");
 }

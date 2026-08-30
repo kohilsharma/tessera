@@ -241,10 +241,13 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .entry-cover { width: 78px; aspect-ratio: 3 / 2; border: 1px solid var(--registration-rule); background: var(--bench-stock); overflow: hidden; }
 .entry-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
-/* An entry's own action (detaching an Article from a Brief, #34) takes a third
-   ruled column at the end of the row, so the register's title and ledger keep
-   the geometry they have everywhere else. */
+/* An entry's own action (detaching an Article from a Brief, #34; running or
+   disabling a connector, #39) takes a third ruled column at the end of the row,
+   so the register's title and ledger keep the geometry they have everywhere else.
+   Wrapping, because an operator row offers two commands and the column is as
+   narrow as the row allows. */
 .entry:has(.entry-action) { grid-template-columns: minmax(0, 1fr) auto auto; }
+.entry-action { display: flex; flex-wrap: wrap; align-content: start; gap: 8px; }
 
 /* Pagination brings its own top rule, so the register closes on that one rather
    than ruling twice, 22px apart. Lists without pagination (a Story's Articles)

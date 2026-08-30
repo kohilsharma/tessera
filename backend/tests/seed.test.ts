@@ -6,6 +6,7 @@ import { Story } from "../src/entities/Story";
 import { BriefArticle } from "../src/entities/BriefArticle";
 import { IngestionConnector } from "../src/entities/IngestionConnector";
 import { LocalDiskFileStorageProvider } from "../src/storage/LocalDiskFileStorageProvider";
+import { SEED_CONNECTORS } from "../src/seedData/corpus";
 import { seedAll } from "../src/seed";
 
 const SEED_BRIEF_TITLE = "AI Accelerator Supply Chain Watch";
@@ -45,6 +46,16 @@ describe("npm run seed", () => {
     const connectors = await AppDataSource.getRepository(IngestionConnector).find();
     expect(connectors.length).toBeGreaterThan(0);
     expect(connectors.map((c) => c.kind)).toContain("gdelt_gkg");
+
+    // #39: the curated RSS list is what ingestion actually runs, so it has to be
+    // real feeds — the placeholder it replaced pointed at a domain that cannot
+    // resolve, which made the only RSS connector unrunnable.
+    const rss = connectors.filter((connector) => connector.kind === "rss");
+    expect(rss.length).toBeGreaterThanOrEqual(8);
+    expect(rss.length).toBeLessThanOrEqual(12);
+    expect(rss.every((connector) => connector.enabled)).toBe(true);
+    expect(rss.every((connector) => /^https:\/\//.test(connector.endpoint))).toBe(true);
+    expect(rss.some((connector) => connector.endpoint.includes(".example"))).toBe(false);
   });
 
   it("creates one owned Brief complete on every mandated field, media included", async () => {
@@ -77,7 +88,7 @@ describe("npm run seed", () => {
 
     expect(await repo.count()).toBe(1);
     expect(await AppDataSource.getRepository(User).count()).toBe(USER_ROLES.length);
-    expect(await AppDataSource.getRepository(IngestionConnector).count()).toBe(3);
+    expect(await AppDataSource.getRepository(IngestionConnector).count()).toBe(SEED_CONNECTORS.length);
     // A second cover image would orphan the first file on disk and churn the key
     // the frontend just cached, so the backfill must not fire on a Brief that
     // already has one.

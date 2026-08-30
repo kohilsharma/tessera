@@ -177,7 +177,12 @@ const requireBriefOwner = asyncHandler(async (req, res, next) => {
   next();
 });
 
-briefsRouter.use(requireAuth, requireRole("student", "investor"));
+// Path-scoped, not bare `use(...)`: an unpathed router-level guard runs for every
+// request Express routes into this router — including requests for paths this
+// router does not serve at all — so it would 403 an Admin on any endpoint mounted
+// after briefsRouter in app.ts. Briefs are ADR-0004's Student/Investor artefact;
+// this guard has no business outside /briefs.
+briefsRouter.use("/briefs", requireAuth, requireRole("student", "investor"));
 briefsRouter.use("/briefs/:id", requireBriefOwner);
 
 briefsRouter.get(

@@ -18,29 +18,49 @@ export const SEED_PUBLISHERS: SeedPublisher[] = [
 ];
 
 // ADR-0018's ingestion surfaces, seeded so the Admin dashboard has real
-// connectors to inspect. Seed-only in Phase 1: nothing reads `endpoint` until
-// ingestion lands (ADR-0022).
+// connectors to inspect and, from #39, real feeds to run.
 export type SeedConnector = { name: string; kind: "gdelt_gkg" | "gdelt_doc" | "rss"; endpoint: string; enabled: boolean };
 
+// The curated RSS list. ADR-0018 makes feed curation the cheapest lever on text
+// quality, so the five that emit `content:encoded` (a full article body rather
+// than a one-line teaser) lead the list, and the five that emit only
+// `description` follow. Which is which was measured against the live feeds on
+// 2026-08-30, not assumed from the publisher. Deliberately spread across world
+// news, technology, science and security so the ingested corpus has more than one
+// subject in it.
+//
+// These replace the `meridianwire.example` placeholder, which pointed at a domain
+// that cannot resolve and was the only RSS connector.
+const SEED_RSS_FEEDS: { name: string; endpoint: string }[] = [
+  { name: "NPR World (RSS)", endpoint: "https://feeds.npr.org/1004/rss.xml" },
+  { name: "Ars Technica (RSS)", endpoint: "https://feeds.arstechnica.com/arstechnica/index" },
+  { name: "NASA news releases (RSS)", endpoint: "https://www.nasa.gov/news-release/feed/" },
+  { name: "WSJ World News (RSS)", endpoint: "https://feeds.a.dj.com/rss/RSSWorldNews.xml" },
+  { name: "Krebs on Security (RSS)", endpoint: "https://krebsonsecurity.com/feed/" },
+  { name: "BBC News World (RSS)", endpoint: "https://feeds.bbci.co.uk/news/world/rss.xml" },
+  { name: "The Guardian World (RSS)", endpoint: "https://www.theguardian.com/world/rss" },
+  { name: "Al Jazeera (RSS)", endpoint: "https://www.aljazeera.com/xml/rss/all.xml" },
+  { name: "ScienceDaily Top Science (RSS)", endpoint: "https://www.sciencedaily.com/rss/top/science.xml" },
+  { name: "TechCrunch (RSS)", endpoint: "https://techcrunch.com/feed/" },
+];
+
 export const SEED_CONNECTORS: SeedConnector[] = [
+  // Disabled until their connectors exist (#41, #46): runConnector fails a run it
+  // has no implementation for, and an operator should not have to learn that by
+  // pressing the button. Their tickets enable them.
   {
     name: "GDELT GKG firehose",
     kind: "gdelt_gkg",
     endpoint: "http://data.gdeltproject.org/gdeltv2/lastupdate.txt",
-    enabled: true,
+    enabled: false,
   },
   {
     name: "GDELT DOC API",
     kind: "gdelt_doc",
     endpoint: "https://api.gdeltproject.org/api/v2/doc/doc",
-    enabled: true,
-  },
-  {
-    name: "Meridian Wire RSS",
-    kind: "rss",
-    endpoint: "https://meridianwire.example/feed.xml",
     enabled: false,
   },
+  ...SEED_RSS_FEEDS.map(({ name, endpoint }): SeedConnector => ({ name, kind: "rss", endpoint, enabled: true })),
 ];
 
 export type SeedArticle = {

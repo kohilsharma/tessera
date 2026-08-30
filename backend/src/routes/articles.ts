@@ -21,7 +21,13 @@ articlesRouter.get(
       where: { id: req.params.id },
       relations: { publisher: true, story: true },
     });
-    if (!article) {
+    // An Unclustered Article (CONTEXT.md) is not a public record: everything
+    // ingestion produces has no Story until Phase 3 clusters it, and this
+    // endpoint's response is shaped around the Story it belongs to. 404 rather
+    // than a partial record — a 200 with a null Story would make "not clustered
+    // yet" look like a public state, and dereferencing the absent Story below
+    // would be a 500.
+    if (!article || !article.story) {
       res.status(404).json({ error: "Article not found" });
       return;
     }

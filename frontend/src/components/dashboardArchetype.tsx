@@ -84,18 +84,26 @@ export function DashboardRegister({
 // it: a coverage rollup is read by comparison, and comparing eight integers is
 // slower than comparing eight lengths. Omitted where the row's facts are not
 // one quantity.
+//
+// `action` is what an operator can do to the thing this row names — running a
+// connector, disabling it (#39). It takes the Index archetype's third ruled
+// column, so a register that offers actions keeps the geometry of one that does
+// not. A dashboard row's action is the only place in the app where a register row
+// commands anything, which is what an operator console is for.
 export function RegisterRow({
   name,
   to,
   note,
   measure,
   meta,
+  action,
 }: {
   name: string;
   to?: string;
   note?: ReactNode;
   measure?: number;
   meta: { term: string; value: ReactNode }[];
+  action?: ReactNode;
 }) {
   return (
     <li className="entry">
@@ -115,6 +123,7 @@ export function RegisterRow({
         )}
       </div>
       <EntryLedger meta={meta} />
+      {action && <div className="entry-action">{action}</div>}
     </li>
   );
 }

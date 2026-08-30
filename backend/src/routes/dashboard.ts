@@ -3,14 +3,20 @@ import { AppDataSource } from "../data-source";
 import { User, USER_ROLES, UserRole } from "../entities/User";
 import { IntelligenceBrief } from "../entities/IntelligenceBrief";
 import { IngestionConnector } from "../entities/IngestionConnector";
+import { IngestionRun } from "../entities/IngestionRun";
 import { Publisher } from "../entities/Publisher";
 import { Story } from "../entities/Story";
 import type { StoryCategory } from "../entities/Story";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
+import { toPublicIngestionRun } from "../lib/ingestionRunView";
 
 export const dashboardRouter = Router();
+
+// Deep enough to tell a feed that has been failing all morning from one that
+// failed once; shallow enough that the Admin payload has a fixed ceiling.
+const RECENT_INGESTION_RUNS = 20;
 
 // ADR-0004: Student and Investor are genuinely distinct endpoints/data, not one
 // shared shape with a role flag — each route below returns its own field set.
@@ -87,6 +93,16 @@ dashboardRouter.get(
       order: { name: "ASC" },
     });
 
+    // ADR-0024: run history is read from Postgres, never from the queue, so this
+    // panel renders whether or not the worker (#42) is running. Newest first, and
+    // capped — an operator diagnosing a feed reads the last few runs, and an
+    // unbounded history would grow the Admin payload without bound.
+    const ingestionRuns = await AppDataSource.getRepository(IngestionRun).find({
+      relations: { connector: true },
+      order: { startedAt: "DESC" },
+      take: RECENT_INGESTION_RUNS,
+    });
+
     const publishers = await AppDataSource.getRepository(Publisher)
       .createQueryBuilder("publisher")
       .loadRelationCountAndMap("publisher.articleCount", "publisher.articles")
@@ -97,6 +113,7 @@ dashboardRouter.get(
       role: "admin",
       userCounts,
       connectors,
+      ingestionRuns: ingestionRuns.map((run) => toPublicIngestionRun(run, run.connector.name)),
       publishers: (publishers as (Publisher & { articleCount?: number })[]).map((publisher) => ({
         id: publisher.id,
         name: publisher.name,

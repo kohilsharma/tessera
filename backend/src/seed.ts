@@ -108,6 +108,12 @@ async function seedCorpus(): Promise<void> {
 // connectors to inspect. Ingestion reads them in Phase 2.
 async function seedConnectors(): Promise<void> {
   const connectors = AppDataSource.getRepository(IngestionConnector);
+  // #39 replaced the `meridianwire.example` placeholder with real feeds. The seed
+  // is idempotent by name and never deletes, so a database seeded before that
+  // would keep an RSS connector pointing at a domain that cannot resolve —
+  // converge it away, the same way seedBrief converges a missing cover image.
+  await connectors.delete({ name: "Meridian Wire RSS" });
+
   for (const seedConnector of SEED_CONNECTORS) {
     if (await connectors.findOne({ where: { name: seedConnector.name } })) {
       console.log(`= connector ${seedConnector.name} already seeded`);

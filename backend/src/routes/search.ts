@@ -2,7 +2,7 @@ import { Router } from "express";
 import { In } from "typeorm";
 import { AppDataSource } from "../data-source";
 import { Article } from "../entities/Article";
-import { STORY_CATEGORIES } from "../entities/Story";
+import { Story, STORY_CATEGORIES } from "../entities/Story";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
 import { toPublicArticle } from "../lib/articleView";
@@ -57,7 +57,11 @@ searchRouter.get(
     // Re-order to the fused rank: `In(ids)` makes no ordering promise of its own.
     const items = hits
       .map((hit) => ({ article: byId.get(hit.id), score: hit.score }))
-      .filter((hit): hit is { article: Article; score: number } => hit.article !== undefined)
+      // The Story is non-null by construction — hybridSearch inner-joins stories
+      // in both its lexical CTE and its filter, so an Unclustered Article can
+      // never be a hit (ADR-0007: ingested reporting stays out of search). The
+      // narrowing is here so that stays a type-level fact rather than a comment.
+      .filter((hit): hit is { article: Article & { story: Story }; score: number } => hit.article?.story != null)
       // No analysisText: a result list is not the Article detail endpoint, and
       // that endpoint stays the only place body text is served (ADR-0018).
       .map(({ article, score }) => ({

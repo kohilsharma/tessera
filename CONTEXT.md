@@ -89,12 +89,17 @@ Terms are canonical: use these words in code, docs, and conversation.
   default to `internal_only` — the gate fails closed. (ADR-0024)
 - **Enrichment** — A second connector finding an Article Tessera already holds (same
   canonical URL) and contributing what it carries: GKG Annotations, or text further up the
-  ladder. _Avoid_: calling this a duplicate. Two instruments seeing one document is not
-  duplication, and discarding the newcomer loses data whichever one arrives second.
-- **Duplicate** — The same reporting at a *different* canonical URL, caught on normalized
-  title + publisher + date. Rejected on arrival and counted on the IngestionRun. Syndicated
-  wire copy running across many publishers is deliberately *not* handled here — collapsing it
-  is a Phase-3 question about evidence weight, not a Phase-2 question about rows. (ADR-0024)
+  ladder. A same-canonical-URL sighting that contributes *nothing* — re-running an unchanged
+  feed — is not enrichment and is counted as a Duplicate instead; an enrichment count that
+  ticks for no-ops tells an operator nothing. _Avoid_: calling an enrichment a duplicate. Two
+  instruments seeing one document is not duplication, and discarding the newcomer loses data
+  whichever one arrives second.
+- **Duplicate** — Reporting Tessera declines to store: either the same reporting at a
+  *different* canonical URL, caught on normalized title + publisher + date, or a same-URL
+  sighting with nothing to contribute (above). Rejected on arrival and counted on the
+  IngestionRun. Syndicated wire copy running across many publishers is deliberately *not*
+  handled here — collapsing it is a Phase-3 question about evidence weight, not a Phase-2
+  question about rows. (ADR-0024)
 - **GKG Annotation** — One surface-name occurrence of a person, organization, location or
   theme in one Article, exactly as GDELT's GKG reported it, before any resolution. The
   pre-resolution raw material an **Entity** is later resolved *from*. _Avoid_: "GKG mention" —
