@@ -6,28 +6,13 @@ import type { AnalysisTextMode } from "./Article";
 export const TERMS_CLASSES = ["open_metadata", "syndicated_excerpt", "internal_only", "licensed"] as const;
 export type TermsClass = (typeof TERMS_CLASSES)[number];
 
-// The rights gate, in one place (#40): whether Tessera may *serve* this
-// publisher's text over the API. `Record`, not `Partial` — adding a class fails
-// to compile until someone has decided what it may serve, which is the one
-// decision that must never be defaulted by accident.
-const SERVES_TEXT: Record<TermsClass, boolean> = {
-  // Only the metadata is cleared; the text is not, so it is never served.
-  open_metadata: false,
-  syndicated_excerpt: true,
-  // The default for anything a connector creates: held for analysis, never served.
-  internal_only: false,
-  licensed: true,
-};
-
 export function mayServeText(termsClass: TermsClass, mode: AnalysisTextMode): boolean {
-  // ADR-0018's floor, inside the class gate rather than beside it: `api_content`
-  // is a body Tessera extracted from the page itself (Readability, #46). No
-  // publisher's terms grant us that text, because they never handed it to us, so
-  // it stays internal whatever the class says. The class decides everything else
-  // — `feed_excerpt` is text a publisher syndicated, `licensed_full_text` is text
-  // we hold a licence for, `manual_fixture` is our own.
-  if (mode === "api_content") return false;
-  return SERVES_TEXT[termsClass];
+  // `api_content` is always internal (ADR-0018). Every other combination is
+  // fail-closed unless the Publisher cleared that exact strength of text.
+  return (
+    mode !== "api_content" &&
+    (termsClass === "licensed" || (termsClass === "syndicated_excerpt" && mode === "feed_excerpt"))
+  );
 }
 
 // `open_metadata` is the one class whose terms do not let Tessera hold the text
