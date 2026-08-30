@@ -89,9 +89,9 @@ describe("Admin dashboard", () => {
     status: "succeeded",
     startedAt: "2026-08-30T10:00:00.000Z",
     completedAt: "2026-08-30T10:00:02.000Z",
-    discovered: 3,
+    discovered: 6,
     inserted: 2,
-    enriched: 0,
+    enriched: 3,
     duplicate: 1,
     rejectedByPolicy: 0,
     failed: 0,
@@ -159,6 +159,7 @@ describe("Admin dashboard", () => {
               status: "failed",
               discovered: 0,
               inserted: 0,
+              enriched: 0,
               duplicate: 0,
               errorSummary: "getaddrinfo ENOTFOUND feed.invalid",
             }),
@@ -172,9 +173,12 @@ describe("Admin dashboard", () => {
     const runs = await screen.findByRole("region", { name: "Ingestion runs" });
     const [newest, older] = within(runs).getAllByRole("listitem");
     expect(within(newest).getByText("Succeeded")).toBeInTheDocument();
-    // Discovered 3 = inserted 2 + duplicate 1: what an operator reads a run for.
-    expect(within(newest).getByText("Discovered").closest("div")).toHaveTextContent("3");
+    // Discovered 6 = inserted 2 + enriched 3 + duplicate 1: what an operator
+    // reads a run for. #44: overlap between connectors is its own outcome here,
+    // reported as neither an insert nor a duplicate.
+    expect(within(newest).getByText("Discovered").closest("div")).toHaveTextContent("6");
     expect(within(newest).getByText("Inserted").closest("div")).toHaveTextContent("2");
+    expect(within(newest).getByText("Enriched").closest("div")).toHaveTextContent("3");
     expect(within(newest).getByText("Duplicate").closest("div")).toHaveTextContent("1");
     // By the Status cell, not by the word: "Failed" is also a counter's term, and
     // a run that failed is not the same fact as a run with failed items.

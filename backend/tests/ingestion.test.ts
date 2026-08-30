@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import bcrypt from "bcryptjs";
 import { strToU8, zipSync } from "fflate";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app";
 import { AppDataSource } from "../src/data-source";
@@ -101,6 +101,22 @@ function countersSumToDiscovered(run: IngestionRun): boolean {
     run.inserted + run.enriched + run.duplicate + run.rejectedByPolicy + run.failed === run.discovered
   );
 }
+
+// #44: the same ledger invariant for *every* run the suite persists, not only the
+// ones a test thought to check. A succeeded run's five outcomes sum to what it
+// discovered; a run that failed part-way keeps what it accumulated, so it is only
+// ever short by what it never reached.
+afterEach(async () => {
+  const offenders = await AppDataSource.query(
+    `SELECT id, status, discovered, inserted, enriched, duplicate, "rejectedByPolicy", failed
+       FROM ingestion_runs
+      WHERE (status = 'succeeded'
+             AND inserted + enriched + duplicate + "rejectedByPolicy" + failed <> discovered)
+         OR (status <> 'succeeded'
+             AND inserted + enriched + duplicate + "rejectedByPolicy" + failed > discovered)`,
+  );
+  expect(offenders).toEqual([]);
+});
 
 // ADR-0024's ordered ladder, checked directly: `manual_fixture` sits *outside* it,
 // which is the whole reason it is unranked — our own synthetic seed text must not
@@ -777,6 +793,68 @@ describe("runConnector over a GKG window", () => {
     expect(gkgRun!.inserted + rssRun!.inserted).toBe(4);
     expect(gkgRun!.duplicate + rssRun!.duplicate).toBe(1);
     expect(await AppDataSource.getRepository(Article).count()).toBe(4);
+  });
+
+  // ADR-0024 §4 (#44): the two connectors constantly discover the same document
+  // and each carries what the other lacks — GKG the annotations and tone, RSS the
+  // excerpt — so whichever arrives second must enrich rather than insert, reject,
+  // or overwrite. Both orderings are driven end to end below, over the committed
+  // window and a feed carrying that window's own first document URL, so no
+  // contribution can be lost to arrival order. The feed is written inline because
+  // the URL is the thing under test and it comes from the committed fixture.
+  const wmukUrl =
+    "https://www.wmuk.org/npr-news/2026-08-30/canada-claps-back-at-trumps-efforts-to-rename-lake-ontario-as-lake-america";
+  const wmukFeed: FetchText = async () =>
+    `<?xml version="1.0"?><rss version="2.0"><channel><title>WMUK NPR News</title><item><title>Canada claps back at Trump's efforts to rename Lake Ontario as 'Lake America'</title><link>${wmukUrl}?utm_source=rss</link><pubDate>Sun, 30 Aug 2026 19:00:00 GMT</pubDate><description>Broadcast excerpt the station's feed supplied.</description></item></channel></rss>`;
+
+  it("raises a GKG row to feed_excerpt when RSS sights the same canonical URL second", async () => {
+    const gkgConnector = await createGkgConnector();
+    const rssConnector = await createRssConnector("https://wmuk.example/feed.xml");
+    expect((await runConnector(gkgConnector, gkgFixture("20260830190000.gkg.csv")))!.inserted).toBe(4);
+    const held = await AppDataSource.getRepository(Article).findOneByOrFail({ url: wmukUrl });
+    expect(held.analysisTextMode).toBe("metadata_only");
+    expect(await AppDataSource.getRepository(GkgAnnotation).countBy({ articleId: held.id })).toBeGreaterThan(0);
+
+    const run = await runConnector(rssConnector, { fetchText: wmukFeed });
+
+    expect(run!.discovered).toBe(1);
+    expect(run!.enriched).toBe(1);
+    expect(run!.inserted).toBe(0);
+    expect(run!.duplicate).toBe(0);
+    expect(countersSumToDiscovered(run!)).toBe(true);
+    const after = await AppDataSource.getRepository(Article).findOneByOrFail({ id: held.id });
+    expect(after.analysisTextMode).toBe("feed_excerpt");
+    expect(after.analysisText).toContain("Broadcast excerpt");
+    // What GKG contributed is untouched by the enrichment, and the sighting made
+    // no second Article.
+    expect(after.tone).toBeCloseTo(-0.884955752212389, 10);
+    expect(await AppDataSource.getRepository(Article).count()).toBe(4);
+  });
+
+  it("attaches GKG Annotations to an Article RSS found first, without lowering its mode", async () => {
+    const rssConnector = await createRssConnector("https://wmuk.example/feed.xml");
+    const gkgConnector = await createGkgConnector();
+    expect((await runConnector(rssConnector, { fetchText: wmukFeed }))!.inserted).toBe(1);
+    const held = await AppDataSource.getRepository(Article).findOneByOrFail({ url: wmukUrl });
+    expect(await AppDataSource.getRepository(GkgAnnotation).countBy({ articleId: held.id })).toBe(0);
+
+    const run = await runConnector(gkgConnector, gkgFixture("20260830190000.gkg.csv"));
+
+    expect(run!.discovered).toBe(4);
+    expect(run!.inserted).toBe(3);
+    expect(run!.enriched).toBe(1);
+    expect(run!.duplicate).toBe(0);
+    expect(countersSumToDiscovered(run!)).toBe(true);
+    expect(await AppDataSource.getRepository(Article).count()).toBe(4);
+    const after = await AppDataSource.getRepository(Article).findOneByOrFail({ id: held.id });
+    // The ladder's weakest rung arriving second takes nothing away: the mode and
+    // the excerpt are the feed's, the tone and the annotations are GKG's.
+    expect(after.analysisTextMode).toBe("feed_excerpt");
+    expect(after.analysisText).toContain("Broadcast excerpt");
+    expect(after.tone).toBeCloseTo(-0.884955752212389, 10);
+    const annotations = await AppDataSource.getRepository(GkgAnnotation).findBy({ articleId: held.id });
+    expect(annotations.some(({ kind, surfaceName }) => kind === "person" && surfaceName === "Doug Ford")).toBe(true);
+    expect(annotations.length).toBeGreaterThan(0);
   });
 
   // ADR-0024 §4: both connectors will constantly hit the same URL and which one

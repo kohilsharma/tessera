@@ -52,6 +52,13 @@ a nullable `locationDetail` JSONB carrying FeatureID, coordinates and country). 
 are the row identity, so re-reading a window stages nothing twice and a sighting whose only
 contribution is annotations counts as an Enrichment. Nothing reads them yet — Phase 3.5
 resolves Entities from them and builds co-occurrence edges by self-joining.
+**Cross-connector enrichment** (#44) is the behaviour ADR-0024 exists for: a second connector
+sighting an Article's canonical URL attaches what it brings (excerpt text, tone, GKG Annotations,
+GKG's source Publisher), raises the Analysis Text Mode only upward, makes no second Article, and
+is counted as `enriched` — its own outcome beside inserted, duplicate, rejected-by-policy and
+failed, which sum to `discovered` (asserted for every run the suite persists) and are all on the
+Admin console. Both arrival orderings — GKG then RSS, RSS then GKG — are driven end to end
+against the committed GKG window, with each connector's real pipeline enriching the other's row.
 The DOC connector and Phase 3.5 (graph/timeline) are not built yet.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
