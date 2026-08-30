@@ -2,6 +2,7 @@ import "reflect-metadata";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import bcrypt from "bcryptjs";
+import { strToU8, zipSync } from "fflate";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app";
@@ -14,7 +15,7 @@ import { Story } from "../src/entities/Story";
 import { User } from "../src/entities/User";
 import { signToken } from "../src/auth/jwt";
 import { canonicalizeUrl, publisherDomain } from "../src/ingestion/canonicalUrl";
-import { runConnector, type FetchText } from "../src/ingestion/runConnector";
+import { runConnector, type FetchText, type RunConnectorDeps } from "../src/ingestion/runConnector";
 import { setupTestDb } from "./setupTestDb";
 
 setupTestDb();
@@ -29,6 +30,20 @@ const fixture =
   () =>
     readFile(join(__dirname, "fixtures", "rss", name), "utf-8");
 
+// The GKG equivalent: GDELT's own `lastupdate.txt` line, and a committed slice of
+// the live window it names, zipped the way GDELT ships it. Both fetchers are
+// injected, so a GKG run is exercised end to end offline.
+const GKG_LAST_UPDATE =
+  "3066848 98f668dc83aa84d1942c973fc5fcf07c http://data.gdeltproject.org/gdeltv2/20260830190000.gkg.csv.zip";
+
+const gkgFixture = (name: string): RunConnectorDeps => ({
+  fetchText: async () => GKG_LAST_UPDATE,
+  fetchBytes: async () =>
+    zipSync({
+      "20260830190000.gkg.csv": strToU8(await readFile(join(__dirname, "fixtures", "gkg", name), "utf-8")),
+    }),
+});
+
 const failingFetch: FetchText = () => Promise.reject(new Error("getaddrinfo ENOTFOUND feed.invalid"));
 
 let nextConnector = 0;
@@ -40,6 +55,16 @@ async function createRssConnector(endpoint: string, enabled = true): Promise<Ing
     kind: "rss",
     endpoint,
     enabled,
+  });
+}
+
+async function createGkgConnector(): Promise<IngestionConnector> {
+  nextConnector += 1;
+  return AppDataSource.getRepository(IngestionConnector).save({
+    name: `Test GKG ${nextConnector}`,
+    kind: "gdelt_gkg",
+    endpoint: "http://data.gdeltproject.org/gdeltv2/lastupdate.txt",
+    enabled: true,
   });
 }
 
@@ -446,16 +471,183 @@ describe("runConnector over an RSS feed", () => {
 
   it("fails a run for a connector kind that has no implementation yet", async () => {
     const connector = await AppDataSource.getRepository(IngestionConnector).save({
-      name: "GKG not yet built",
-      kind: "gdelt_gkg",
-      endpoint: "http://data.gdeltproject.org/gdeltv2/lastupdate.txt",
+      name: "DOC not yet built",
+      kind: "gdelt_doc",
+      endpoint: "https://api.gdeltproject.org/api/v2/doc/doc",
       enabled: true,
     });
 
     const run = await runConnector(connector, { fetchText: failingFetch });
 
     expect(run!.status).toBe("failed");
-    expect(run!.errorSummary).toContain("gdelt_gkg");
+    expect(run!.errorSummary).toContain("gdelt_doc");
+  });
+});
+
+// #41. GKG carries no body and no snippet at all (ADR-0024), so its rows land on
+// the ladder's weakest rung with genuinely null text — the same runConnector seam,
+// a different discovery step.
+describe("runConnector over a GKG window", () => {
+  beforeEach(async () => {
+    await AppDataSource.query(`TRUNCATE "articles", "publishers", "ingestion_runs" CASCADE`);
+  });
+
+  it("lands each row as a metadata_only Unclustered Article with no text", async () => {
+    const connector = await createGkgConnector();
+
+    const run = await runConnector(connector, gkgFixture("20260830190000.gkg.csv"));
+
+    expect(run!.status).toBe("succeeded");
+    expect(run!.discovered).toBe(4);
+    expect(run!.inserted).toBe(4);
+    expect(run!.failed).toBe(0);
+    expect(countersSumToDiscovered(run!)).toBe(true);
+    // The 15-minute window this run consumed. #45 turns it into a real cursor.
+    expect(run!.cursor).toBe("20260830190000");
+
+    const articles = await AppDataSource.getRepository(Article).find({
+      where: { discoveredByConnectorId: connector.id },
+      relations: { publisher: true },
+    });
+    expect(articles).toHaveLength(4);
+    for (const article of articles) {
+      expect(article.storyId).toBeNull();
+      expect(article.analysisTextMode).toBe("metadata_only");
+      // ADR-0024: the absence is held as null, never as a copy of the title —
+      // which is the lie the rung exists to prevent.
+      expect(article.analysisText).toBeNull();
+      // Retained for the Phase-3.5 timeline overlay.
+      expect(article.tone).not.toBeNull();
+      // Auto-created and fail-closed, exactly as for RSS (#40).
+      expect(article.publisher.termsClass).toBe("internal_only");
+    }
+    // One Publisher per source domain, keyed on the document's own host.
+    expect(articles.map((article) => article.publisher.domain).sort()).toEqual([
+      "kdwa.com",
+      "thehindu.com",
+      "timesofindia.indiatimes.com",
+      "wmuk.org",
+    ]);
+    const canada = articles.find((article) => article.title.includes("Lake Ontario"));
+    expect(canada!.tone).toBeCloseTo(-0.884955752212389, 10);
+  });
+
+  it("keeps a text-free Article's searchVector over its title alone", async () => {
+    const connector = await createGkgConnector();
+
+    await runConnector(connector, gkgFixture("20260830190000.gkg.csv"));
+
+    // ADR-0024's trap: `tsvector || NULL` is NULL, so a null body without the
+    // coalesce would blank the whole vector and drop the row from lexical search
+    // silently. The row still has to be *findable by title* — its invisibility to
+    // the search endpoint comes from having no Story, not from a broken vector.
+    const [{ blank, titleMatches }] = await AppDataSource.query(
+      `SELECT COUNT(*) FILTER (WHERE "searchVector" IS NULL)::int AS blank,
+              COUNT(*) FILTER (WHERE "searchVector" @@ plainto_tsquery('english', 'Lake Ontario'))::int AS "titleMatches"
+       FROM articles WHERE "discoveredByConnectorId" = $1`,
+      [connector.id],
+    );
+    expect(blank).toBe(0);
+    expect(titleMatches).toBe(1);
+  });
+
+  it("fails a malformed row and not the run, and says why", async () => {
+    const connector = await createGkgConnector();
+
+    const run = await runConnector(connector, gkgFixture("20260830190000-malformed.gkg.csv"));
+
+    // One row truncated mid-record (so no V2EXTRASXML and no title), one with an
+    // empty document identifier; the third is intact.
+    expect(run!.status).toBe("succeeded");
+    expect(run!.discovered).toBe(3);
+    expect(run!.inserted).toBe(1);
+    expect(run!.failed).toBe(2);
+    expect(countersSumToDiscovered(run!)).toBe(true);
+    expect(run!.errorSummary).toMatch(/no title/);
+    expect(run!.errorSummary).toMatch(/no link/);
+  });
+
+  it("records a window that is not a GKG file as a failed run", async () => {
+    const connector = await createGkgConnector();
+
+    const run = await runConnector(connector, {
+      fetchText: async () => "<html>503 Service Unavailable</html>",
+      fetchBytes: async () => new Uint8Array(),
+    });
+
+    expect(run!.status).toBe("failed");
+    expect(run!.errorSummary).toContain(".gkg.csv.zip");
+    expect(run!.discovered).toBe(0);
+    expect(await AppDataSource.getRepository(Article).count()).toBe(0);
+  });
+
+  it("re-running the same window inserts nothing", async () => {
+    const connector = await createGkgConnector();
+    const deps = gkgFixture("20260830190000.gkg.csv");
+
+    expect((await runConnector(connector, deps))!.inserted).toBe(4);
+    const second = await runConnector(connector, deps);
+
+    expect(second!.inserted).toBe(0);
+    expect(second!.duplicate).toBe(4);
+    // A metadata_only sighting is the weakest rung, so it can never enrich.
+    expect(second!.enriched).toBe(0);
+    expect(await AppDataSource.getRepository(Article).count()).toBe(4);
+  });
+
+  // ADR-0024 §4: both connectors will constantly hit the same URL and which one
+  // arrives first is a race. Tone must survive the ordering where GKG is second
+  // and its rung is too weak to enrich.
+  it("contributes tone to an Article an RSS feed found first", async () => {
+    const rssConnector = await createRssConnector("https://tone-overlap.example/feed.xml");
+    const gkgConnector = await createGkgConnector();
+    const publisher = await AppDataSource.getRepository(Publisher).save({
+      name: "WMUK",
+      domain: "wmuk.org",
+    });
+    const held = await AppDataSource.getRepository(Article).save({
+      storyId: null,
+      publisherId: publisher.id,
+      discoveredByConnectorId: rssConnector.id,
+      title: "Canada claps back at Trump's efforts to rename Lake Ontario as 'Lake America'",
+      // The first row of the committed window slice, already held with real text.
+      url: "https://www.wmuk.org/npr-news/2026-08-30/canada-claps-back-at-trumps-efforts-to-rename-lake-ontario-as-lake-america",
+      analysisText: "An excerpt the feed supplied.",
+      analysisTextMode: "feed_excerpt",
+      publishedAt: new Date("2026-08-30T10:36:00Z"),
+    });
+
+    const run = await runConnector(gkgConnector, gkgFixture("20260830190000.gkg.csv"));
+
+    expect(run!.inserted).toBe(3);
+    expect(run!.duplicate).toBe(1);
+    const after = await AppDataSource.getRepository(Article).findOneByOrFail({ id: held.id });
+    expect(after.tone).toBeCloseTo(-0.884955752212389, 10);
+    // The weaker sighting contributed tone and nothing else: the text and the rung
+    // the feed supplied are untouched.
+    expect(after.analysisTextMode).toBe("feed_excerpt");
+    expect(after.analysisText).toBe("An excerpt the feed supplied.");
+  });
+
+  // GKG reports no publisher name, so it creates Publishers named after their bare
+  // domain — and it covers the curated feeds' own domains. A placeholder name must
+  // not outlive the first source that offers a real one.
+  it("lets a feed's channel title replace the bare domain GKG left as a name", async () => {
+    const gkgConnector = await createGkgConnector();
+    await runConnector(gkgConnector, gkgFixture("20260830190000.gkg.csv"));
+    const publishers = AppDataSource.getRepository(Publisher);
+    expect((await publishers.findOneByOrFail({ domain: "wmuk.org" })).name).toBe("wmuk.org");
+    // A hand-curated name is a different case, and is never overwritten.
+    await publishers.update({ domain: "kdwa.com" }, { name: "KDWA 1460 AM" });
+
+    const rssConnector = await createRssConnector("https://wmuk.example/feed.xml");
+    await runConnector(rssConnector, {
+      fetchText: async () =>
+        `<?xml version="1.0"?><rss version="2.0"><channel><title>WMUK Public Radio</title><item><title>A later WMUK report</title><link>https://www.wmuk.org/npr-news/2026-08-30/a-later-report</link><pubDate>Sun, 30 Aug 2026 12:00:00 GMT</pubDate><description>Excerpt text.</description></item></channel></rss>`,
+    });
+
+    expect((await publishers.findOneByOrFail({ domain: "wmuk.org" })).name).toBe("WMUK Public Radio");
+    expect((await publishers.findOneByOrFail({ domain: "kdwa.com" })).name).toBe("KDWA 1460 AM");
   });
 });
 
@@ -487,7 +679,7 @@ describe("a completed run does not disturb the curated corpus", () => {
     });
   });
 
-  it("leaves Story browse and search results identical", async () => {
+  it("leaves Story browse and search results identical, for GKG rows too", async () => {
     const stories = () => request(app()).get("/api/v1/stories").set("Authorization", `Bearer ${token}`);
     const search = () =>
       request(app()).get("/api/v1/search?q=packaging").set("Authorization", `Bearer ${token}`);
@@ -499,9 +691,22 @@ describe("a completed run does not disturb the curated corpus", () => {
     const connector = await createRssConnector("https://undisturbed.example/feed.xml");
     const run = await runConnector(connector, { fetchText: fixture("npr-world.xml") });
     expect(run!.inserted).toBeGreaterThan(0);
+    const gkgConnector = await createGkgConnector();
+    const gkgRun = await runConnector(gkgConnector, gkgFixture("20260830190000.gkg.csv"));
+    expect(gkgRun!.status).toBe("succeeded");
+    // Inserted here or already held from an earlier run in this file — either way
+    // the metadata_only rows are in the table while these assertions run.
+    expect(await AppDataSource.getRepository(Article).countBy({ analysisTextMode: "metadata_only" })).toBe(4);
 
     expect((await stories()).body).toEqual(storiesBefore.body);
     expect((await search()).body).toEqual(searchBefore.body);
+    // A term that appears *only* in a GKG-discovered title: it is in the
+    // Article's own searchVector and still unreachable, because every read path
+    // joins through Story and a GKG row has none.
+    const gkgTerm = await request(app())
+      .get("/api/v1/search?q=Manipur")
+      .set("Authorization", `Bearer ${token}`);
+    expect(gkgTerm.body.total).toBe(0);
   });
 
   it("404s an Unclustered Article requested by id rather than 500ing on its absent Story", async () => {

@@ -23,6 +23,10 @@ async function findConnector(id: string): Promise<IngestionConnector | null> {
 // queue the worker drains. The response shape does not change, because what the
 // Admin surface reads afterwards is the IngestionRun row in Postgres either way
 // (ADR-0024) — never the queue.
+// ponytail: inline means the request is held for the whole run, which a curated
+// feed makes imperceptible and a GKG window (~700 rows, #41) makes tens of
+// seconds. #42's enqueue is the upgrade path; capping items per run instead would
+// silently drop reporting, which is worse.
 ingestionRouter.post(
   "/ingestion/connectors/:id/run",
   ...adminOnly,

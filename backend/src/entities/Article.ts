@@ -74,6 +74,13 @@ export class Article {
   @Column({ type: "varchar" })
   analysisTextMode!: AnalysisTextMode;
 
+  // GKG's average document tone for this article (ADR-0024 keeps field 16 and
+  // drops GCAM). Null for every other source: nothing else reports tone, and 0
+  // would assert a neutrality nobody measured. Retained for the Phase-3.5
+  // timeline overlay (ADR-0020) — nothing reads it yet.
+  @Column({ type: "double precision", nullable: true })
+  tone!: number | null;
+
   @Column({ type: "timestamptz" })
   publishedAt!: Date;
 

@@ -50,14 +50,17 @@ const SEED_RSS_FEEDS: { name: string; endpoint: string }[] = [
 ];
 
 export const SEED_CONNECTORS: SeedConnector[] = [
-  // Disabled until their connectors exist (#41, #46): runConnector fails a run it
-  // has no implementation for, and an operator should not have to learn that by
-  // pressing the button. Their tickets enable them.
+  // #41 built the GKG connector, so the firehose is runnable and enabled. The DOC
+  // connector stays disabled until #46 exists: runConnector fails a run it has no
+  // implementation for, and an operator should not have to learn that by pressing
+  // the button.
   {
     name: "GDELT GKG firehose",
     kind: "gdelt_gkg",
-    endpoint: "http://data.gdeltproject.org/gdeltv2/lastupdate.txt",
-    enabled: false,
+    // https, though ADR-0018 writes it as http: GDELT 301s to https anyway, and the
+    // body of this file decides what the connector downloads next.
+    endpoint: "https://data.gdeltproject.org/gdeltv2/lastupdate.txt",
+    enabled: true,
   },
   {
     name: "GDELT DOC API",

@@ -16,6 +16,7 @@
     "dotenv": "17.4.2",
     "express": "4.22.2",
     "fast-xml-parser": "4.5.7",
+    "fflate": "0.8.3",
     "jsonwebtoken": "9.0.3",
     "multer": "2.2.0",
     "pg": "8.23.0",

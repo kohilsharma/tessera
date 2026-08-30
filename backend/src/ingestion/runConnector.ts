@@ -1,4 +1,4 @@
-import type { EntityManager } from "typeorm";
+import { IsNull, type EntityManager } from "typeorm";
 import { AppDataSource } from "../data-source";
 import { Article, isStrongerAnalysisTextMode } from "../entities/Article";
 import type { AnalysisTextMode } from "../entities/Article";
@@ -6,7 +6,8 @@ import { IngestionConnector } from "../entities/IngestionConnector";
 import { IngestionRun } from "../entities/IngestionRun";
 import { Publisher, mayStoreText } from "../entities/Publisher";
 import { canonicalizeUrl, normalizeTitle, publisherDomain } from "./canonicalUrl";
-import { parseRssFeed, type FeedItem } from "./rss";
+import { parseGkgCsv, readGkgArchive, resolveGkgWindowUrl } from "./gkg";
+import { parseRssFeed } from "./rss";
 
 // The one new seam in Phase 2 (#38): a plain async function taking the connector
 // and its dependencies, returning the IngestionRun it persisted. Everything below
@@ -14,13 +15,21 @@ import { parseRssFeed, type FeedItem } from "./rss";
 // counter accumulation — is internal and deliberately has no seam of its own, so
 // tests survive the pipeline being reorganised.
 //
-// The injected fetcher is what lets the whole pipeline be tested against
-// committed real feeds with no network access.
+// The injected fetchers are what let the whole pipeline be tested against
+// committed real feeds and a real GKG window with no network access: text for
+// feeds and GDELT's `lastupdate.txt`, bytes for the zipped GKG window.
 export type FetchText = (url: string) => Promise<string>;
+export type FetchBytes = (url: string) => Promise<Uint8Array>;
 
-export type RunConnectorDeps = { fetchText: FetchText };
+// `fetchBytes` is optional so the RSS path — which has no use for it — keeps a
+// one-key deps object; the GKG path falls back to the real fetcher, and its tests
+// always inject.
+export type RunConnectorDeps = { fetchText: FetchText; fetchBytes?: FetchBytes };
 
 const FETCH_TIMEOUT_MS = 15_000;
+// A GKG window is ~3 MB compressed, so it gets a download-shaped timeout rather
+// than the feed-shaped one.
+const ARCHIVE_FETCH_TIMEOUT_MS = 60_000;
 
 // Identifies us to the publishers we are reading, with a contact path — the
 // courtesy that keeps a curated feed list working. Feeds also 403 a bare default.
@@ -34,6 +43,18 @@ export async function httpFetchText(url: string): Promise<string> {
   });
   if (!res.ok) throw new Error(`${url} responded ${res.status}`);
   return res.text();
+}
+
+// GDELT names its window files over plain http and redirects to https, so
+// redirects are followed here too.
+export async function httpFetchBytes(url: string): Promise<Uint8Array> {
+  const res = await fetch(url, {
+    headers: { "User-Agent": USER_AGENT, Accept: "application/zip, */*" },
+    signal: AbortSignal.timeout(ARCHIVE_FETCH_TIMEOUT_MS),
+    redirect: "follow",
+  });
+  if (!res.ok) throw new Error(`${url} responded ${res.status}`);
+  return new Uint8Array(await res.arrayBuffer());
 }
 
 // The five terminal outcomes for one discovered item. Every item ends in exactly
@@ -61,7 +82,15 @@ function fail(reason: string): never {
 async function resolvePublisher(domain: string, name: string): Promise<Publisher> {
   const publishers = AppDataSource.getRepository(Publisher);
   await publishers.createQueryBuilder().insert().values({ domain, name }).orIgnore().execute();
-  return publishers.findOneByOrFail({ domain });
+  const publisher = await publishers.findOneByOrFail({ domain });
+  // A name that is still just the domain is what GKG leaves behind — it reports no
+  // publisher name at all — so the first source that offers a real one replaces
+  // it. Conditioned on the held name, so a curated name is never overwritten.
+  if (publisher.name === domain && name !== domain) {
+    await publishers.update({ id: publisher.id, name: domain }, { name });
+    publisher.name = name;
+  }
+  return publisher;
 }
 
 function utcDayBounds(at: Date): [Date, Date] {
@@ -106,11 +135,14 @@ type HeldArticle = {
 // A same-URL sighting enriches only when it persists stronger text. Equal or
 // weaker sightings contribute nothing and are duplicates, regardless of which
 // connector saw them (CONTEXT.md "Enrichment").
+// `text` is nullable because a `metadata_only` sighting has none — and because
+// that rung is the weakest, such a sighting can never clear the loop's condition,
+// so the update below only ever writes text that exists.
 async function reconcileWithHeld(
   manager: EntityManager,
   held: HeldArticle,
   connectorId: string,
-  text: string,
+  text: string | null,
   mode: AnalysisTextMode,
 ): Promise<ItemOutcome> {
   const articles = manager.getRepository(Article);
@@ -142,39 +174,106 @@ async function reconcileWithHeld(
   return "duplicate";
 }
 
+// What every connector reduces to before anything touches the database: one
+// discovered document, already carrying the rung it can honestly claim. Nullable
+// where a source may simply not say — validated per item below, so a source that
+// omits something fails that item rather than the run.
+type DiscoveredItem = {
+  title: string | null;
+  // Not yet canonicalized: normalization happens in one place, on the way in.
+  link: string | null;
+  publishedAt: Date | null;
+  text: string | null;
+  mode: AnalysisTextMode;
+  tone: number | null;
+  // The publisher's display name where the source gives one. Null lets the domain
+  // name it — GKG supplies nothing better, and a Publisher is keyed on domain
+  // regardless.
+  publisherName: string | null;
+};
+
+// A run's whole discovery step: the items it found, plus the nearest thing the
+// source has to a cursor.
+type Discovery = { items: DiscoveredItem[]; cursor: string | null };
+
+async function discoverRss(connector: IngestionConnector, deps: RunConnectorDeps): Promise<Discovery> {
+  const feed = parseRssFeed(await deps.fetchText(connector.endpoint));
+  return {
+    cursor: feed.lastBuildDate,
+    items: feed.items.map((item) => ({
+      ...item,
+      mode: "feed_excerpt",
+      // No connector but GKG reports tone.
+      tone: null,
+      publisherName: feed.channelTitle,
+    })),
+  };
+}
+
+// ADR-0018: poll `lastupdate.txt`, take the current 15-minute GKG window, and turn
+// its rows into Articles. ADR-0024: GKG has no body and no snippet at all, so
+// every row is the ladder's weakest rung — `metadata_only`, with genuinely null
+// text rather than a title copied into the text column, which is the lie the rung
+// was added to prevent.
+async function discoverGkg(connector: IngestionConnector, deps: RunConnectorDeps): Promise<Discovery> {
+  const window = resolveGkgWindowUrl(await deps.fetchText(connector.endpoint), connector.endpoint);
+  const csv = readGkgArchive(await (deps.fetchBytes ?? httpFetchBytes)(window.url));
+  return {
+    cursor: window.stamp,
+    items: parseGkgCsv(csv).map((row) => ({
+      title: row.title,
+      link: row.documentIdentifier,
+      publishedAt: row.publishedAt,
+      text: null,
+      mode: "metadata_only",
+      tone: row.tone,
+      // GKG's own source name is a bare domain, and where it differs from the
+      // document's host it is the *coarser* of the two (`indiatimes.com` for a
+      // `timesofindia.indiatimes.com` URL). The URL host is what an Article links
+      // to, so both connectors key their Publisher the same way.
+      publisherName: null,
+    })),
+  };
+}
+
+async function discover(connector: IngestionConnector, deps: RunConnectorDeps): Promise<Discovery> {
+  // #46 adds gdelt_doc here. Until then an unimplemented kind is a failed run
+  // with a legible reason, not a run that quietly discovers nothing.
+  if (connector.kind === "rss") return discoverRss(connector, deps);
+  if (connector.kind === "gdelt_gkg") return discoverGkg(connector, deps);
+  throw new Error(`No connector implementation for kind "${connector.kind}"`);
+}
+
 // One item, start to finish. Throws ItemFailure for anything about the item
-// itself that makes it unstorable — a feed is untrusted input, so a missing link,
-// an unparseable date or a body-less entry is an expected outcome that fails the
-// item and not the run.
-async function ingestItem(
-  item: FeedItem,
-  connector: IngestionConnector,
-  // The feed's channel title, which is where a Publisher's name comes from. Null
-  // for a feed that carries none, and then the domain names the publisher — never
-  // an empty string.
-  channelTitle: string | null,
-): Promise<ItemOutcome> {
-  if (!item.title) fail("item has no title");
+// itself that makes it unstorable — a feed and a GKG window are both untrusted
+// input, so a missing link, an unparseable date or a row with no title is an
+// expected outcome that fails the item and not the run.
+async function ingestItem(item: DiscoveredItem, connector: IngestionConnector): Promise<ItemOutcome> {
+  // Bound to locals, not read off `item` twice: narrowing a parameter's property
+  // does not survive into the transaction callback below.
+  const title = item.title;
+  if (!title) fail("item has no title");
   if (!item.link) fail("item has no link");
   const url = canonicalizeUrl(item.link);
   if (!url) fail(`item link is not an absolute http(s) URL: ${item.link}`);
   const publishedAt = item.publishedAt;
-  if (!publishedAt) fail(`item has no parseable date: ${item.title}`);
+  if (!publishedAt) fail(`item has no parseable date: ${title}`);
   const text = item.text;
-  if (!text) fail(`item has no description or content:encoded: ${item.title}`);
+  // Only `metadata_only` may hold no text (ADR-0024). Any other rung with null
+  // text is a source that promised text and did not deliver it — a failed item,
+  // not a row that quietly claims a rung it cannot support.
+  if (text === null && item.mode !== "metadata_only") fail(`item has no analysable text: ${title}`);
 
-  const mode: AnalysisTextMode = "feed_excerpt";
   const domain = publisherDomain(url);
-  const publisher = await resolvePublisher(domain, channelTitle ?? domain);
+  const publisher = await resolvePublisher(domain, item.publisherName ?? domain);
   // The rights gate (#40). A publisher classed `open_metadata` has cleared its
-  // metadata and nothing else, and an RSS item's whole contribution is its
-  // excerpt — so there is nothing here Tessera may keep, and the item goes with
-  // its text rather than landing as a text-free row. Rejected on rights grounds
-  // and counted, which is what an operator reads that counter for.
-  // (A text-free sighting is unaffected: the metadata_only rung is #41's path,
-  // where there is no text to reject.)
-  if (!mayStoreText(publisher.termsClass)) return "rejectedByPolicy";
-  const dedupeKey = `${publisher.id}\n${publishedAt.toISOString().slice(0, 10)}\n${normalizeTitle(item.title)}`;
+  // metadata and nothing else, so text it did not clear is not kept at all: the
+  // item goes with its text rather than landing as a text-free row. Rejected on
+  // rights grounds and counted, which is what an operator reads that counter for.
+  // A text-free sighting has nothing to reject and is unaffected — that is the
+  // `metadata_only` rung, whose whole contribution is metadata.
+  if (text !== null && !mayStoreText(publisher.termsClass)) return "rejectedByPolicy";
+  const dedupeKey = `${publisher.id}\n${publishedAt.toISOString().slice(0, 10)}\n${normalizeTitle(title)}`;
 
   return AppDataSource.transaction(async (manager) => {
     // The issue-defined duplicate identity has no stored normalized-title
@@ -186,9 +285,19 @@ async function ingestItem(
       where: { url },
       select: { id: true, analysisTextMode: true, discoveredByConnectorId: true },
     });
-    if (held) return reconcileWithHeld(manager, held, connector.id, text, mode);
+    if (held) {
+      // ADR-0024 §4: a same-URL sighting is one document seen by two instruments,
+      // so it contributes what it carries even when its rung is too weak to
+      // enrich. Tone is that contribution today (GKG reports it, RSS does not; #43
+      // adds the GKG Annotations) — written only where the row holds none, so
+      // neither arrival order loses it and neither overwrites the other.
+      if (item.tone !== null) await articles.update({ id: held.id, tone: IsNull() }, { tone: item.tone });
+      // A text-free newcomer can never be stronger than what is held, so it is
+      // counted as a duplicate.
+      return reconcileWithHeld(manager, held, connector.id, text, item.mode);
+    }
 
-    if (await findDuplicateId(manager, publisher.id, item.title, publishedAt)) return "duplicate";
+    if (await findDuplicateId(manager, publisher.id, title, publishedAt)) return "duplicate";
 
     const inserted = await articles
       .createQueryBuilder()
@@ -198,10 +307,11 @@ async function ingestItem(
         storyId: null,
         publisherId: publisher.id,
         discoveredByConnectorId: connector.id,
-        title: item.title,
+        title,
         url,
         analysisText: text,
-        analysisTextMode: mode,
+        analysisTextMode: item.mode,
+        tone: item.tone,
         publishedAt,
       })
       .orIgnore()
@@ -217,7 +327,7 @@ async function ingestItem(
       select: { id: true, analysisTextMode: true, discoveredByConnectorId: true },
     });
     if (!raced) throw new Error(`Article insert was ignored without a canonical URL conflict: ${url}`);
-    return reconcileWithHeld(manager, raced, connector.id, text, mode);
+    return reconcileWithHeld(manager, raced, connector.id, text, item.mode);
   });
 }
 
@@ -243,18 +353,13 @@ export async function runConnector(
   let cursor: string | null = null;
 
   try {
-    // Later tickets widen this path rather than opening a new one: #41 adds
-    // gdelt_gkg, #46 adds gdelt_doc. Until then an unimplemented kind is a
-    // failed run with a legible reason, not a run that quietly discovers nothing.
-    if (connector.kind !== "rss") throw new Error(`No connector implementation for kind "${connector.kind}"`);
+    const discovery = await discover(connector, deps);
+    cursor = discovery.cursor;
+    discovered = discovery.items.length;
 
-    const feed = parseRssFeed(await deps.fetchText(connector.endpoint));
-    cursor = feed.lastBuildDate;
-    discovered = feed.items.length;
-
-    for (const item of feed.items) {
+    for (const item of discovery.items) {
       try {
-        counters[await ingestItem(item, connector, feed.channelTitle)] += 1;
+        counters[await ingestItem(item, connector)] += 1;
       } catch (err) {
         counters.failed += 1;
         if (itemFailures.size < MAX_REPORTED_ITEM_FAILURES) {

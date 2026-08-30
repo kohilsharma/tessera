@@ -42,10 +42,36 @@ describe("npm run seed", () => {
     expect(count).toBe(0);
   });
 
+  // ADR-0024's near-miss, guarded against regression: making `analysisText`
+  // nullable forced `articles.searchVector` to coalesce it, and a coalesce is
+  // exactly the kind of rewrite that quietly changes what the demo corpus
+  // matches. `coalesce(x, '')` must be a no-op for every row that *has* text, so
+  // the stored vector is compared against the pre-migration expression itself —
+  // identical tsvectors mean identical ts_rank, and therefore identical search
+  // results for the seeded corpus.
+  it("leaves the seeded corpus's search vectors identical to the pre-coalesce expression", async () => {
+    const [{ compared, differing }] = await AppDataSource.query(
+      `SELECT COUNT(*)::int AS compared,
+              COUNT(*) FILTER (
+                WHERE "searchVector" IS DISTINCT FROM (
+                  setweight(to_tsvector('english', "title"), 'A') ||
+                  setweight(to_tsvector('english', "analysisText"), 'B')
+                )
+              )::int AS differing
+       FROM articles WHERE "analysisText" IS NOT NULL`,
+    );
+    expect(compared).toBeGreaterThan(0);
+    expect(differing).toBe(0);
+  });
+
   it("seeds the IngestionConnectors the Admin dashboard inspects", async () => {
     const connectors = await AppDataSource.getRepository(IngestionConnector).find();
     expect(connectors.length).toBeGreaterThan(0);
     expect(connectors.map((c) => c.kind)).toContain("gdelt_gkg");
+    // #41 built the GKG connector, so the firehose is enabled and an Admin's Run
+    // button on that row does something. DOC stays off until #46 implements it.
+    expect(connectors.find((connector) => connector.kind === "gdelt_gkg")!.enabled).toBe(true);
+    expect(connectors.find((connector) => connector.kind === "gdelt_doc")!.enabled).toBe(false);
 
     // #39: the curated RSS list is what ingestion actually runs, so it has to be
     // real feeds — the placeholder it replaced pointed at a domain that cannot

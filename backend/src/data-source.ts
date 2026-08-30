@@ -10,6 +10,7 @@ import { CreateIngestionConnectors1755745000000 } from "./migrations/17557450000
 import { CreateIngestionRuns1755746000000 } from "./migrations/1755746000000-CreateIngestionRuns";
 import { AlignAnalysisTextMode1755747000000 } from "./migrations/1755747000000-AlignAnalysisTextMode";
 import { AddPublisherTermsClass1755748000000 } from "./migrations/1755748000000-AddPublisherTermsClass";
+import { AddArticleToneAndDedupeIndex1755749000000 } from "./migrations/1755749000000-AddArticleToneAndDedupeIndex";
 import { User } from "./entities/User";
 import { Publisher } from "./entities/Publisher";
 import { Story } from "./entities/Story";
@@ -46,6 +47,7 @@ export const AppDataSource = new DataSource({
     CreateIngestionRuns1755746000000,
     AlignAnalysisTextMode1755747000000,
     AddPublisherTermsClass1755748000000,
+    AddArticleToneAndDedupeIndex1755749000000,
   ],
   synchronize: false,
   logging: false,

@@ -1,4 +1,5 @@
 import { XMLParser } from "fast-xml-parser";
+import { decodeEntities } from "./decodeEntities";
 
 // RSS 2.0 only. ADR-0018 makes feed curation the cheapest lever on text quality,
 // and the curated list (seedData/corpus.ts) is RSS 2.0 throughout — so Atom and
@@ -54,24 +55,10 @@ function textOf(value: unknown): string | null {
 // Tags out, then the handful of entities that survive, then whitespace collapsed
 // — analysisText feeds tsvector and, later, evidence text, and markup in either
 // is noise a human reader would never have seen.
-const HTML_ENTITIES: Record<string, string> = {
-  amp: "&",
-  lt: "<",
-  gt: ">",
-  quot: '"',
-  apos: "'",
-  nbsp: " ",
-};
-
 function stripHtml(html: string): string {
-  return html
-    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCodePoint(parseInt(code, 16)))
-    // `&amp;` last would double-decode `&amp;lt;`; the named pass runs once over
-    // the string, so each entity is replaced exactly once.
-    .replace(/&([a-z]+);/gi, (whole, name: string) => HTML_ENTITIES[name.toLowerCase()] ?? whole)
+  return decodeEntities(
+    html.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]*>/g, " "),
+  )
     .replace(/\s+/g, " ")
     .trim();
 }

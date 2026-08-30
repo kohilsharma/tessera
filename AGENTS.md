@@ -31,7 +31,16 @@ Each Publisher now carries a **Terms Class** (#40) and *that* decides whether th
 its text: fixture Publishers are `licensed` (the text is ours), anything a connector creates
 defaults to `internal_only`, and an `open_metadata` publisher's text-bearing items are rejected
 on rights grounds and counted on the run.
-The GKG/DOC connectors, the worker, and Phase 3.5 (graph/timeline) are not built yet.
+The **GKG connector** (#41) is in: a run resolves the current 15-minute window from GDELT's
+`lastupdate.txt`, downloads and unzips it, and parses the 27 tab-separated fields
+(`src/ingestion/gkg.ts`), dropping GCAM at parse time. Its rows land on the ladder's weakest
+rung — `metadata_only`, with genuinely null `analysisText`, since GKG carries no body and no
+snippet — and keep GDELT's average tone in `articles.tone` for the Phase-3.5 timeline. The GKG
+firehose connector is enabled in the seed; DOC is still off. A window is ~700 rows, so an
+Admin's Run on that connector is a long request until #42 makes it an enqueue, and there is no
+retention yet (#45).
+The DOC connector, the worker, GKG Annotation staging, and Phase 3.5 (graph/timeline) are not
+built yet.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
 `/register`, `/account`), role dashboards (`/dashboard/:role`), browsing the corpus
@@ -193,10 +202,13 @@ npm run build     # tsc -> dist/
 npm run migrate   # apply TypeORM migrations
 npm run seed      # demo users for all three roles (only path to an Admin, ADR-0015) + the
                   # Story/Article/Publisher corpus + one owned Brief with a cover image +
-                  # 10 curated real RSS connectors (#39); embedded with the hosted provider
+                  # 10 curated real RSS connectors + the enabled GKG firehose (#39, #41);
+                  # embedded with the hosted provider
                   # when GEMINI_API_KEY is set, else the Mock (ADR-0023 — switching providers
                   # needs a fresh volume, see SETUP.md)
 npm test          # vitest; spins up an ephemeral Postgres via Testcontainers, needs docker access
+                  # GDELT_LIVE_SMOKE=1 additionally runs the one live GKG check (#41),
+                  # skipped by default so the suite stays offline
 ```
 
 No lint script exists yet. Do not claim it passes until implemented.
