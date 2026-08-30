@@ -278,11 +278,9 @@ describe("GKG Annotations", () => {
 
   // Every one of these fields reaches us through GDELT from a publisher's page,
   // so they are untrusted input on the way into the database.
-  it("drops an occurrence with no usable name or offset instead of inventing one", async () => {
+  it("preserves usable surface names exactly and drops occurrences with invalid offsets", async () => {
     const fields = (await windowCsv()).split("\n")[0].split("\t");
-    fields[12] = `Real Person,42;No Offset;Bad Offset,x;,77;Trailing Comma,;Negative,-3`;
-    // Past the column's own bound, so it is dropped rather than truncated: a
-    // shortened name would be a name GKG never reported.
+    fields[12] = `  Real Person  ,42;No Offset;Bad Offset,x;,77;Trailing Comma,;Negative,-3`;
     fields[14] = `${"A".repeat(513)},5`;
     // The first entry is short of the nine `#`-separated components, so it cannot
     // be read positionally — the same rule the row itself follows.
@@ -291,9 +289,11 @@ describe("GKG Annotations", () => {
     const [row] = parseGkgCsv(fields.join("\t"));
 
     expect(kindOf(row, "person")).toEqual([
-      { kind: "person", surfaceName: "Real Person", charOffset: 42, locationDetail: null },
+      { kind: "person", surfaceName: "  Real Person  ", charOffset: 42, locationDetail: null },
     ]);
-    expect(kindOf(row, "organization")).toEqual([]);
+    expect(kindOf(row, "organization")).toEqual([
+      { kind: "organization", surfaceName: "A".repeat(513), charOffset: 5, locationDetail: null },
+    ]);
     expect(kindOf(row, "location").map((annotation) => annotation.charOffset)).toEqual([85]);
   });
 
@@ -306,6 +306,8 @@ describe("GKG Annotations", () => {
       `1#Unplaced#IN#IN##  #  #IN#10`,
       `4#Off The Globe, India#IN#IN25#70251#913.0833#80.2833#-2103041#20`,
       `4#Not A Number, India#IN#IN25#70251#13.0833#east#-2103041#30`,
+      `4#Numeric Prefix, India#IN#IN25#70251#13.0833north#80.2833#-2103041#40`,
+      `4#Hex Syntax, India#IN#IN25#70251#0x10#80.2833#-2103041#50`,
     ].join(";");
 
     const [row] = parseGkgCsv(fields.join("\t"));

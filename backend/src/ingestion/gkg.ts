@@ -145,15 +145,6 @@ function averageTone(value: string | undefined): number | null {
   return Number.isFinite(average) ? average : null;
 }
 
-// A surface name reaches us through GDELT from a publisher's page, so it is
-// untrusted input. The bound is the column's own `varchar(512)` — chosen to sit
-// far under Postgres's btree index-tuple limit, since the occurrence index covers
-// this column — not a judgement about how long a name may be: GDELT's longest
-// real organization names run to a few dozen characters. Dropping the occurrence
-// rather than truncating it keeps the rule "as GKG reported it, or not at all",
-// and fails one occurrence instead of the whole item.
-const MAX_SURFACE_NAME_LENGTH = 512;
-
 // `charOffset` is an int4 column. Digits only — `Number("")` is 0, so a
 // `Name,`-shaped entry would otherwise be accepted as an occurrence at offset 0.
 function charOffsetOf(value: string | undefined): number | null {
@@ -162,10 +153,11 @@ function charOffsetOf(value: string | undefined): number | null {
 }
 
 function surfaceNameOf(value: string | undefined): string | null {
-  // Trimmed of GDELT's own delimiter whitespace but otherwise exactly as
-  // reported: no case folding, no entity decoding, no resolution (#43).
-  const name = (value ?? "").trim();
-  return name === "" || name.length > MAX_SURFACE_NAME_LENGTH ? null : name;
+  // Preserve the surface name byte-for-byte after splitting off GKG's structural
+  // comma. Resolution needs the reported form; trim only to decide whether the
+  // field carries a name at all.
+  const name = value ?? "";
+  return name.trim() === "" ? null : name;
 }
 
 // V2ENHANCEDPERSONS, V2ENHANCEDORGANIZATIONS and V2ENHANCEDTHEMES all share one
@@ -197,7 +189,8 @@ function coordinate(value: string | undefined, limit: number): number | null | u
   // not place. `undefined` means present but unreadable, which the caller drops —
   // storing garbage as null would make it indistinguishable from absence.
   if (text === null) return null;
-  const parsed = Number.parseFloat(text);
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(text)) return undefined;
+  const parsed = Number(text);
   return Number.isFinite(parsed) && Math.abs(parsed) <= limit ? parsed : undefined;
 }
 

@@ -39,14 +39,10 @@ export class GkgAnnotation {
   @Column({ type: "varchar" })
   kind!: GkgAnnotationKind;
 
-  // As GKG reported it: no case folding, no normalization, no resolution.
-  // Phase 3.5 resolves canonical Entities *from* these rows against a confidence
-  // threshold (ADR-0019), so normalizing here would destroy the surface evidence
-  // that resolution — and the Admin review of a borderline merge — reads.
-  // Bounded because the unique occurrence index (see the migration) covers this
-  // column; the parser drops an occurrence it cannot fit rather than truncating
-  // the name.
-  @Column({ type: "varchar", length: 512 })
+  // As GKG reported it: no case folding, normalization, resolution or lossy
+  // length bound. The migration hashes this value only for the fixed-size unique
+  // occurrence index; the reported value itself remains intact.
+  @Column({ type: "text" })
   surfaceName!: string;
 
   // Character offset into the document body GDELT analysed. The same name at two

@@ -12,6 +12,7 @@ import { AlignAnalysisTextMode1755747000000 } from "./migrations/1755747000000-A
 import { AddPublisherTermsClass1755748000000 } from "./migrations/1755748000000-AddPublisherTermsClass";
 import { AddArticleToneAndDedupeIndex1755749000000 } from "./migrations/1755749000000-AddArticleToneAndDedupeIndex";
 import { CreateGkgAnnotations1755750000000 } from "./migrations/1755750000000-CreateGkgAnnotations";
+import { PreserveGkgAnnotationSurfaceNames1755751000000 } from "./migrations/1755751000000-PreserveGkgAnnotationSurfaceNames";
 import { User } from "./entities/User";
 import { Publisher } from "./entities/Publisher";
 import { Story } from "./entities/Story";
@@ -61,6 +62,7 @@ export const AppDataSource = new DataSource({
     AddPublisherTermsClass1755748000000,
     AddArticleToneAndDedupeIndex1755749000000,
     CreateGkgAnnotations1755750000000,
+    PreserveGkgAnnotationSurfaceNames1755751000000,
   ],
   synchronize: false,
   logging: false,

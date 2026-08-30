@@ -677,6 +677,32 @@ describe("runConnector over a GKG window", () => {
     expect(staged.map((row) => row.surfaceName)).toContain("WB_1305_HEALTH_SERVICES_DELIVERY");
   });
 
+  it("persists exact surface names beyond the old index bound idempotently", async () => {
+    const connector = await createGkgConnector();
+    const fields = (await readFile(join(__dirname, "fixtures", "gkg", "20260830190000.gkg.csv"), "utf-8"))
+      .split("\n")[0]
+      .split("\t");
+    const longName = "A".repeat(513);
+    fields[8] = "";
+    fields[10] = "";
+    fields[12] = `  Reported Person  ,42`;
+    fields[14] = `${longName},5`;
+    const deps: RunConnectorDeps = {
+      fetchText: async () => GKG_LAST_UPDATE,
+      fetchBytes: async () => zipSync({ "20260830190000.gkg.csv": strToU8(fields.join("\t")) }),
+    };
+
+    await runConnector(connector, deps);
+
+    const annotations = AppDataSource.getRepository(GkgAnnotation);
+    expect(
+      (await annotations.find({ order: { charOffset: "ASC" } })).map((annotation) => annotation.surfaceName),
+    ).toEqual([longName, "  Reported Person  "]);
+
+    await runConnector(connector, deps);
+    expect(await annotations.count()).toBe(2);
+  });
+
   it("returns an Article's co-occurring names from a self-join over its annotations", async () => {
     const connector = await createGkgConnector();
     await runConnector(connector, gkgFixture("20260830190000.gkg.csv"));
