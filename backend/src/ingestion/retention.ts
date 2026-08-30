@@ -1,5 +1,5 @@
 import { AppDataSource } from "../data-source";
-import { Article } from "../entities/Article";
+import { Article, type AnalysisTextMode } from "../entities/Article";
 import type { ConnectorKind } from "../entities/IngestionConnector";
 
 // #45. The GKG firehose is unbounded — one window every 15 minutes, forever, at
@@ -32,7 +32,9 @@ export async function pruneExpiredGkgArticles(): Promise<number> {
     .createQueryBuilder()
     .delete()
     .where(`"createdAt" < :cutoff`, { cutoff })
-    .andWhere(`"analysisTextMode" = 'metadata_only'`)
+    .andWhere(`"analysisTextMode" = :mode`, {
+      mode: "metadata_only" satisfies AnalysisTextMode,
+    })
     // A seeded fixture Article has no discovering connector at all (ADR-0007), so
     // `IN` excludes the curated corpus without a clause of its own. The kind is
     // bound rather than inlined so tsc still checks it against the union.

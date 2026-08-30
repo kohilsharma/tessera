@@ -1095,7 +1095,7 @@ describe("runConnector over a GKG window", () => {
       expect(run!.cursor).toBe("20260830190000");
     });
 
-    it("steps over a missed window GDELT never published, reporting it", async () => {
+    it("keeps a failed missed window retryable while continuing the run", async () => {
       const connector = await createGkgConnector();
       await processedThrough(connector.id, "20260830183000");
       const { deps } = recordingDeps((url) => url.includes("20260830184500"));
@@ -1104,10 +1104,23 @@ describe("runConnector over a GKG window", () => {
 
       expect(run!.status).toBe("succeeded");
       expect(run!.errorSummary).toMatch(/window 20260830184500 failed: responded 404/);
-      // The current window was read, so the cursor moves past the missing one
-      // instead of the connector retrying it forever.
-      expect(run!.cursor).toBe("20260830190000");
+      // Later windows may still be ingested, but the cursor stays before the gap
+      // so a transient refusal cannot silently lose that window.
+      expect(run!.cursor).toBe("20260830183000");
       expect(run!.discovered).toBe(4);
+    });
+
+    it("ignores malformed run cursors when choosing where to resume", async () => {
+      const connector = await createGkgConnector();
+      await processedThrough(connector.id, "20260830183000");
+      await processedThrough(connector.id, "20260830185900");
+      await processedThrough(connector.id, "Sat, 30 Aug 2026 19:00:00 GMT");
+      const { requested, deps } = recordingDeps();
+
+      const run = await runConnector(connector, deps);
+
+      expect(requested).toEqual([windowUrl("20260830184500"), windowUrl("20260830190000")]);
+      expect(run!.cursor).toBe("20260830190000");
     });
 
     it("holds the cursor short of a current window that would not download", async () => {

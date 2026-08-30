@@ -1,4 +1,4 @@
-import { IsNull, Not, type EntityManager } from "typeorm";
+import { IsNull, type EntityManager } from "typeorm";
 import { AppDataSource } from "../data-source";
 import { Article, isStrongerAnalysisTextMode } from "../entities/Article";
 import type { AnalysisTextMode } from "../entities/Article";
@@ -10,6 +10,7 @@ import { canonicalizeUrl, normalizeTitle, publisherDomain } from "./canonicalUrl
 import {
   MAX_CATCH_UP_WINDOWS,
   gkgWindowUrl,
+  isGkgWindowStamp,
   parseGkgCsv,
   planGkgCatchUp,
   readGkgArchive,
@@ -354,12 +355,24 @@ async function discoverRss(connector: IngestionConnector, deps: RunConnectorDeps
 // runs count: re-reading a window is idempotent, so a failed run's window is
 // simply read again.
 async function lastProcessedWindow(connectorId: string): Promise<string | null> {
-  const run = await AppDataSource.getRepository(IngestionRun).findOne({
-    where: { connectorId, status: "succeeded", cursor: Not(IsNull()) },
-    order: { cursor: "DESC" },
-    select: { cursor: true },
-  });
-  return run?.cursor ?? null;
+  const runs = AppDataSource.getRepository(IngestionRun);
+  let before: string | null = null;
+  while (true) {
+    const query = runs
+      .createQueryBuilder("run")
+      .select(["run.cursor"])
+      .where("run.connectorId = :connectorId", { connectorId })
+      .andWhere("run.status = :status", { status: "succeeded" })
+      .andWhere("run.cursor IS NOT NULL")
+      .orderBy("run.cursor", "DESC")
+      .limit(1);
+    if (before) query.andWhere("run.cursor < :before", { before });
+
+    const run = await query.getOne();
+    if (!run?.cursor) return null;
+    if (isGkgWindowStamp(run.cursor)) return run.cursor;
+    before = run.cursor;
+  }
 }
 
 // ADR-0018: poll `lastupdate.txt`, take the current 15-minute GKG window, and turn
@@ -386,12 +399,11 @@ async function discoverGkg(connector: IngestionConnector, deps: RunConnectorDeps
 
   const items: DiscoveredItem[] = [];
   const failures: string[] = [];
-  // The cursor advances only over a window that was read, and the stamps ascend
-  // with the current window last — so a window GDELT never published, or one the
-  // CDN refused, is reported and stepped over rather than wedging the connector on
-  // it forever, while a failure on the *current* window leaves the cursor short of
-  // it and the next run reads it again.
+  // The cursor advances only through the contiguous prefix that was read. Later
+  // windows still ingest after a failure, but remain retryable with the gap on
+  // the next run; re-reading them is idempotent.
   let cursor = held;
+  let cursorBlocked = false;
   for (const stamp of stamps) {
     try {
       const csv = readGkgArchive(await fetchBytes(gkgWindowUrl(current, stamp)));
@@ -408,8 +420,9 @@ async function discoverGkg(connector: IngestionConnector, deps: RunConnectorDeps
           annotations: row.annotations,
         })),
       );
-      cursor = stamp;
+      if (!cursorBlocked) cursor = stamp;
     } catch (err) {
+      cursorBlocked = true;
       failures.push(`window ${stamp} failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }

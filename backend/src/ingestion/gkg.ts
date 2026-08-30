@@ -114,11 +114,7 @@ function formatStamp(at: number): string {
 // Given the last window this connector finished and the one GDELT is publishing
 // now, which windows to read. The cap is what keeps a long absence from turning
 // the next run into an unbounded backfill.
-export function planGkgCatchUp(
-  cursor: string | null,
-  current: string,
-  cap: number = MAX_CATCH_UP_WINDOWS,
-): GkgCatchUp {
+export function planGkgCatchUp(cursor: string | null, current: string): GkgCatchUp {
   const currentAt = parseStamp(current);
   if (!currentAt) throw new Error(`Not a 15-minute window stamp: ${current}`);
   // No cursor at all — a connector's first run. Going live is the only honest
@@ -133,7 +129,7 @@ export function planGkgCatchUp(
   // Negative covers both "the cursor is the current window" and a cursor ahead of
   // it, which a clock correction upstream can produce.
   if (missed < 0) return { stamps: [], skippedWindows: 0 };
-  if (missed > cap) return { stamps: [current], skippedWindows: missed };
+  if (missed > MAX_CATCH_UP_WINDOWS) return { stamps: [current], skippedWindows: missed };
   return {
     stamps: [
       ...Array.from({ length: missed }, (_, step) => formatStamp(from + (step + 1) * GKG_WINDOW_MS)),
@@ -141,6 +137,11 @@ export function planGkgCatchUp(
     ],
     skippedWindows: 0,
   };
+}
+
+export function isGkgWindowStamp(value: string | null): value is string {
+  const parsed = parseStamp(value);
+  return parsed !== null && parsed.getUTCMinutes() % 15 === 0 && parsed.getUTCSeconds() === 0;
 }
 
 // A missed window's file sits beside the current one, so its URL is derived from
