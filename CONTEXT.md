@@ -10,6 +10,10 @@ Terms are canonical: use these words in code, docs, and conversation.
 
 - **Article** — One piece of reporting discovered from a connector. Carries the text
   actually available for analysis (see *Analysis Text Mode*), not necessarily full body.
+  An **Unclustered Article** is an Article with no Story yet — the normal state of everything
+  ingestion produces, since clustering is Phase 3. A *state*, not a second entity: every
+  public read path joins through Story, so unclustered Articles are invisible to browse and
+  search by construction. (ADR-0022)
 
 - **IntelligenceBrief** — The user-*owned* analytical artifact built on top of a Story.
   This is the course's required "core business entity" (title, note, category, timestamp,
@@ -64,12 +68,38 @@ Terms are canonical: use these words in code, docs, and conversation.
 
 ## Acquisition
 
-- **Publisher** — Who originates reporting. Owns rights fields.
+- **Publisher** — Who originates reporting. Owns rights fields (see *Terms Class*).
 - **IngestionConnector** — *How* Tessera discovers/receives data (RSS, GDELT_DOC, etc).
   A connector is not a publisher; a GDELT connector spans many publishers.
-- **Analysis Text Mode** — What text is actually available for an Article: `feed_excerpt`,
-  `api_content`, `licensed_full_text`, `manual_fixture`. Product wording must match the
-  weakest mode in an EvidenceSet (never claim "publisher omitted X" from an excerpt).
+- **IngestionRun** — One invocation of one connector, and the only record of what that
+  invocation did: how much it discovered, inserted, enriched, rejected as duplicate, rejected
+  on rights, and failed. Persisted in Postgres, never read back from the queue — the Admin
+  ingestion view must render with the worker down. (ADR-0024)
+- **Analysis Text Mode** — What text is actually available for an Article, as an **ordered
+  ladder**, weakest first: `metadata_only` (title and metadata, no text at all) <
+  `feed_excerpt` < `api_content` < `licensed_full_text`. `manual_fixture` sits outside the
+  ladder — it is our own synthetic seed text. An Article's mode only ever moves *up*.
+  Product wording must match the weakest mode in an EvidenceSet (never claim "publisher
+  omitted X" from an excerpt), and `metadata_only` is never sufficient evidence for a
+  claim on its own. (ADR-0024)
+- **Terms Class** — The per-Publisher rights vocabulary governing whether Tessera may
+  *serve* that publisher's text: `open_metadata`, `syndicated_excerpt`, `internal_only`,
+  `licensed`. Storing bodies for internal analysis is governed globally instead (bodies are
+  never redistributed, ADR-0018). Assigned by hand; publishers auto-created by a connector
+  default to `internal_only` — the gate fails closed. (ADR-0024)
+- **Enrichment** — A second connector finding an Article Tessera already holds (same
+  canonical URL) and contributing what it carries: GKG Annotations, or text further up the
+  ladder. _Avoid_: calling this a duplicate. Two instruments seeing one document is not
+  duplication, and discarding the newcomer loses data whichever one arrives second.
+- **Duplicate** — The same reporting at a *different* canonical URL, caught on normalized
+  title + publisher + date. Rejected on arrival and counted on the IngestionRun. Syndicated
+  wire copy running across many publishers is deliberately *not* handled here — collapsing it
+  is a Phase-3 question about evidence weight, not a Phase-2 question about rows. (ADR-0024)
+- **GKG Annotation** — One surface-name occurrence of a person, organization, location or
+  theme in one Article, exactly as GDELT's GKG reported it, before any resolution. The
+  pre-resolution raw material an **Entity** is later resolved *from*. _Avoid_: "GKG mention" —
+  GDELT ships a `mentions` file meaning something else entirely (an event referenced in an
+  article). (ADR-0018, ADR-0019)
 
 ## Deferred (startup-only, behind interfaces — NOT in graded build)
 
@@ -93,7 +123,9 @@ Terms are canonical: use these words in code, docs, and conversation.
 
 ## Decision index
 
-All decisions are recorded in `docs/adr/0001`–`0023`. ADR-0023 (2026-08-21) moves embedding
+All decisions are recorded in `docs/adr/0001`–`0024`. ADR-0024 (2026-08-30) makes Analysis
+Text Mode an ordered ladder, adds the `metadata_only` rung for GKG-discovered Articles, and
+separates enrichment from duplication at the connector seam. ADR-0023 (2026-08-21) moves embedding
 serving to a hosted API default after a system-RAM measurement on the demo machine; the
 `vector(1024)` space and provider interface are unchanged. The 2026-07-26 additions
 (ADR-0017–0022) un-defer the knowledge graph + timeline (GKG-backed, bounded), upgrade

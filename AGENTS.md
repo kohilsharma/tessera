@@ -6,7 +6,7 @@
 ## Quick start
 
 1. Read `CONTEXT.md` for the domain glossary — use these exact terms.
-2. Read `docs/adr/` (23 ADRs) — **these override the spec** where they conflict.
+2. Read `docs/adr/` (24 ADRs) — **these override the spec** where they conflict.
 3. Read `project-docs/Tessera_Master_Build_Specification_v3.md` — the full product spec.
 4. Read `project-docs/project-statement.md` — non-negotiable course requirements.
 5. Read `project-docs/Tessera_Initial_Report.md` — the capstone initial report (submission-ready).
@@ -76,6 +76,9 @@ pattern (supertest + an ephemeral Testcontainers Postgres) later Foundation tick
 - **ADR-0023** Embeddings served by hosted API (demo machine has ~3 GB free RAM); TEI optional.
   Bodies to the embedding provider is a documented exception to ADR-0018; synthesis evidence
   text stays on the paid no-training provider.
+- **ADR-0024** Analysis Text Mode is an ordered ladder (`metadata_only` < `feed_excerpt` <
+  `api_content` < `licensed_full_text`); modes only move up. Same canonical URL across
+  connectors is *enrichment*, not duplication.
 
 ## Build order (ADR-0022)
 
