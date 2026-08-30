@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import bcrypt from "bcryptjs";
 import { strToU8, zipSync } from "fflate";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app";
 import { AppDataSource } from "../src/data-source";
@@ -16,8 +16,21 @@ import { User } from "../src/entities/User";
 import { signToken } from "../src/auth/jwt";
 import { canonicalizeUrl, publisherDomain } from "../src/ingestion/canonicalUrl";
 import { parseGkgCsv } from "../src/ingestion/gkg";
+import { runIngestionJob } from "../src/ingestion/jobs";
+import { RUN_JOB, TICK_JOB } from "../src/ingestion/queue";
 import { runConnector, type FetchText, type RunConnectorDeps } from "../src/ingestion/runConnector";
 import { setupTestDb } from "./setupTestDb";
+
+// #42: Redis is deliberately not in the test stack — the suite needs only the
+// Postgres container — so the one enqueue call is recorded here instead. What that
+// leaves untested is bullmq's own behaviour (a job id that already exists is not
+// added, which is what makes a second trigger mid-run a no-op); what it does test
+// is everything either execution path does either side of the queue.
+const { enqueued } = vi.hoisted(() => ({ enqueued: [] as string[] }));
+vi.mock("../src/ingestion/queue", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/ingestion/queue")>()),
+  enqueueConnectorRun: async (connectorId: string) => void enqueued.push(connectorId),
+}));
 
 setupTestDb();
 
@@ -858,13 +871,17 @@ describe("a completed run does not disturb the curated corpus", () => {
   });
 });
 
-// Seam 2: only what is HTTP-visible. The endpoint's RBAC, that it runs the
-// connector and persists a run, and that the Admin dashboard carries the history.
+// Seam 2: only what is HTTP-visible. The endpoint's RBAC, that it enqueues onto
+// the queue the worker drains (#42), and that the Admin dashboard carries the
+// history — read from Postgres, so it is there with the worker stopped.
 describe("the Admin ingestion surface", () => {
-  // A closed local port, so the run reaches runConnector and persists a row
-  // without any external network: what this asserts is that the endpoint wires
-  // through to the run function, not what the run function does.
+  // A closed local port, so a run that does happen reaches runConnector and
+  // persists a row without any external network.
   const CLOSED_PORT_FEED = "http://127.0.0.1:1/feed.xml";
+
+  beforeEach(() => {
+    enqueued.length = 0;
+  });
 
   it("is Admin-only", async () => {
     const connector = await createRssConnector(CLOSED_PORT_FEED);
@@ -877,9 +894,12 @@ describe("the Admin ingestion surface", () => {
 
     const investor = await registerAndLogin("ingestion-investor@example.com", "investor");
     expect((await request(app()).post(path).set("Authorization", `Bearer ${investor}`)).status).toBe(403);
+
+    // None of the three refusals reached the queue.
+    expect(enqueued).toEqual([]);
   });
 
-  it("runs a connector on demand and persists the run", async () => {
+  it("accepts the command by enqueueing it, and runs nothing in the request", async () => {
     const token = await createAdminToken("ingestion-admin@example.com");
     const connector = await createRssConnector(CLOSED_PORT_FEED);
 
@@ -887,9 +907,12 @@ describe("the Admin ingestion surface", () => {
       .post(`/api/v1/ingestion/connectors/${connector.id}/run`)
       .set("Authorization", `Bearer ${token}`);
 
-    expect(res.status).toBe(201);
-    expect(res.body.connectorId).toBe(connector.id);
-    expect(await AppDataSource.getRepository(IngestionRun).countBy({ connectorId: connector.id })).toBe(1);
+    expect(res.status).toBe(202);
+    expect(res.body).toEqual({ connectorId: connector.id, status: "accepted" });
+    expect(enqueued).toEqual([connector.id]);
+    // The worker records the run; the request does not. An IngestionRun row here
+    // would mean the endpoint still executed inline.
+    expect(await AppDataSource.getRepository(IngestionRun).countBy({ connectorId: connector.id })).toBe(0);
   });
 
   it("refuses to run a disabled connector, and 404s an unknown one", async () => {
@@ -905,6 +928,8 @@ describe("the Admin ingestion surface", () => {
       .post(`/api/v1/ingestion/connectors/00000000-0000-0000-0000-000000000000/run`)
       .set("Authorization", `Bearer ${token}`);
     expect(missing.status).toBe(404);
+
+    expect(enqueued).toEqual([]);
   });
 
   it("lets an Admin disable a connector without a deploy, and nobody else", async () => {
@@ -955,5 +980,58 @@ describe("the Admin ingestion surface", () => {
     expect(ours[0]).toMatchObject({ status: "succeeded", discovered: 3 });
     expect(ours[1]).toMatchObject({ status: "failed" });
     expect(ours[1].errorSummary).toContain("ENOTFOUND");
+  });
+});
+
+
+// #42: the worker's side of the same queue. Driven as a function rather than
+// through a live bullmq Worker, because Redis is not in the test stack — what is
+// worth proving is the fan-out's rule and that a run job reaches the same run
+// function the Admin trigger does.
+describe("the ingestion worker's job handler", () => {
+  const CLOSED_PORT_FEED = "http://127.0.0.1:1/feed.xml";
+
+  beforeEach(() => {
+    enqueued.length = 0;
+  });
+
+  it("fans the 15-minute tick out to the enabled connectors and no others", async () => {
+    const live = await createRssConnector(CLOSED_PORT_FEED);
+    const paused = await createRssConnector(CLOSED_PORT_FEED, false);
+
+    await runIngestionJob({ name: TICK_JOB, data: {} });
+
+    expect(enqueued).toContain(live.id);
+    expect(enqueued).not.toContain(paused.id);
+    // A tick enqueues; it must not run anything itself, or the fleet would run
+    // inside one job and the per-connector job id would stop deduplicating.
+    expect(await AppDataSource.getRepository(IngestionRun).countBy({ connectorId: live.id })).toBe(0);
+  });
+
+  it("executes a run job through the same run function, and records the run", async () => {
+    const connector = await createRssConnector(CLOSED_PORT_FEED);
+
+    await runIngestionJob({ name: RUN_JOB, data: { connectorId: connector.id } });
+
+    const run = await AppDataSource.getRepository(IngestionRun).findOneByOrFail({ connectorId: connector.id });
+    // The feed is a closed port, so the run fails — the point is that it is a
+    // persisted IngestionRun with a legible reason and not a thrown job.
+    expect(run.status).toBe("failed");
+    expect(run.errorSummary).not.toBeNull();
+  });
+
+  it("records nothing for a connector disabled after its job was enqueued", async () => {
+    const connector = await createRssConnector(CLOSED_PORT_FEED);
+    await AppDataSource.getRepository(IngestionConnector).update({ id: connector.id }, { enabled: false });
+
+    await runIngestionJob({ name: RUN_JOB, data: { connectorId: connector.id } });
+
+    expect(await AppDataSource.getRepository(IngestionRun).countBy({ connectorId: connector.id })).toBe(0);
+  });
+
+  it("ignores a run job for a connector that no longer exists", async () => {
+    await expect(
+      runIngestionJob({ name: RUN_JOB, data: { connectorId: "00000000-0000-0000-0000-000000000000" } }),
+    ).resolves.toBeUndefined();
   });
 });

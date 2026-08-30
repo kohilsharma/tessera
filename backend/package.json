@@ -5,18 +5,22 @@
   "type": "commonjs",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "worker": "tsx watch src/worker.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/src/index.js",
+    "start:worker": "node dist/src/worker.js",
     "test": "vitest run",
     "migrate": "typeorm-ts-node-commonjs migration:run -d src/data-source.ts",
     "seed": "tsx src/seed.ts"
   },
   "dependencies": {
     "bcryptjs": "3.0.3",
+    "bullmq": "6.3.2",
     "dotenv": "17.4.2",
     "express": "4.22.2",
     "fast-xml-parser": "4.5.7",
     "fflate": "0.8.3",
+    "ioredis": "5.9.0",
     "jsonwebtoken": "9.0.3",
     "multer": "2.2.0",
     "pg": "8.23.0",

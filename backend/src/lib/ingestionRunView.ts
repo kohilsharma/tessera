@@ -1,15 +1,13 @@
 import { IngestionRun } from "../entities/IngestionRun";
 
-// The IngestionRun projection shared by the run endpoint and the Admin
-// dashboard's history register, in the same spirit as articleView.ts's
-// toPublicArticle: one statement of the wire shape, so the two callers cannot
-// drift and the mirror type in frontend/src/api/client.ts has one thing to
-// mirror.
+// The IngestionRun projection the Admin dashboard's history register is served
+// from, in the same spirit as articleView.ts's toPublicArticle: one statement of
+// the wire shape, so the mirror type in frontend/src/api/client.ts has one thing
+// to mirror. Sole caller since #42 — the run endpoint answers with an
+// acknowledgement now, because the run has not happened when it replies.
 //
-// The connector's name is passed in rather than read off `run.connector`: the run
-// endpoint already holds the connector it just ran, and the dashboard loads the
-// relation — requiring the relation here would make the endpoint re-fetch a row
-// it has.
+// The connector's name is passed in rather than read off `run.connector`, so a
+// caller that already holds the connector need not load the relation again.
 //
 // `cursor` is deliberately not served. It is where the connector got to in its
 // source's own terms, kept for the scheduler's benefit (#45); nothing on the

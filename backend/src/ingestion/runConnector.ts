@@ -440,8 +440,11 @@ async function ingestItem(item: DiscoveredItem, connector: IngestionConnector): 
 }
 
 // Returns null when the connector is disabled: it did not run, so there is no
-// IngestionRun to record. One rule in one place — the Admin trigger and, from
-// #42, the scheduler both go through here, so neither can run a disabled feed.
+// IngestionRun to record. The last of the three places that rule is enforced —
+// the Admin trigger refuses immediately (routes/ingestion.ts) and the tick skips
+// it (ingestion/jobs.ts) — and the only one that cannot be bypassed, which is what
+// makes it the rule: a connector disabled after its job was enqueued still runs
+// nothing.
 export async function runConnector(
   connector: IngestionConnector,
   deps: RunConnectorDeps,

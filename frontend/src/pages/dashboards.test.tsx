@@ -183,11 +183,12 @@ describe("Admin dashboard", () => {
     expect(within(older).getByText(/ENOTFOUND feed.invalid/)).toBeInTheDocument();
   });
 
-  it("runs a connector on demand and refetches the console", async () => {
+  it("queues a connector run and says so, rather than claiming it ran", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(jsonResponse(adminPayload()))
-      .mockResolvedValueOnce(jsonResponse(ingestionRun()))
-      .mockResolvedValue(jsonResponse(adminPayload({ ingestionRuns: [ingestionRun()] })));
+      // #42: the endpoint acknowledges an enqueue; the run itself is the worker's.
+      .mockResolvedValueOnce(jsonResponse({ connectorId: "c1", status: "accepted" }, 202))
+      .mockResolvedValue(jsonResponse(adminPayload()));
 
     renderWithProviders(<AdminDashboard />);
 
@@ -195,8 +196,13 @@ describe("Admin dashboard", () => {
 
     expect(vi.mocked(fetch).mock.calls[1][0]).toBe("/api/v1/ingestion/connectors/c1/run");
     expect(vi.mocked(fetch).mock.calls[1][1]).toMatchObject({ method: "POST" });
-    const runs = await screen.findByRole("region", { name: "Ingestion runs" });
-    expect(within(runs).getByText("Succeeded")).toBeInTheDocument();
+    // The register states the queued run. Without it, a press against a stopped
+    // worker — which is most of the time — is indistinguishable from a button
+    // that does nothing.
+    expect(await screen.findByRole("status")).toHaveTextContent("Run queued");
+    // And the ledger stays honest: no run has happened, so it is still empty.
+    const runs = screen.getByRole("region", { name: "Ingestion runs" });
+    expect(within(runs).getByText(/No connector has run yet/)).toBeInTheDocument();
   });
 
   it("offers no Run for a disabled connector, and enables it in one press", async () => {

@@ -23,10 +23,10 @@ fused by RRF), and Phase-1 demo hardening (#23 — finalized Compose, hosted Emb
 a seeded owned Brief) are live; `GET /api/v1/health` from the walking skeleton (#16) too.
 Phase 2 has started: the **RSS connector tracer bullet** (#39) is in — `src/ingestion/`
 (`runConnector` is the one new seam, over `canonicalUrl` + `rss`), `POST
-/api/v1/ingestion/connectors/:id/run` and `PATCH .../:id` (Admin-only, run is inline until
-#42 makes it an enqueue), an `ingestion_runs` table, and 10 curated real RSS feeds in the
-seed. Ingested reporting lands as **Unclustered Articles** (`articles.storyId` is nullable and
-ingestion leaves it null), so it is invisible to browse and search by construction.
+/api/v1/ingestion/connectors/:id/run` and `PATCH .../:id` (Admin-only), an `ingestion_runs`
+table, and 10 curated real RSS feeds in the seed. Ingested reporting lands as **Unclustered
+Articles** (`articles.storyId` is nullable and ingestion leaves it null), so it is invisible
+to browse and search by construction.
 Each Publisher now carries a **Terms Class** (#40) and *that* decides whether the API serves
 its text: fixture Publishers are `licensed` (the text is ours), anything a connector creates
 defaults to `internal_only`, and an `open_metadata` publisher's text-bearing items are rejected
@@ -36,10 +36,16 @@ The **GKG connector** (#41) is in: a run resolves the current 15-minute window f
 (`src/ingestion/gkg.ts`), dropping GCAM at parse time. Its rows land on the ladder's weakest
 rung — `metadata_only`, with genuinely null `analysisText`, since GKG carries no body and no
 snippet — and keep GDELT's average tone in `articles.tone` for the Phase-3.5 timeline. The GKG
-firehose connector is enabled in the seed; DOC is still off. A window is ~700 rows, so an
-Admin's Run on that connector is a long request until #42 makes it an enqueue, and there is no
-retention yet (#45).
-The DOC connector, the worker, GKG Annotation staging, and Phase 3.5 (graph/timeline) are not
+firehose connector is enabled in the seed; DOC is still off.
+The **worker** (#42) closes the loop: `src/worker.ts` is its own process (natively, not in
+Compose — ADR-0015) draining a BullMQ `ingestion` queue, with a repeatable tick on the
+quarter hour that enqueues one run per enabled connector. The Admin trigger enqueues onto
+that same queue and answers `202 {status:"accepted"}`, so there is one execution path; the
+job id is the connector's id, so a trigger landing mid-run adds no second run, and worker
+concurrency is 1. `src/ingestion/queue.ts` is the enqueue side, `src/ingestion/jobs.ts` the
+handler. Run history is still read from Postgres, never the queue, so the Admin console
+renders with the worker stopped. There is no retention yet (#45).
+The DOC connector, GKG Annotation staging, and Phase 3.5 (graph/timeline) are not
 built yet.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
@@ -56,7 +62,8 @@ The cross-route responsive and accessibility sweep (#37) closed it out: `/accoun
 `/status` became stated pages in the same vocabulary, and every route's screenshots at both
 breakpoints sit in `docs/verification/bureau-rollout/`. `/` redirects to the caller's own
 dashboard. The Admin console gained a fourth register for **IngestionRun** history and Run /
-Enable-Disable commands on each connector row (#39), and each publisher row shows its Terms
+Enable-Disable commands on each connector row (#39 — Run states that it queued the run, since
+the worker is what executes it, #42), and each publisher row shows its Terms
 Class beside its article count (#40). The
 **design prototype** for the Phase-3 flagship (`src/versions/BureauPrototype.tsx` +
 `bureau.tsx` over hardcoded `src/data.ts`, styled by `src/styles.css`) sits at
@@ -198,6 +205,8 @@ Backend commands (run from `backend/`, after `docker compose up -d` — see `SET
 
 ```bash
 npm run dev       # tsx watch, http://localhost:4000
+npm run worker    # tsx watch, the ingestion worker: drains the BullMQ queue and ticks
+                  # every 15 minutes (#42). Needs REDIS_URL; run it in a second terminal.
 npm run build     # tsc -> dist/
 npm run migrate   # apply TypeORM migrations
 npm run seed      # demo users for all three roles (only path to an Admin, ADR-0015) + the
@@ -207,6 +216,7 @@ npm run seed      # demo users for all three roles (only path to an Admin, ADR-0
                   # when GEMINI_API_KEY is set, else the Mock (ADR-0023 — switching providers
                   # needs a fresh volume, see SETUP.md)
 npm test          # vitest; spins up an ephemeral Postgres via Testcontainers, needs docker access
+                  # No Redis in the test stack: the enqueue is stubbed (#42)
                   # GDELT_LIVE_SMOKE=1 additionally runs the one live GKG check (#41),
                   # skipped by default so the suite stays offline
 ```

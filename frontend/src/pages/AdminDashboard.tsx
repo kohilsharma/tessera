@@ -15,7 +15,7 @@ import {
   DashboardRegister,
   RegisterRow,
 } from "../components/dashboardArchetype";
-import { EmptyState, EntryList, ErrorState } from "../components/uiStates";
+import { EmptyState, EntryList, ErrorState, PendingState } from "../components/uiStates";
 
 // A run's own timing, in the note line rather than the ledger: a timestamp and a
 // duration are one fact about when, and two more ledger cells beside seven
@@ -100,6 +100,17 @@ export default function AdminDashboard() {
                   the payload loaded fine, so DashboardShell's error treatment
                   would be a lie. Same treatment, stated where it happened. */}
               {commandError && <ErrorState>{commandError}</ErrorState>}
+              {/* #42: Run enqueues, so an accepted command has produced nothing
+                  to look at yet — and with the worker stopped, which is most of
+                  the time, it will not. Saying so is the difference between a
+                  queued run and a button that did nothing. The pending treatment
+                  because that is exactly what it is: a run that has not happened. */}
+              {run.isSuccess && (
+                <PendingState>
+                  Run queued. Runs appear under Ingestion runs once the worker has executed them — start it with{" "}
+                  <code>npm run worker</code> in <code>backend/</code>.
+                </PendingState>
+              )}
               {data.connectors.length === 0 ? (
                 <EmptyState>
                   <p>
@@ -120,7 +131,7 @@ export default function AdminDashboard() {
                       action={
                         <>
                           {/* Only this row's button reports in flight: an
-                              operator running one feed has not lost the others.
+                              operator queueing one feed has not lost the others.
                               A disabled connector is refused server-side, so the
                               button is not offered at all. */}
                           <button
@@ -128,7 +139,7 @@ export default function AdminDashboard() {
                             disabled={!connector.enabled || (run.isPending && run.variables === connector.id)}
                             onClick={() => command(() => run.mutate(connector.id))}
                           >
-                            {run.isPending && run.variables === connector.id ? "Running…" : "Run"}
+                            {run.isPending && run.variables === connector.id ? "Queueing…" : "Run"}
                           </button>
                           <button
                             type="button"
@@ -146,14 +157,18 @@ export default function AdminDashboard() {
             </DashboardRegister>
 
             {/* ADR-0024: read from Postgres, not the queue — so this register is
-                populated whether or not the worker is running. */}
+                populated whether or not the worker is running, and a run queued
+                a moment ago is simply not here yet. */}
             <DashboardRegister
               heading="Ingestion runs"
               folio={`${data.ingestionRuns.length} most recent`}
             >
               {data.ingestionRuns.length === 0 ? (
                 <EmptyState>
-                  <p>No connector has run yet — press Run on a connector above.</p>
+                  <p>
+                    No connector has run yet. The worker runs every enabled connector on the quarter hour; press Run
+                    above to queue one now.
+                  </p>
                 </EmptyState>
               ) : (
                 <EntryList>

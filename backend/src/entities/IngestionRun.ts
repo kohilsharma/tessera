@@ -21,9 +21,9 @@ export class IngestionRun {
   connectorId!: string;
 
   // `running` is written before the first fetch and updated to a terminal status
-  // at the end. Redundant while the Admin trigger runs the connector inline
-  // (#39), and exactly what the queue needs when the trigger becomes an enqueue
-  // (#42) — a row that exists before the work does.
+  // at the end — a row that exists before the work does, which is what makes a
+  // run in flight visible on the Admin console while the worker (#42) is still
+  // working through it.
   @Column({ type: "varchar" })
   status!: IngestionRunStatus;
 

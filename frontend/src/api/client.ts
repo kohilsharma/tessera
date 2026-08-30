@@ -399,10 +399,16 @@ export async function fetchBriefCoverImage(coverImageUrl: string): Promise<Blob>
 }
 
 
-// #39: the Admin ingestion surface. Both are Admin-only server-side
+// #39, #42: the Admin ingestion surface. Both are Admin-only server-side
 // (backend/src/routes/ingestion.ts) — the console is only ever rendered for an
 // Admin, so the client does not re-check what the API enforces.
-export function runIngestionConnector(connectorId: string): Promise<IngestionRunSummary> {
+//
+// The run command is an enqueue, so what comes back is an acknowledgement and not
+// a run: the IngestionRun appears in the dashboard payload once the worker has
+// executed it (ADR-0024 — history is read from Postgres, never the queue).
+export type IngestionRunAccepted = { connectorId: string; status: "accepted" };
+
+export function runIngestionConnector(connectorId: string): Promise<IngestionRunAccepted> {
   return sendJson("POST", `/api/v1/ingestion/connectors/${connectorId}/run`, undefined, "Could not run this connector");
 }
 

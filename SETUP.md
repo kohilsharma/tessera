@@ -29,10 +29,34 @@ npm install
 cp .env.example .env
 npm run migrate   # applies migrations, incl. `CREATE EXTENSION vector`
 npm run seed      # demo users for all three roles (ADR-0015) + a Story/Article corpus
-                  # + seed-only IngestionConnectors + one owned Brief
+                  # + IngestionConnectors (10 curated RSS feeds + the GKG firehose) + one owned Brief
 npm run dev       # http://localhost:4000
 npm run build     # type-check + compile to dist/ (`npm start` runs the build)
 ```
+
+### The ingestion worker
+
+Ingestion runs in its own process, natively rather than in Compose (ADR-0015). Start it
+in a second terminal:
+
+```bash
+cd backend
+npm run worker    # tsx watch src/worker.ts (`npm run start:worker` runs the build)
+```
+
+It drains the `ingestion` queue and, on every quarter hour, enqueues one run for each
+enabled connector. The Admin console's Run button enqueues onto that same queue, so the
+scheduled path and the on-demand path are the same execution path — pressing Run with the
+worker stopped queues a run that happens when the worker next starts.
+
+Nothing else needs the worker: run history is read from Postgres, so
+`/dashboard/admin` renders correctly with the worker down. `REDIS_URL` must be set (it is
+in `.env.example`) for either the worker or the Run button to work.
+
+A tick runs the whole enabled fleet one connector at a time, and the GKG firehose alone is
+~700 rows per 15-minute window, so expect a minute of work per tick and the corpus to grow
+steadily while the worker is up. Everything it ingests is an **Unclustered Article** —
+invisible to browse and search until clustering lands.
 
 ### Demo logins
 
@@ -117,7 +141,9 @@ server — see `frontend/vite.config.ts`). `/` redirects to your own role dashbo
 
 Backend tests drive the Express app with `supertest` against a real, ephemeral
 Postgres spun up per test run via Testcontainers — no manual test-DB setup needed,
-just a working `docker` connection (see Prerequisites).
+just a working `docker` connection (see Prerequisites). Redis is deliberately not in the
+test stack: the one enqueue call is stubbed, so the suite needs only the Postgres
+container.
 
 ```bash
 cd backend
