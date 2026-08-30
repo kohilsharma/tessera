@@ -192,7 +192,12 @@ export type ListEnvelope<T> = { items: T[]; page: number; pageSize: number; tota
 
 // CONTEXT.md "Analysis Text Mode" — mirrors backend/src/entities/Article.ts's
 // ANALYSIS_TEXT_MODES, same as STORY_CATEGORIES mirrors the Story vocabulary.
-export type AnalysisTextMode = "feed_excerpt" | "api_content" | "licensed_full_text" | "manual_fixture";
+export type AnalysisTextMode =
+  | "metadata_only"
+  | "feed_excerpt"
+  | "api_content"
+  | "licensed_full_text"
+  | "manual_fixture";
 
 export type StorySummary = {
   id: string;

@@ -67,8 +67,10 @@ function countersSumToDiscovered(run: IngestionRun): boolean {
 // be climbable by anything a publisher hands us.
 describe("Analysis Text Mode ladder", () => {
   it("orders the ladder upward only and never ranks manual_fixture", () => {
+    expect(isStrongerAnalysisTextMode("feed_excerpt", "metadata_only")).toBe(true);
     expect(isStrongerAnalysisTextMode("api_content", "feed_excerpt")).toBe(true);
     expect(isStrongerAnalysisTextMode("licensed_full_text", "api_content")).toBe(true);
+    expect(isStrongerAnalysisTextMode("metadata_only", "feed_excerpt")).toBe(false);
     expect(isStrongerAnalysisTextMode("feed_excerpt", "api_content")).toBe(false);
     expect(isStrongerAnalysisTextMode("feed_excerpt", "feed_excerpt")).toBe(false);
     expect(isStrongerAnalysisTextMode("licensed_full_text", "manual_fixture")).toBe(false);
@@ -167,6 +169,100 @@ describe("runConnector over an RSS feed", () => {
     expect(await AppDataSource.getRepository(Article).countBy({ discoveredByConnectorId: connector.id })).toBe(3);
   });
 
+  it("counts cross-connector sightings with no new contribution as duplicates", async () => {
+    const firstConnector = await createRssConnector("https://bbc-one.example/feed.xml");
+    const secondConnector = await createRssConnector("https://bbc-two.example/feed.xml");
+    const fetchText = fixture("bbc-world.xml");
+
+    expect((await runConnector(firstConnector, { fetchText }))!.inserted).toBe(3);
+    const overlap = await runConnector(secondConnector, { fetchText });
+    const rerun = await runConnector(secondConnector, { fetchText });
+
+    for (const run of [overlap, rerun]) {
+      expect(run!.inserted).toBe(0);
+      expect(run!.enriched).toBe(0);
+      expect(run!.duplicate).toBe(3);
+      expect(countersSumToDiscovered(run!)).toBe(true);
+    }
+    expect(await AppDataSource.getRepository(Article).count()).toBe(3);
+  });
+
+  it("enriches a metadata-only Article when another connector contributes excerpt text", async () => {
+    const sourceConnector = await createRssConnector("https://metadata.example/feed.xml");
+    const rssConnector = await createRssConnector("https://bbc-enrichment.example/feed.xml");
+    const publisher = await AppDataSource.getRepository(Publisher).save({
+      name: "BBC News",
+      domain: "bbc.co.uk",
+    });
+    const held = await AppDataSource.getRepository(Article).save({
+      storyId: null,
+      publisherId: publisher.id,
+      discoveredByConnectorId: sourceConnector.id,
+      title: "Iceland votes against restarting EU membership talks",
+      url: "https://www.bbc.co.uk/news/articles/c70le8ed1plo",
+      analysisText: null,
+      analysisTextMode: "metadata_only",
+      publishedAt: new Date("2026-08-30T14:45:05Z"),
+    });
+
+    const run = await runConnector(rssConnector, { fetchText: fixture("bbc-world.xml") });
+
+    expect(run!.inserted).toBe(2);
+    expect(run!.enriched).toBe(1);
+    expect(run!.duplicate).toBe(0);
+    const enriched = await AppDataSource.getRepository(Article).findOneByOrFail({ id: held.id });
+    expect(enriched.analysisTextMode).toBe("feed_excerpt");
+    expect(enriched.analysisText).toContain("Broadcaster RUV reports");
+    expect(enriched.discoveredByConnectorId).toBe(sourceConnector.id);
+  });
+
+  it("counts only one concurrent enrichment of the same canonical URL", async () => {
+    const concurrency = 8;
+    const sourceConnector = await createRssConnector("https://metadata-race.example/feed.xml");
+    const connectors = await Promise.all(
+      Array.from({ length: concurrency }, (_, index) =>
+        createRssConnector(`https://enrichment-race-${index}.example/feed.xml`),
+      ),
+    );
+    const publisher = await AppDataSource.getRepository(Publisher).save({
+      name: "Race News",
+      domain: "race.example",
+    });
+    await AppDataSource.getRepository(Article).save({
+      storyId: null,
+      publisherId: publisher.id,
+      discoveredByConnectorId: sourceConnector.id,
+      title: "Original metadata title",
+      url: "https://race.example/shared-report",
+      analysisText: null,
+      analysisTextMode: "metadata_only",
+      publishedAt: new Date("2026-08-30T12:00:00Z"),
+    });
+    let ready = 0;
+    let release!: () => void;
+    const allReady = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const completed = await Promise.all(
+      connectors.map((connector, index) =>
+        runConnector(connector, {
+          fetchText: async () => {
+            ready += 1;
+            if (ready === concurrency) release();
+            await allReady;
+            return `<?xml version="1.0"?><rss version="2.0"><channel><title>Race News</title><item><title>Variant ${index}</title><link>https://race.example/shared-report</link><pubDate>${new Date(Date.UTC(2026, 7, 30 + index)).toUTCString()}</pubDate><description>Excerpt ${index}.</description></item></channel></rss>`;
+          },
+        }),
+      ),
+    );
+
+    expect(completed.reduce((sum, run) => sum + run!.enriched, 0)).toBe(1);
+    expect(completed.reduce((sum, run) => sum + run!.duplicate, 0)).toBe(concurrency - 1);
+    expect(completed.reduce((sum, run) => sum + run!.failed, 0)).toBe(0);
+    expect(await AppDataSource.getRepository(Article).count()).toBe(1);
+  });
+
   it("stores the canonical URL, so a tracked feed link is not a second Article", async () => {
     const connector = await createRssConnector("https://bbc-canonical.example/feed.xml");
 
@@ -208,6 +304,37 @@ describe("runConnector over an RSS feed", () => {
     expect(countersSumToDiscovered(run!)).toBe(true);
   });
 
+  it("atomically rejects concurrent different-URL duplicates", async () => {
+    const concurrency = 8;
+    const connectors = await Promise.all(
+      Array.from({ length: concurrency }, (_, index) =>
+        createRssConnector(`https://concurrent-${index}.example/feed.xml`),
+      ),
+    );
+    let ready = 0;
+    let release!: () => void;
+    const allReady = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const runs = connectors.map((connector, index) =>
+      runConnector(connector, {
+        fetchText: async () => {
+          ready += 1;
+          if (ready === concurrency) release();
+          await allReady;
+          return `<?xml version="1.0"?><rss version="2.0"><channel><title>Concurrent News</title><item><title>One shared report</title><link>https://concurrent.example/report-${index}</link><pubDate>Sun, 30 Aug 2026 12:00:00 GMT</pubDate><description>Shared report text.</description></item></channel></rss>`;
+        },
+      }),
+    );
+
+    const completed = await Promise.all(runs);
+
+    expect(completed.reduce((sum, run) => sum + run!.inserted, 0)).toBe(1);
+    expect(completed.reduce((sum, run) => sum + run!.duplicate, 0)).toBe(concurrency - 1);
+    expect(completed.reduce((sum, run) => sum + run!.failed, 0)).toBe(0);
+    expect(await AppDataSource.getRepository(Article).count()).toBe(1);
+  });
+
   it("never lets a weaker sighting degrade text already held for the same URL", async () => {
     const connector = await createRssConnector("https://bbc-held.example/feed.xml");
     const publisher = await AppDataSource.getRepository(Publisher).save({
@@ -232,6 +359,7 @@ describe("runConnector over an RSS feed", () => {
     const after = await AppDataSource.getRepository(Article).findOneByOrFail({ id: held.id });
     expect(after.analysisTextMode).toBe("licensed_full_text");
     expect(after.analysisText).toBe("The licensed full text we already hold.");
+    expect(after.discoveredByConnectorId).toBeNull();
   });
 
   it("fails a malformed item and not the run, and says why", async () => {

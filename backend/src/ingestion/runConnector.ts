@@ -1,10 +1,10 @@
+import type { EntityManager } from "typeorm";
 import { AppDataSource } from "../data-source";
 import { Article, isStrongerAnalysisTextMode } from "../entities/Article";
 import type { AnalysisTextMode } from "../entities/Article";
 import { IngestionConnector } from "../entities/IngestionConnector";
 import { IngestionRun } from "../entities/IngestionRun";
 import { Publisher } from "../entities/Publisher";
-import { isPgError, PG_UNIQUE_VIOLATION } from "../lib/pgError";
 import { canonicalizeUrl, normalizeTitle, publisherDomain } from "./canonicalUrl";
 import { parseRssFeed, type FeedItem } from "./rss";
 
@@ -78,9 +78,15 @@ function utcDayBounds(at: Date): [Date, Date] {
 // memory — there is no normalized-title column to index, and one publisher's
 // output for one day is a handful of rows. If that stops being true, the upgrade
 // is a generated normalized-title column with an index on (publisherId, day).
-async function findDuplicateId(publisherId: string, title: string, publishedAt: Date): Promise<string | null> {
+async function findDuplicateId(
+  manager: EntityManager,
+  publisherId: string,
+  title: string,
+  publishedAt: Date,
+): Promise<string | null> {
   const [dayStart, nextDay] = utcDayBounds(publishedAt);
-  const candidates = await AppDataSource.getRepository(Article)
+  const candidates = await manager
+    .getRepository(Article)
     .createQueryBuilder("article")
     .select(["article.id", "article.title"])
     .where("article.publisherId = :publisherId", { publisherId })
@@ -91,20 +97,49 @@ async function findDuplicateId(publisherId: string, title: string, publishedAt: 
   return candidates.find((candidate) => normalizeTitle(candidate.title) === normalized)?.id ?? null;
 }
 
-type HeldArticle = { id: string; analysisTextMode: AnalysisTextMode };
+type HeldArticle = {
+  id: string;
+  analysisTextMode: AnalysisTextMode;
+  discoveredByConnectorId: string | null;
+};
 
-// ADR-0024: same canonical URL is *enrichment*, not duplication — one document
-// seen by two instruments. It counts as enriched only when the newcomer actually
-// contributed: text further up the ladder. A sighting that contributes nothing
-// (re-running an unchanged feed, most commonly) is a Duplicate, because an
-// `enriched` counter that ticks for no-ops tells an operator nothing.
-async function reconcileWithHeld(held: HeldArticle, text: string, mode: AnalysisTextMode): Promise<ItemOutcome> {
-  if (!isStrongerAnalysisTextMode(mode, held.analysisTextMode)) return "duplicate";
-  await AppDataSource.getRepository(Article).update(
-    { id: held.id },
-    { analysisText: text, analysisTextMode: mode },
-  );
-  return "enriched";
+// A same-URL sighting enriches only when it persists stronger text. Equal or
+// weaker sightings contribute nothing and are duplicates, regardless of which
+// connector saw them (CONTEXT.md "Enrichment").
+async function reconcileWithHeld(
+  manager: EntityManager,
+  held: HeldArticle,
+  connectorId: string,
+  text: string,
+  mode: AnalysisTextMode,
+): Promise<ItemOutcome> {
+  const articles = manager.getRepository(Article);
+  let current = held;
+  while (isStrongerAnalysisTextMode(mode, current.analysisTextMode)) {
+    // Compare-and-set the rung: concurrent sightings may hold different dedupe
+    // locks, so only the transaction that still sees this exact mode may count
+    // the transition as enrichment.
+    const updated = await articles
+      .createQueryBuilder()
+      .update()
+      .set({
+        analysisText: text,
+        analysisTextMode: mode,
+        discoveredByConnectorId: current.discoveredByConnectorId ?? connectorId,
+      })
+      .where(`id = :id AND "analysisTextMode" = :heldMode`, {
+        id: current.id,
+        heldMode: current.analysisTextMode,
+      })
+      .execute();
+    if (updated.affected === 1) return "enriched";
+
+    current = await articles.findOneOrFail({
+      where: { id: current.id },
+      select: { id: true, analysisTextMode: true, discoveredByConnectorId: true },
+    });
+  }
+  return "duplicate";
 }
 
 // One item, start to finish. Throws ItemFailure for anything about the item
@@ -119,52 +154,63 @@ async function ingestItem(
   // an empty string.
   channelTitle: string | null,
 ): Promise<ItemOutcome> {
-  const articles = AppDataSource.getRepository(Article);
-
   if (!item.title) fail("item has no title");
   if (!item.link) fail("item has no link");
   const url = canonicalizeUrl(item.link);
   if (!url) fail(`item link is not an absolute http(s) URL: ${item.link}`);
-  if (!item.publishedAt) fail(`item has no parseable date: ${item.title}`);
-  // No metadata_only rung exists yet (it arrives with the GKG connector, #41),
-  // and analysisText is still NOT NULL — so an RSS item with neither
-  // content:encoded nor description has nowhere to land.
-  if (!item.text) fail(`item has no description or content:encoded: ${item.title}`);
+  const publishedAt = item.publishedAt;
+  if (!publishedAt) fail(`item has no parseable date: ${item.title}`);
+  const text = item.text;
+  if (!text) fail(`item has no description or content:encoded: ${item.title}`);
 
   const mode: AnalysisTextMode = "feed_excerpt";
   const domain = publisherDomain(url);
   const publisher = await resolvePublisher(domain, channelTitle ?? domain);
+  const dedupeKey = `${publisher.id}\n${publishedAt.toISOString().slice(0, 10)}\n${normalizeTitle(item.title)}`;
 
-  const held = await articles.findOne({ where: { url }, select: { id: true, analysisTextMode: true } });
-  if (held) return reconcileWithHeld(held, item.text, mode);
-
-  if (await findDuplicateId(publisher.id, item.title, item.publishedAt)) return "duplicate";
-
-  try {
-    await articles.insert({
-      // CONTEXT.md "Unclustered Article": ingestion never assigns a Story.
-      // Phase 3 clustering is what fills this in.
-      storyId: null,
-      publisherId: publisher.id,
-      discoveredByConnectorId: connector.id,
-      title: item.title,
-      url,
-      analysisText: item.text,
-      analysisTextMode: mode,
-      publishedAt: item.publishedAt,
+  return AppDataSource.transaction(async (manager) => {
+    // The issue-defined duplicate identity has no stored normalized-title
+    // column. A transaction-scoped lock makes its check+insert atomic without
+    // adding duplicate schema solely for one write path.
+    await manager.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [dedupeKey]);
+    const articles = manager.getRepository(Article);
+    const held = await articles.findOne({
+      where: { url },
+      select: { id: true, analysisTextMode: true, discoveredByConnectorId: true },
     });
-    return "inserted";
-  } catch (err) {
-    if (!isPgError(err, PG_UNIQUE_VIOLATION)) throw err;
-    // Another connector inserted this canonical URL between the read above and
-    // this write. Re-read it and make the same decision the non-racing path
-    // makes, rather than assuming the winner holds no weaker text than ours —
-    // once #41 lands, the row that won the race can be `metadata_only`, and
-    // assuming would discard the excerpt (epic story 23: no connector's
-    // contribution is lost to a race).
-    const raced = await articles.findOneOrFail({ where: { url }, select: { id: true, analysisTextMode: true } });
-    return reconcileWithHeld(raced, item.text, mode);
-  }
+    if (held) return reconcileWithHeld(manager, held, connector.id, text, mode);
+
+    if (await findDuplicateId(manager, publisher.id, item.title, publishedAt)) return "duplicate";
+
+    const inserted = await articles
+      .createQueryBuilder()
+      .insert()
+      .values({
+        // CONTEXT.md "Unclustered Article": ingestion never assigns a Story.
+        storyId: null,
+        publisherId: publisher.id,
+        discoveredByConnectorId: connector.id,
+        title: item.title,
+        url,
+        analysisText: text,
+        analysisTextMode: mode,
+        publishedAt,
+      })
+      .orIgnore()
+      .returning(["id"])
+      .execute();
+    if (inserted.raw.length > 0) return "inserted";
+
+    // A differently-titled item can use a different advisory lock while racing
+    // on the same canonical URL. ON CONFLICT keeps the transaction usable so we
+    // can reconcile with the winner instead of losing either contribution.
+    const raced = await articles.findOne({
+      where: { url },
+      select: { id: true, analysisTextMode: true, discoveredByConnectorId: true },
+    });
+    if (!raced) throw new Error(`Article insert was ignored without a canonical URL conflict: ${url}`);
+    return reconcileWithHeld(manager, raced, connector.id, text, mode);
+  });
 }
 
 // Returns null when the connector is disabled: it did not run, so there is no

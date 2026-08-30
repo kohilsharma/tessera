@@ -1,19 +1,11 @@
 import { Article } from "../entities/Article";
 import type { AnalysisTextMode } from "../entities/Article";
 
-// ADR-0018 / AGENTS.md core invariant: article bodies are internal only, never
-// redistributed. Until Publisher carries per-source rights (`terms_class` lands
-// with ingestion in Phase 2, ADR-0022), the Article's own Analysis Text Mode is
-// the only rights signal we have — so text leaves the API only for the modes
-// that are ours to serve: our own synthetic fixtures, and the excerpts
-// publishers syndicate for exactly this purpose. `api_content` and
-// `licensed_full_text` stay internal (embeddings and analysis only).
-// ponytail: mode allowlist, not a real rights check — swap the predicate for
-// Publisher.terms_class once ingestion populates it.
-const REDISTRIBUTABLE_MODES: readonly AnalysisTextMode[] = ["manual_fixture", "feed_excerpt"];
-
+// Until #40 adds Publisher Terms Class, fail closed: only our synthetic fixture
+// text leaves the API. Live feed/API/licensed text remains internal even when a
+// future clustering run makes its Article public.
 export function mayRedistribute(mode: AnalysisTextMode): boolean {
-  return REDISTRIBUTABLE_MODES.includes(mode);
+  return mode === "manual_fixture";
 }
 
 // The Article projection shared by the Story detail's article list and the

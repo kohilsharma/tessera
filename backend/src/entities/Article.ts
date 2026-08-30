@@ -6,7 +6,13 @@ import { Story } from "./Story";
 // CONTEXT.md "Analysis Text Mode": what text is actually available for
 // analysis. Product wording must match the weakest mode in an EvidenceSet
 // (later ticket). Seed fixtures use manual_fixture (ADR-0007).
-export const ANALYSIS_TEXT_MODES = ["feed_excerpt", "api_content", "licensed_full_text", "manual_fixture"] as const;
+export const ANALYSIS_TEXT_MODES = [
+  "metadata_only",
+  "feed_excerpt",
+  "api_content",
+  "licensed_full_text",
+  "manual_fixture",
+] as const;
 export type AnalysisTextMode = (typeof ANALYSIS_TEXT_MODES)[number];
 
 // ADR-0024: the modes are an *ordered ladder*, weakest first, and an Article's
@@ -16,12 +22,10 @@ export type AnalysisTextMode = (typeof ANALYSIS_TEXT_MODES)[number];
 // the one mode deliberately excluded: an unranked mode is one nothing can climb
 // over.
 //
-// `Exclude`, not `Partial`: when #41 adds `metadata_only` as the new weakest
-// rung, this map must fail to compile until it is ranked. Left partial, a
-// `metadata_only` Article would silently be unrankable and so could never be
-// enriched up to `feed_excerpt` — exactly the lost text ADR-0024 exists to
-// prevent, and it would fail silently.
+// `Exclude`, not `Partial`: adding another mode makes this map fail to compile
+// until the new rung is deliberately ranked.
 const ANALYSIS_TEXT_MODE_RANK: Record<Exclude<AnalysisTextMode, "manual_fixture">, number> = {
+  metadata_only: 0,
   feed_excerpt: 1,
   api_content: 2,
   licensed_full_text: 3,
@@ -64,8 +68,8 @@ export class Article {
   @Column({ type: "varchar", unique: true })
   url!: string;
 
-  @Column({ type: "text" })
-  analysisText!: string;
+  @Column({ type: "text", nullable: true })
+  analysisText!: string | null;
 
   @Column({ type: "varchar" })
   analysisTextMode!: AnalysisTextMode;

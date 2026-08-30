@@ -9,6 +9,7 @@ import { PendingState, RetryableError } from "../components/uiStates";
 // "Tessera holds …" so the mode says what text actually exists here, which is
 // the point of stating it at all.
 const ANALYSIS_TEXT_MODES: Record<AnalysisTextMode, { label: string; held: string }> = {
+  metadata_only: { label: "Metadata only", held: "the title and source metadata, with no analysable article text" },
   feed_excerpt: { label: "Feed excerpt", held: "the headline and excerpt from this Publisher's feed" },
   api_content: { label: "API content", held: "the article text served by the GDELT DOC API" },
   licensed_full_text: { label: "Licensed full text", held: "the full article text, under a partner licence" },
@@ -66,6 +67,10 @@ export default function ArticleDetail() {
       <RecordSection heading="Analysis text">
         {article.analysisText ? (
           <p className="record-prose">{article.analysisText}</p>
+        ) : article.analysisTextMode === "metadata_only" ? (
+          <p className="record-prose">
+            No analysable article text is available. Read the reporting at the original source below.
+          </p>
         ) : (
           <p className="record-prose">
             This Article&rsquo;s text is held for analysis only and is not shown here. Read it at the
@@ -88,8 +93,9 @@ export default function ArticleDetail() {
           <div>
             <dt>Redistribution</dt>
             <dd>
-              Body text is held inside Tessera for analysis and is never redistributed or
-              republished. Publisher, title, date, and link are open metadata.
+              {article.analysisTextMode === "metadata_only"
+                ? "No article body is held; Publisher, title, date, and link are open metadata."
+                : "Body text is held inside Tessera for analysis and is never redistributed or republished. Publisher, title, date, and link are open metadata."}
             </dd>
           </div>
           <div>

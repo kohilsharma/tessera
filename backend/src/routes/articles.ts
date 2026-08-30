@@ -34,9 +34,8 @@ articlesRouter.get(
 
     res.json({
       ...toPublicArticle(article),
-      // The one endpoint that serves body text, and only for modes we may
-      // redistribute (ADR-0018) — null otherwise, so the client can say so
-      // rather than render an empty body.
+      // Until Publisher Terms Class lands in #40, the mode gate fails closed:
+      // only our own manual fixtures are redistributable.
       analysisText: mayRedistribute(article.analysisTextMode) ? article.analysisText : null,
       story: { id: article.story.id, slug: article.story.slug, title: article.story.title },
     });

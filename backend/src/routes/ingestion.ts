@@ -14,13 +14,9 @@ export const ingestionRouter = Router();
 // gets 403 here, and an anonymous caller 401 (requireAuth).
 const adminOnly = [requireAuth, requireRole("admin")] as const;
 
-function connectorRepo() {
-  return AppDataSource.getRepository(IngestionConnector);
-}
-
 async function findConnector(id: string): Promise<IngestionConnector | null> {
   if (!isUuid(id)) return null;
-  return connectorRepo().findOneBy({ id });
+  return AppDataSource.getRepository(IngestionConnector).findOneBy({ id });
 }
 
 // #39 runs the connector inline; #42 flips this to an enqueue onto the BullMQ
@@ -67,7 +63,7 @@ ingestionRouter.patch(
       return;
     }
 
-    await connectorRepo().update({ id: connector.id }, { enabled: req.body.enabled });
+    await AppDataSource.getRepository(IngestionConnector).update({ id: connector.id }, { enabled: req.body.enabled });
     res.json({ ...connector, enabled: req.body.enabled });
   }),
 );

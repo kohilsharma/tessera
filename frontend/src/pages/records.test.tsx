@@ -112,6 +112,16 @@ describe("Article detail — the record's own terms", () => {
     expect(screen.getByText("Licensed full text")).toBeInTheDocument();
   });
 
+  it("states when an Article has metadata but no analysable text", async () => {
+    renderArticle({ analysisText: null, analysisTextMode: "metadata_only" });
+
+    expect(await screen.findByText("Metadata only")).toBeInTheDocument();
+    expect(screen.getByText(/No analysable article text is available/)).toBeInTheDocument();
+    expect(screen.getByText(/Tessera holds the title and source metadata/)).toBeInTheDocument();
+    expect(screen.getByText(/No article body is held/)).toBeInTheDocument();
+    expect(screen.queryByText(/held for analysis only/)).not.toBeInTheDocument();
+  });
+
   it("shows a mode it does not describe rather than throwing on it", async () => {
     // The union is the backend's, and it can grow: a mode this page has no words
     // for is still a fact about the record, so it appears instead of blanking it.
