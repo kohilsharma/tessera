@@ -4,7 +4,7 @@ import { Article, isStrongerAnalysisTextMode } from "../entities/Article";
 import type { AnalysisTextMode } from "../entities/Article";
 import { IngestionConnector } from "../entities/IngestionConnector";
 import { IngestionRun } from "../entities/IngestionRun";
-import { Publisher, mayStoreText } from "../entities/Publisher";
+import { Publisher, mayServeText, mayStoreText } from "../entities/Publisher";
 import { canonicalizeUrl, normalizeTitle, publisherDomain } from "./canonicalUrl";
 import { parseGkgCsv, readGkgArchive, resolveGkgWindowUrl } from "./gkg";
 import { parseRssFeed } from "./rss";
@@ -79,8 +79,8 @@ function fail(reason: string): never {
 // publisher someone had already curated by hand.
 // A new Publisher takes the column's `internal_only` default (#40), so its text
 // is held for analysis but never served until an Admin classifies it.
-async function resolvePublisher(domain: string, name: string): Promise<Publisher> {
-  const publishers = AppDataSource.getRepository(Publisher);
+async function resolvePublisher(manager: EntityManager, domain: string, name: string): Promise<Publisher> {
+  const publishers = manager.getRepository(Publisher);
   await publishers.createQueryBuilder().insert().values({ domain, name }).orIgnore().execute();
   const publisher = await publishers.findOneByOrFail({ domain });
   // A name that is still just the domain is what GKG leaves behind — it reports no
@@ -103,13 +103,13 @@ function utcDayBounds(at: Date): [Date, Date] {
 // Half-open on the day bounds, not an inclusive BETWEEN: `timestamptz` is
 // microsecond-precision, so an inclusive upper bound one millisecond short of
 // midnight lets the last fraction of a day escape matching.
-// ponytail: candidates are fetched by publisher and calendar day and compared in
-// memory — there is no normalized-title column to index, and one publisher's
-// output for one day is a handful of rows. If that stops being true, the upgrade
-// is a generated normalized-title column with an index on (publisherId, day).
+// ponytail: candidates are fetched by related Publisher domains and calendar day
+// and compared in memory. The suffix relation lets an authoritative GKG apex
+// (`indiatimes.com`) match an RSS document host beneath it. A PublisherAlias
+// table is the upgrade if cross-brand subdomains make that relation too broad.
 async function findDuplicateId(
   manager: EntityManager,
-  publisherId: string,
+  domain: string,
   title: string,
   publishedAt: Date,
 ): Promise<string | null> {
@@ -117,8 +117,12 @@ async function findDuplicateId(
   const candidates = await manager
     .getRepository(Article)
     .createQueryBuilder("article")
+    .innerJoin("article.publisher", "publisher")
     .select(["article.id", "article.title"])
-    .where("article.publisherId = :publisherId", { publisherId })
+    .where(
+      `(publisher.domain = :domain OR publisher.domain LIKE :childDomain OR :domain LIKE ('%.' || publisher.domain))`,
+      { domain, childDomain: `%.${domain}` },
+    )
     .andWhere(`article."publishedAt" >= :dayStart`, { dayStart })
     .andWhere(`article."publishedAt" < :nextDay`, { nextDay })
     .getMany();
@@ -128,29 +132,85 @@ async function findDuplicateId(
 
 type HeldArticle = {
   id: string;
+  publisherId: string;
   analysisTextMode: AnalysisTextMode;
   discoveredByConnectorId: string | null;
 };
 
-// A same-URL sighting enriches only when it persists stronger text. Equal or
-// weaker sightings contribute nothing and are duplicates, regardless of which
-// connector saw them (CONTEXT.md "Enrichment").
+// A same-URL sighting enriches when it persists any new contribution: stronger
+// text, GKG tone, or GKG's authoritative source Publisher. Equal or weaker
+// sightings that add nothing are duplicates, regardless of which connector saw
+// them (CONTEXT.md "Enrichment").
 // `text` is nullable because a `metadata_only` sighting has none — and because
 // that rung is the weakest, such a sighting can never clear the loop's condition,
-// so the update below only ever writes text that exists.
+// so the text update below only ever writes text that exists.
 async function reconcileWithHeld(
   manager: EntityManager,
   held: HeldArticle,
   connectorId: string,
   text: string | null,
   mode: AnalysisTextMode,
+  tone: number | null,
+  sourcePublisherId: string | null,
+  publisherName: string | null,
 ): Promise<ItemOutcome> {
   const articles = manager.getRepository(Article);
-  let current = held;
+  const publishers = manager.getRepository(Publisher);
+  const heldPublisher = await publishers.findOneByOrFail({ id: held.publisherId });
+  const sourcePublisher =
+    sourcePublisherId === null ? null : await publishers.findOneByOrFail({ id: sourcePublisherId });
+  const toneUpdate =
+    tone === null ? null : await articles.update({ id: held.id, tone: IsNull() }, { tone });
+
+  let publisherUpdated = false;
+  if (sourcePublisher && sourcePublisher.id !== held.publisherId) {
+    const heldHasText = held.analysisTextMode !== "metadata_only";
+    const raisesServingRights =
+      heldHasText &&
+      mayServeText(sourcePublisher.termsClass, held.analysisTextMode) &&
+      !mayServeText(heldPublisher.termsClass, held.analysisTextMode);
+    if ((!heldHasText || mayStoreText(sourcePublisher.termsClass)) && !raisesServingRights) {
+      // Match both identity and mode so a concurrent text enrichment or Publisher
+      // correction cannot invalidate the rights decision made above.
+      publisherUpdated =
+        (
+          await articles
+            .createQueryBuilder()
+            .update()
+            .set({ publisherId: sourcePublisher.id })
+            .where(`id = :id AND "publisherId" = :publisherId AND "analysisTextMode" = :mode`, {
+              id: held.id,
+              publisherId: held.publisherId,
+              mode: held.analysisTextMode,
+            })
+            .execute()
+        ).affected === 1;
+    }
+  }
+
+  const improvePublisherName = async (publisherId: string): Promise<boolean> => {
+    if (!publisherName) return false;
+    const updated = await publishers
+      .createQueryBuilder()
+      .update()
+      .set({ name: publisherName })
+      .where(`id = :publisherId AND "name" = "domain" AND "name" <> :publisherName`, {
+        publisherId,
+        publisherName,
+      })
+      .execute();
+    return updated.affected === 1;
+  };
+
+  let current = publisherUpdated ? { ...held, publisherId: sourcePublisher!.id } : held;
   while (isStrongerAnalysisTextMode(mode, current.analysisTextMode)) {
-    // Compare-and-set the rung: concurrent sightings may hold different dedupe
-    // locks, so only the transaction that still sees this exact mode may count
-    // the transition as enrichment.
+    if (text !== null) {
+      const currentPublisher = await publishers.findOneByOrFail({ id: current.publisherId });
+      if (!mayStoreText(currentPublisher.termsClass)) return "rejectedByPolicy";
+    }
+    // Compare-and-set the rung and Publisher: concurrent sightings may hold
+    // different dedupe locks, so only the transaction that still sees this exact
+    // state may count the transition as enrichment.
     const updated = await articles
       .createQueryBuilder()
       .update()
@@ -159,19 +219,24 @@ async function reconcileWithHeld(
         analysisTextMode: mode,
         discoveredByConnectorId: current.discoveredByConnectorId ?? connectorId,
       })
-      .where(`id = :id AND "analysisTextMode" = :heldMode`, {
+      .where(`id = :id AND "analysisTextMode" = :heldMode AND "publisherId" = :publisherId`, {
         id: current.id,
         heldMode: current.analysisTextMode,
+        publisherId: current.publisherId,
       })
       .execute();
-    if (updated.affected === 1) return "enriched";
+    if (updated.affected === 1) {
+      await improvePublisherName(current.publisherId);
+      return "enriched";
+    }
 
     current = await articles.findOneOrFail({
       where: { id: current.id },
-      select: { id: true, analysisTextMode: true, discoveredByConnectorId: true },
+      select: { id: true, publisherId: true, analysisTextMode: true, discoveredByConnectorId: true },
     });
   }
-  return "duplicate";
+  const nameUpdated = await improvePublisherName(current.publisherId);
+  return toneUpdate?.affected === 1 || publisherUpdated || nameUpdated ? "enriched" : "duplicate";
 }
 
 // What every connector reduces to before anything touches the database: one
@@ -186,6 +251,10 @@ type DiscoveredItem = {
   text: string | null;
   mode: AnalysisTextMode;
   tone: number | null;
+  // GKG names the Publisher independently of the document host. Undefined for
+  // connectors such as RSS that derive it from the canonical URL; null means a
+  // source that promised the field supplied no usable value.
+  sourceDomain?: string | null;
   // The publisher's display name where the source gives one. Null lets the domain
   // name it — GKG supplies nothing better, and a Publisher is keyed on domain
   // regardless.
@@ -227,10 +296,7 @@ async function discoverGkg(connector: IngestionConnector, deps: RunConnectorDeps
       text: null,
       mode: "metadata_only",
       tone: row.tone,
-      // GKG's own source name is a bare domain, and where it differs from the
-      // document's host it is the *coarser* of the two (`indiatimes.com` for a
-      // `timesofindia.indiatimes.com` URL). The URL host is what an Article links
-      // to, so both connectors key their Publisher the same way.
+      sourceDomain: row.sourceDomain,
       publisherName: null,
     })),
   };
@@ -264,16 +330,37 @@ async function ingestItem(item: DiscoveredItem, connector: IngestionConnector): 
   // not a row that quietly claims a rung it cannot support.
   if (text === null && item.mode !== "metadata_only") fail(`item has no analysable text: ${title}`);
 
-  const domain = publisherDomain(url);
-  const publisher = await resolvePublisher(domain, item.publisherName ?? domain);
-  // The rights gate (#40). A publisher classed `open_metadata` has cleared its
-  // metadata and nothing else, so text it did not clear is not kept at all: the
-  // item goes with its text rather than landing as a text-free row. Rejected on
-  // rights grounds and counted, which is what an operator reads that counter for.
-  // A text-free sighting has nothing to reject and is unaffected — that is the
-  // `metadata_only` rung, whose whole contribution is metadata.
-  if (text !== null && !mayStoreText(publisher.termsClass)) return "rejectedByPolicy";
-  const dedupeKey = `${publisher.id}\n${publishedAt.toISOString().slice(0, 10)}\n${normalizeTitle(title)}`;
+  let sourceUrl: URL | null = null;
+  if (item.sourceDomain === null) fail(`item has no parseable source domain: ${title}`);
+  if (item.sourceDomain !== undefined) {
+    try {
+      sourceUrl = new URL(`https://${item.sourceDomain}`);
+    } catch {
+      // Handled by the validation below.
+    }
+    if (
+      !sourceUrl ||
+      sourceUrl.username !== "" ||
+      sourceUrl.password !== "" ||
+      sourceUrl.port !== "" ||
+      sourceUrl.pathname !== "/" ||
+      sourceUrl.search !== "" ||
+      sourceUrl.hash !== "" ||
+      !sourceUrl.hostname.includes(".")
+    ) {
+      fail(`item has no parseable source domain: ${title}`);
+    }
+  }
+  const documentDomain = publisherDomain(url);
+  const sourceDomain = sourceUrl ? publisherDomain(sourceUrl.toString()) : null;
+  if (sourceDomain && documentDomain !== sourceDomain && !documentDomain.endsWith(`.${sourceDomain}`)) {
+    fail(`item source domain ${sourceDomain} is unrelated to document host ${documentDomain}: ${title}`);
+  }
+  const domain = sourceDomain ?? documentDomain;
+  // ponytail: serialize the same normalized title/day across all Publishers so
+  // apex/subdomain aliases share the duplicate lock. A canonical PublisherAlias
+  // identity can narrow this lock if same-headline contention becomes measurable.
+  const dedupeKey = `${publishedAt.toISOString().slice(0, 10)}\n${normalizeTitle(title)}`;
 
   return AppDataSource.transaction(async (manager) => {
     // The issue-defined duplicate identity has no stored normalized-title
@@ -283,21 +370,33 @@ async function ingestItem(item: DiscoveredItem, connector: IngestionConnector): 
     const articles = manager.getRepository(Article);
     const held = await articles.findOne({
       where: { url },
-      select: { id: true, analysisTextMode: true, discoveredByConnectorId: true },
+      select: { id: true, publisherId: true, analysisTextMode: true, discoveredByConnectorId: true },
     });
     if (held) {
-      // ADR-0024 §4: a same-URL sighting is one document seen by two instruments,
-      // so it contributes what it carries even when its rung is too weak to
-      // enrich. Tone is that contribution today (GKG reports it, RSS does not; #43
-      // adds the GKG Annotations) — written only where the row holds none, so
-      // neither arrival order loses it and neither overwrites the other.
-      if (item.tone !== null) await articles.update({ id: held.id, tone: IsNull() }, { tone: item.tone });
-      // A text-free newcomer can never be stronger than what is held, so it is
-      // counted as a duplicate.
-      return reconcileWithHeld(manager, held, connector.id, text, item.mode);
+      const sourcePublisher =
+        sourceDomain === null ? null : await resolvePublisher(manager, sourceDomain, item.publisherName ?? sourceDomain);
+      return reconcileWithHeld(
+        manager,
+        held,
+        connector.id,
+        text,
+        item.mode,
+        item.tone,
+        sourcePublisher?.id ?? null,
+        item.publisherName,
+      );
     }
 
-    if (await findDuplicateId(manager, publisher.id, title, publishedAt)) return "duplicate";
+    const existingPublisher = await manager.getRepository(Publisher).findOneBy({ domain });
+    if (text !== null && existingPublisher && !mayStoreText(existingPublisher.termsClass)) {
+      return "rejectedByPolicy";
+    }
+    if (await findDuplicateId(manager, domain, title, publishedAt)) return "duplicate";
+
+    const publisher = await resolvePublisher(manager, domain, item.publisherName ?? domain);
+    // The rights gate (#40). On inserts the discovered Publisher decides; held
+    // Articles are checked against the Publisher they retain in reconcileWithHeld.
+    if (text !== null && !mayStoreText(publisher.termsClass)) return "rejectedByPolicy";
 
     const inserted = await articles
       .createQueryBuilder()
@@ -324,10 +423,19 @@ async function ingestItem(item: DiscoveredItem, connector: IngestionConnector): 
     // can reconcile with the winner instead of losing either contribution.
     const raced = await articles.findOne({
       where: { url },
-      select: { id: true, analysisTextMode: true, discoveredByConnectorId: true },
+      select: { id: true, publisherId: true, analysisTextMode: true, discoveredByConnectorId: true },
     });
     if (!raced) throw new Error(`Article insert was ignored without a canonical URL conflict: ${url}`);
-    return reconcileWithHeld(manager, raced, connector.id, text, item.mode);
+    return reconcileWithHeld(
+      manager,
+      raced,
+      connector.id,
+      text,
+      item.mode,
+      item.tone,
+      sourceDomain === null ? null : publisher.id,
+      item.publisherName,
+    );
   });
 }
 

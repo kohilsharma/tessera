@@ -13,6 +13,7 @@ const FIELD_COUNT = 27;
 const FIELD = {
   recordId: 0, // GKGRECORDID
   date: 1, // V2.1DATE — when GDELT saw the document, YYYYMMDDHHMMSS in UTC
+  sourceDomain: 3, // V2SOURCECOMMONNAME — the publisher's source domain
   documentIdentifier: 4, // V2DocumentIdentifier — the article URL
   tone: 15, // V1.5Tone — a comma-separated tuple whose first value is average tone
   extrasXml: 26, // V2EXTRASXML — where PAGE_TITLE lives
@@ -20,6 +21,7 @@ const FIELD = {
 
 export type GkgRow = {
   recordId: string | null;
+  sourceDomain: string | null;
   // Raw, not canonicalized: normalization belongs to the run, so a URL is
   // canonicalized in exactly one place (same split as rss.ts).
   documentIdentifier: string | null;
@@ -32,10 +34,10 @@ export type GkgRow = {
 
 export type GkgWindow = { url: string; stamp: string };
 
-// A window is ~3 MB compressed / ~9 MB raw (ADR-0024 measured 8.26 MB), and the
-// demo box has ~3 GB free (ADR-0023) — so an archive far outside that shape is
-// refused rather than inflated into memory.
+// A window is ~3 MB compressed / ~9 MB raw (ADR-0024 measured 8.26 MB). Both
+// sides are capped because the source is external and the demo box has ~3 GB free.
 const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024;
+const MAX_CSV_BYTES = 32 * 1024 * 1024;
 
 // `lastupdate.txt` is three `size md5 url` lines — export, mentions, and gkg.
 // ADR-0018 uses the GKG file alone; the other two are GDELT's event tables.
@@ -68,10 +70,24 @@ export function readGkgArchive(archive: Uint8Array): string {
   if (archive.length > MAX_ARCHIVE_BYTES) {
     throw new Error(`GKG archive is ${archive.length} bytes, over the ${MAX_ARCHIVE_BYTES}-byte ceiling`);
   }
-  const entries = unzipSync(archive);
-  const name = Object.keys(entries).find((entry) => entry.toLowerCase().endsWith(".csv"));
-  if (!name) throw new Error(`GKG archive holds no .csv entry (holds: ${Object.keys(entries).join(", ") || "nothing"})`);
-  return Buffer.from(entries[name]).toString("utf-8");
+  let csvName: string | null = null;
+  const entries = unzipSync(archive, {
+    filter: (entry) => {
+      if (!entry.name.toLowerCase().endsWith(".csv")) return false;
+      if (csvName !== null) throw new Error("GKG archive holds more than one .csv entry");
+      if (entry.originalSize > MAX_CSV_BYTES) {
+        throw new Error(`GKG CSV is ${entry.originalSize} uncompressed bytes, over the ${MAX_CSV_BYTES}-byte ceiling`);
+      }
+      csvName = entry.name;
+      return true;
+    },
+  });
+  if (csvName === null) throw new Error("GKG archive holds no .csv entry");
+  const csv = entries[csvName];
+  if (csv.length > MAX_CSV_BYTES) {
+    throw new Error(`GKG CSV is ${csv.length} extracted bytes, over the ${MAX_CSV_BYTES}-byte ceiling`);
+  }
+  return Buffer.from(csv).toString("utf-8");
 }
 
 function textOf(value: string | undefined): string | null {
@@ -79,15 +95,21 @@ function textOf(value: string | undefined): string | null {
   return trimmed === undefined || trimmed === "" ? null : trimmed;
 }
 
-// GDELT stamps are YYYYMMDDHHMMSS in UTC. Reassembled into an ISO string rather
-// than fed to Date.UTC, because ISO parsing rejects an impossible date instead of
-// rolling it over into a plausible-looking wrong one.
+// GDELT stamps are YYYYMMDDHHMMSS in UTC. Date.UTC rolls impossible dates
+// forward, so every component is round-tripped before the value is accepted.
 function parseStamp(value: string | null): Date | null {
   const digits = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(value ?? "");
   if (!digits) return null;
-  const [, year, month, day, hour, minute, second] = digits;
-  const parsed = new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}Z`);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  const [, year, month, day, hour, minute, second] = digits.map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  return parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day &&
+    parsed.getUTCHours() === hour &&
+    parsed.getUTCMinutes() === minute &&
+    parsed.getUTCSeconds() === second
+    ? parsed
+    : null;
 }
 
 // V2EXTRASXML is XML-shaped but not well-formed — real titles carry a bare `&` —
@@ -108,12 +130,20 @@ function toGkgRow(fields: string[]): GkgRow {
   // reading on would key an Article on whatever now sits at field 5. Nulls
   // throughout make it a failed item, which is the honest outcome.
   if (fields.length !== FIELD_COUNT) {
-    return { recordId: textOf(fields[FIELD.recordId]), documentIdentifier: null, title: null, publishedAt: null, tone: null };
+    return {
+      recordId: textOf(fields[FIELD.recordId]),
+      sourceDomain: null,
+      documentIdentifier: null,
+      title: null,
+      publishedAt: null,
+      tone: null,
+    };
   }
   const extras = textOf(fields[FIELD.extrasXml]);
   const title = extraTag(extras, "PAGE_TITLE");
   return {
     recordId: textOf(fields[FIELD.recordId]),
+    sourceDomain: textOf(fields[FIELD.sourceDomain])?.toLowerCase() ?? null,
     documentIdentifier: textOf(fields[FIELD.documentIdentifier]),
     title: title === null ? null : decodeEntities(title),
     // PAGE_PRECISEPUBTIMESTAMP is the publisher's own timestamp and is present in

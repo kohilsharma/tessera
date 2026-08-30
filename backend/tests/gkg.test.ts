@@ -61,6 +61,45 @@ describe("readGkgArchive", () => {
   it("throws when the archive carries no CSV", () => {
     expect(() => readGkgArchive(zipSync({ "readme.txt": strToU8("not a window") }))).toThrow(/no \.csv entry/);
   });
+
+  it("refuses a CSV whose declared or extracted size exceeds the window ceiling", () => {
+    const declaredOversized = zipSync({ "20260830190000.gkg.csv": strToU8("one row") });
+    const declaredCentralDirectory = declaredOversized.findIndex(
+      (byte, index) =>
+        byte === 0x50 &&
+        declaredOversized[index + 1] === 0x4b &&
+        declaredOversized[index + 2] === 0x01 &&
+        declaredOversized[index + 3] === 0x02,
+    );
+    // ZIP central-directory offset 24 is the declared uncompressed size. Mutating
+    // metadata exercises the pre-inflation guard without allocating a huge fixture.
+    new DataView(declaredOversized.buffer, declaredOversized.byteOffset, declaredOversized.byteLength).setUint32(
+      declaredCentralDirectory + 24,
+      32 * 1024 * 1024 + 1,
+      true,
+    );
+    expect(() => readGkgArchive(declaredOversized)).toThrow(/uncompressed.*ceiling/);
+
+    // A stored entry can lie in the other direction. The post-extraction check
+    // must use actual bytes rather than trusting the central directory alone.
+    const extractedOversized = zipSync(
+      { "20260830190000.gkg.csv": new Uint8Array(32 * 1024 * 1024 + 1) },
+      { level: 0 },
+    );
+    const extractedCentralDirectory = extractedOversized.findIndex(
+      (byte, index) =>
+        byte === 0x50 &&
+        extractedOversized[index + 1] === 0x4b &&
+        extractedOversized[index + 2] === 0x01 &&
+        extractedOversized[index + 3] === 0x02,
+    );
+    new DataView(extractedOversized.buffer, extractedOversized.byteOffset, extractedOversized.byteLength).setUint32(
+      extractedCentralDirectory + 24,
+      1,
+      true,
+    );
+    expect(() => readGkgArchive(extractedOversized)).toThrow(/extracted.*ceiling/);
+  });
 });
 
 describe("parseGkgCsv", () => {
@@ -74,6 +113,7 @@ describe("parseGkgCsv", () => {
       "https://timesofindia.indiatimes.com/city/guwahati/manipur-cm-khemchand-urges-people-to-avoid-bandhs-amid-nrc-demand/articleshow/133635705.cms",
       "https://kdwa.com/karen-sue-patterson/",
     ]);
+    expect(rows.map((row) => row.sourceDomain)).toEqual(["wmuk.org", "thehindu.com", "indiatimes.com", "kdwa.com"]);
     expect(rows[0].title).toBe("Canada claps back at Trump's efforts to rename Lake Ontario as 'Lake America'");
     // Entity-decoded (`&#x2013;` is an en dash) while the bare `&` the publisher
     // left unescaped survives — the reason this field is read tag by tag rather
@@ -93,6 +133,13 @@ describe("parseGkgCsv", () => {
     // The last two rows carry none, so V2.1DATE — when GDELT saw them — stands in.
     expect(rows[2].publishedAt).toEqual(new Date("2026-08-30T19:00:00Z"));
     expect(rows[3].publishedAt).toEqual(new Date("2026-08-30T19:00:00Z"));
+  });
+
+  it("rejects an impossible calendar date instead of letting JavaScript roll it forward", async () => {
+    const fields = (await windowCsv()).split("\n")[2].split("\t");
+    fields[1] = "20260230000000";
+
+    expect(parseGkgCsv(fields.join("\t"))[0].publishedAt).toBeNull();
   });
 
   it("keeps average tone, the one V1.5Tone component the timeline wants", async () => {

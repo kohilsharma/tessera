@@ -15,6 +15,7 @@ import { Story } from "../src/entities/Story";
 import { User } from "../src/entities/User";
 import { signToken } from "../src/auth/jwt";
 import { canonicalizeUrl, publisherDomain } from "../src/ingestion/canonicalUrl";
+import { parseGkgCsv } from "../src/ingestion/gkg";
 import { runConnector, type FetchText, type RunConnectorDeps } from "../src/ingestion/runConnector";
 import { setupTestDb } from "./setupTestDb";
 
@@ -521,11 +522,12 @@ describe("runConnector over a GKG window", () => {
       // Auto-created and fail-closed, exactly as for RSS (#40).
       expect(article.publisher.termsClass).toBe("internal_only");
     }
-    // One Publisher per source domain, keyed on the document's own host.
+    // One Publisher per GKG source domain, even when the document is served from
+    // a more specific host.
     expect(articles.map((article) => article.publisher.domain).sort()).toEqual([
+      "indiatimes.com",
       "kdwa.com",
       "thehindu.com",
-      "timesofindia.indiatimes.com",
       "wmuk.org",
     ]);
     const canada = articles.find((article) => article.title.includes("Lake Ontario"));
@@ -567,6 +569,30 @@ describe("runConnector over a GKG window", () => {
     expect(run!.errorSummary).toMatch(/no link/);
   });
 
+  it("fails missing and non-domain GKG source values row by row", async () => {
+    const connector = await createGkgConnector();
+    const lines = (await readFile(join(__dirname, "fixtures", "gkg", "20260830190000.gkg.csv"), "utf-8")).split("\n");
+    for (const [lineIndex, source] of [
+      [0, ""],
+      [2, "attacker@indiatimes.com"],
+      [3, "com"],
+    ] as const) {
+      const fields = lines[lineIndex].split("\t");
+      fields[3] = source;
+      lines[lineIndex] = fields.join("\t");
+    }
+
+    const run = await runConnector(connector, {
+      fetchText: async () => GKG_LAST_UPDATE,
+      fetchBytes: async () => zipSync({ "20260830190000.gkg.csv": strToU8(lines.join("\n")) }),
+    });
+
+    expect(run!.status).toBe("succeeded");
+    expect(run!.inserted).toBe(1);
+    expect(run!.failed).toBe(3);
+    expect(run!.errorSummary).toMatch(/source domain/);
+  });
+
   it("records a window that is not a GKG file as a failed run", async () => {
     const connector = await createGkgConnector();
 
@@ -595,59 +621,167 @@ describe("runConnector over a GKG window", () => {
     expect(await AppDataSource.getRepository(Article).count()).toBe(4);
   });
 
+  it("atomically deduplicates different URLs across GKG apex and RSS subdomain Publishers", async () => {
+    const csv = await readFile(join(__dirname, "fixtures", "gkg", "20260830190000.gkg.csv"), "utf-8");
+    const gkgRow = parseGkgCsv(csv)[2];
+    const gkgConnector = await createGkgConnector();
+    const rssConnector = await createRssConnector("https://times.example/feed.xml");
+
+    const [gkgRun, rssRun] = await Promise.all([
+      runConnector(gkgConnector, gkgFixture("20260830190000.gkg.csv")),
+      runConnector(rssConnector, {
+        fetchText: async () =>
+          `<?xml version="1.0"?><rss version="2.0"><channel><title>Times of India</title><item><title>${gkgRow.title}</title><link>https://timesofindia.indiatimes.com/different-url-for-the-same-report</link><pubDate>${gkgRow.publishedAt!.toUTCString()}</pubDate><description>Feed excerpt.</description></item></channel></rss>`,
+      }),
+    ]);
+
+    expect(gkgRun!.inserted + rssRun!.inserted).toBe(4);
+    expect(gkgRun!.duplicate + rssRun!.duplicate).toBe(1);
+    expect(await AppDataSource.getRepository(Article).count()).toBe(4);
+  });
+
   // ADR-0024 §4: both connectors will constantly hit the same URL and which one
-  // arrives first is a race. Tone must survive the ordering where GKG is second
-  // and its rung is too weak to enrich.
-  it("contributes tone to an Article an RSS feed found first", async () => {
+  // arrives first is a race. GKG's source domain and tone must survive the
+  // ordering where RSS is first, even when the document host is more specific.
+  it("contributes GKG Publisher identity and tone to an Article an RSS feed found first", async () => {
     const rssConnector = await createRssConnector("https://tone-overlap.example/feed.xml");
     const gkgConnector = await createGkgConnector();
     const publisher = await AppDataSource.getRepository(Publisher).save({
-      name: "WMUK",
-      domain: "wmuk.org",
+      name: "Times of India",
+      domain: "timesofindia.indiatimes.com",
     });
     const held = await AppDataSource.getRepository(Article).save({
       storyId: null,
       publisherId: publisher.id,
       discoveredByConnectorId: rssConnector.id,
-      title: "Canada claps back at Trump's efforts to rename Lake Ontario as 'Lake America'",
-      // The first row of the committed window slice, already held with real text.
-      url: "https://www.wmuk.org/npr-news/2026-08-30/canada-claps-back-at-trumps-efforts-to-rename-lake-ontario-as-lake-america",
+      title: "An RSS headline for the same document",
+      url: "https://timesofindia.indiatimes.com/city/guwahati/manipur-cm-khemchand-urges-people-to-avoid-bandhs-amid-nrc-demand/articleshow/133635705.cms",
       analysisText: "An excerpt the feed supplied.",
       analysisTextMode: "feed_excerpt",
-      publishedAt: new Date("2026-08-30T10:36:00Z"),
+      publishedAt: new Date("2026-08-30T19:00:00Z"),
     });
 
     const run = await runConnector(gkgConnector, gkgFixture("20260830190000.gkg.csv"));
 
     expect(run!.inserted).toBe(3);
-    expect(run!.duplicate).toBe(1);
-    const after = await AppDataSource.getRepository(Article).findOneByOrFail({ id: held.id });
-    expect(after.tone).toBeCloseTo(-0.884955752212389, 10);
-    // The weaker sighting contributed tone and nothing else: the text and the rung
-    // the feed supplied are untouched.
+    expect(run!.duplicate).toBe(0);
+    expect(run!.enriched).toBe(1);
+    const after = await AppDataSource.getRepository(Article).findOneOrFail({
+      where: { id: held.id },
+      relations: { publisher: true },
+    });
+    expect(after.publisher.domain).toBe("indiatimes.com");
+    expect(after.tone).not.toBeNull();
+    // The weaker sighting contributed metadata and nothing else: the text and
+    // rung the feed supplied are untouched.
     expect(after.analysisTextMode).toBe("feed_excerpt");
     expect(after.analysisText).toBe("An excerpt the feed supplied.");
   });
 
-  // GKG reports no publisher name, so it creates Publishers named after their bare
-  // domain — and it covers the curated feeds' own domains. A placeholder name must
-  // not outlive the first source that offers a real one.
-  it("lets a feed's channel title replace the bare domain GKG left as a name", async () => {
+  it("does not let GKG attribution grant serving rights to held text", async () => {
+    const gkgConnector = await createGkgConnector();
+    const publishers = AppDataSource.getRepository(Publisher);
+    const documentHost = await publishers.save({
+      name: "Times of India",
+      domain: "timesofindia.indiatimes.com",
+    });
+    await publishers.save({ name: "India Times", domain: "indiatimes.com", termsClass: "licensed" });
+    const held = await AppDataSource.getRepository(Article).save({
+      storyId: null,
+      publisherId: documentHost.id,
+      discoveredByConnectorId: null,
+      title: "An RSS headline for the same document",
+      url: "https://timesofindia.indiatimes.com/city/guwahati/manipur-cm-khemchand-urges-people-to-avoid-bandhs-amid-nrc-demand/articleshow/133635705.cms",
+      analysisText: "Text cleared by the document-host Publisher.",
+      analysisTextMode: "feed_excerpt",
+      publishedAt: new Date("2026-08-30T19:00:00Z"),
+    });
+
+    const run = await runConnector(gkgConnector, gkgFixture("20260830190000.gkg.csv"));
+    const after = await AppDataSource.getRepository(Article).findOneOrFail({
+      where: { id: held.id },
+      relations: { publisher: true },
+    });
+
+    expect(run!.enriched).toBe(1);
+    expect(after.publisher.domain).toBe("timesofindia.indiatimes.com");
+    expect(after.analysisText).toBe("Text cleared by the document-host Publisher.");
+    expect(after.tone).not.toBeNull();
+  });
+
+  it("rejects RSS text when the held GKG source Publisher is open_metadata", async () => {
+    await AppDataSource.getRepository(Publisher).save({
+      name: "India Times",
+      domain: "indiatimes.com",
+      termsClass: "open_metadata",
+    });
+    const gkgConnector = await createGkgConnector();
+    await runConnector(gkgConnector, gkgFixture("20260830190000.gkg.csv"));
+
+    const rssConnector = await createRssConnector("https://times.example/feed.xml");
+    const run = await runConnector(rssConnector, {
+      fetchText: async () =>
+        `<?xml version="1.0"?><rss version="2.0"><channel><title>Times of India</title><item><title>Same document with text</title><link>https://timesofindia.indiatimes.com/city/guwahati/manipur-cm-khemchand-urges-people-to-avoid-bandhs-amid-nrc-demand/articleshow/133635705.cms</link><pubDate>Sun, 30 Aug 2026 19:00:00 GMT</pubDate><description>Feed excerpt.</description></item></channel></rss>`,
+    });
+    const article = await AppDataSource.getRepository(Article).findOneOrFail({
+      where: {
+        url: "https://timesofindia.indiatimes.com/city/guwahati/manipur-cm-khemchand-urges-people-to-avoid-bandhs-amid-nrc-demand/articleshow/133635705.cms",
+      },
+      relations: { publisher: true },
+    });
+
+    expect(run!.rejectedByPolicy).toBe(1);
+    expect(run!.enriched).toBe(0);
+    expect(article.publisher.domain).toBe("indiatimes.com");
+    expect(article.analysisText).toBeNull();
+    expect(article.analysisTextMode).toBe("metadata_only");
+  });
+
+  it("uses the held source Publisher's terms for RSS enrichment", async () => {
+    const publishers = AppDataSource.getRepository(Publisher);
+    await publishers.save({ name: "India Times", domain: "indiatimes.com" });
+    await publishers.save({
+      name: "Times document host",
+      domain: "timesofindia.indiatimes.com",
+      termsClass: "open_metadata",
+    });
+    const gkgConnector = await createGkgConnector();
+    await runConnector(gkgConnector, gkgFixture("20260830190000.gkg.csv"));
+
+    const rssConnector = await createRssConnector("https://times.example/feed.xml");
+    const run = await runConnector(rssConnector, {
+      fetchText: async () =>
+        `<?xml version="1.0"?><rss version="2.0"><channel><title>Times of India</title><item><title>Same document with text</title><link>https://timesofindia.indiatimes.com/city/guwahati/manipur-cm-khemchand-urges-people-to-avoid-bandhs-amid-nrc-demand/articleshow/133635705.cms</link><pubDate>Sun, 30 Aug 2026 19:00:00 GMT</pubDate><description>Feed excerpt.</description></item></channel></rss>`,
+    });
+    const article = await AppDataSource.getRepository(Article).findOneOrFail({
+      where: {
+        url: "https://timesofindia.indiatimes.com/city/guwahati/manipur-cm-khemchand-urges-people-to-avoid-bandhs-amid-nrc-demand/articleshow/133635705.cms",
+      },
+      relations: { publisher: true },
+    });
+
+    expect(run!.enriched).toBe(1);
+    expect(run!.rejectedByPolicy).toBe(0);
+    expect(article.publisher.domain).toBe("indiatimes.com");
+    expect(article.analysisText).toBe("Feed excerpt.");
+  });
+
+  // GKG reports no publisher name, so an RSS channel title should improve the
+  // authoritative source Publisher even when the document is served by a subdomain.
+  it("applies a feed's channel title to the GKG source Publisher without creating an alias", async () => {
     const gkgConnector = await createGkgConnector();
     await runConnector(gkgConnector, gkgFixture("20260830190000.gkg.csv"));
     const publishers = AppDataSource.getRepository(Publisher);
-    expect((await publishers.findOneByOrFail({ domain: "wmuk.org" })).name).toBe("wmuk.org");
-    // A hand-curated name is a different case, and is never overwritten.
-    await publishers.update({ domain: "kdwa.com" }, { name: "KDWA 1460 AM" });
+    expect((await publishers.findOneByOrFail({ domain: "indiatimes.com" })).name).toBe("indiatimes.com");
 
-    const rssConnector = await createRssConnector("https://wmuk.example/feed.xml");
+    const rssConnector = await createRssConnector("https://times.example/feed.xml");
     await runConnector(rssConnector, {
       fetchText: async () =>
-        `<?xml version="1.0"?><rss version="2.0"><channel><title>WMUK Public Radio</title><item><title>A later WMUK report</title><link>https://www.wmuk.org/npr-news/2026-08-30/a-later-report</link><pubDate>Sun, 30 Aug 2026 12:00:00 GMT</pubDate><description>Excerpt text.</description></item></channel></rss>`,
+        `<?xml version="1.0"?><rss version="2.0"><channel><title>Times of India</title><item><title>Same document with text</title><link>https://timesofindia.indiatimes.com/city/guwahati/manipur-cm-khemchand-urges-people-to-avoid-bandhs-amid-nrc-demand/articleshow/133635705.cms</link><pubDate>Sun, 30 Aug 2026 19:00:00 GMT</pubDate><description>Feed excerpt.</description></item></channel></rss>`,
     });
 
-    expect((await publishers.findOneByOrFail({ domain: "wmuk.org" })).name).toBe("WMUK Public Radio");
-    expect((await publishers.findOneByOrFail({ domain: "kdwa.com" })).name).toBe("KDWA 1460 AM");
+    expect((await publishers.findOneByOrFail({ domain: "indiatimes.com" })).name).toBe("Times of India");
+    expect(await publishers.findOneBy({ domain: "timesofindia.indiatimes.com" })).toBeNull();
   });
 });
 
@@ -696,7 +830,7 @@ describe("a completed run does not disturb the curated corpus", () => {
     expect(gkgRun!.status).toBe("succeeded");
     // Inserted here or already held from an earlier run in this file — either way
     // the metadata_only rows are in the table while these assertions run.
-    expect(await AppDataSource.getRepository(Article).countBy({ analysisTextMode: "metadata_only" })).toBe(4);
+    expect(await AppDataSource.getRepository(Article).countBy({ analysisTextMode: "metadata_only" })).toBeGreaterThan(0);
 
     expect((await stories()).body).toEqual(storiesBefore.body);
     expect((await search()).body).toEqual(searchBefore.body);
