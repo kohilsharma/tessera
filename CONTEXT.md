@@ -75,12 +75,8 @@ Terms are canonical: use these words in code, docs, and conversation.
   invocation did: how much it discovered, inserted, enriched, rejected as duplicate, rejected
   on rights, and failed. Persisted in Postgres, never read back from the queue — the Admin
   ingestion view must render with the worker down. (ADR-0024)
-- **Ingestion Worker** — The process that executes runs, and the only thing that does. It
-  drains one queue fed from two places — its own **tick** on every quarter hour, which
-  enqueues one run per enabled connector on GKG's 15-minute cadence, and an Admin's Run
-  command, which enqueues onto the same queue rather than running anything itself. So an
-  accepted Run is a *queued* run, not a finished one, and what is demoed is what runs.
-  (ADR-0005, ADR-0015, ADR-0018)
+- **Ingestion Worker** — The process that executes IngestionRuns. (ADR-0005, ADR-0015,
+  ADR-0018)
 - **Analysis Text Mode** — What text is actually available for an Article, as an **ordered
   ladder**, weakest first: `metadata_only` (title and metadata, no text at all) <
   `feed_excerpt` < `api_content` < `licensed_full_text`. `manual_fixture` sits outside the
