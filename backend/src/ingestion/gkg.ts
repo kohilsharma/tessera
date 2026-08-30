@@ -1,4 +1,5 @@
 import { unzipSync } from "fflate";
+import type { GkgAnnotationKind, GkgLocationDetail } from "../entities/GkgAnnotation";
 import { decodeEntities } from "./decodeEntities";
 
 // GDELT GKG 2.1 (ADR-0018): the 15-minute firehose is the backbone of the entity
@@ -15,9 +16,25 @@ const FIELD = {
   date: 1, // V2.1DATE — when GDELT saw the document, YYYYMMDDHHMMSS in UTC
   sourceDomain: 3, // V2SOURCECOMMONNAME — the publisher's source domain
   documentIdentifier: 4, // V2DocumentIdentifier — the article URL
+  themes: 8, // V2ENHANCEDTHEMES — `THEME,charOffset;`
+  locations: 10, // V2ENHANCEDLOCATIONS — nine `#`-separated components per occurrence
+  persons: 12, // V2ENHANCEDPERSONS — `Name,charOffset;`
+  organizations: 14, // V2ENHANCEDORGANIZATIONS — `Name,charOffset;`
   tone: 15, // V1.5Tone — a comma-separated tuple whose first value is average tone
   extrasXml: 26, // V2EXTRASXML — where PAGE_TITLE lives
 } as const;
+
+// The V1 fields (7, 9, 11, 13) carry the same names *without* offsets, so the
+// enhanced fields above are the ones read: the offset is what makes an occurrence
+// distinct from a bare name, and what a co-occurrence self-join needs (#43).
+
+// One GKG Annotation as parsed, before it has an Article to belong to.
+export type ParsedAnnotation = {
+  kind: GkgAnnotationKind;
+  surfaceName: string;
+  charOffset: number;
+  locationDetail: GkgLocationDetail | null;
+};
 
 export type GkgRow = {
   recordId: string | null;
@@ -30,6 +47,10 @@ export type GkgRow = {
   // Average document tone. Retained for the Phase-3.5 timeline overlay
   // (ADR-0020, ADR-0024); nothing reads it yet.
   tone: number | null;
+  // The persons, organizations, locations and themes GKG already extracted, as
+  // surface-name occurrences (#43). Empty for a row that cannot be read
+  // positionally at all.
+  annotations: ParsedAnnotation[];
 };
 
 export type GkgWindow = { url: string; stamp: string };
@@ -124,6 +145,99 @@ function averageTone(value: string | undefined): number | null {
   return Number.isFinite(average) ? average : null;
 }
 
+// A surface name reaches us through GDELT from a publisher's page, so it is
+// untrusted input. The bound is the column's own `varchar(512)` — chosen to sit
+// far under Postgres's btree index-tuple limit, since the occurrence index covers
+// this column — not a judgement about how long a name may be: GDELT's longest
+// real organization names run to a few dozen characters. Dropping the occurrence
+// rather than truncating it keeps the rule "as GKG reported it, or not at all",
+// and fails one occurrence instead of the whole item.
+const MAX_SURFACE_NAME_LENGTH = 512;
+
+// `charOffset` is an int4 column. Digits only — `Number("")` is 0, so a
+// `Name,`-shaped entry would otherwise be accepted as an occurrence at offset 0.
+function charOffsetOf(value: string | undefined): number | null {
+  const digits = (value ?? "").trim();
+  return /^\d{1,9}$/.test(digits) ? Number(digits) : null;
+}
+
+function surfaceNameOf(value: string | undefined): string | null {
+  // Trimmed of GDELT's own delimiter whitespace but otherwise exactly as
+  // reported: no case folding, no entity decoding, no resolution (#43).
+  const name = (value ?? "").trim();
+  return name === "" || name.length > MAX_SURFACE_NAME_LENGTH ? null : name;
+}
+
+// V2ENHANCEDPERSONS, V2ENHANCEDORGANIZATIONS and V2ENHANCEDTHEMES all share one
+// shape: `;`-separated occurrences of `Name,charOffset`. Split at the *last*
+// comma, because GDELT does not escape commas inside a name.
+function parseNameAnnotations(field: string | undefined, kind: GkgAnnotationKind): ParsedAnnotation[] {
+  return (field ?? "").split(";").flatMap((entry) => {
+    const comma = entry.lastIndexOf(",");
+    if (comma < 0) return [];
+    const surfaceName = surfaceNameOf(entry.slice(0, comma));
+    const charOffset = charOffsetOf(entry.slice(comma + 1));
+    return surfaceName === null || charOffset === null
+      ? []
+      : [{ kind, surfaceName, charOffset, locationDetail: null }];
+  });
+}
+
+// V2ENHANCEDLOCATIONS uses `#` between components precisely because a location's
+// full name contains commas ("Chennai, Tamil Nadu, India"). Nine components:
+// type, full name, country code, ADM1, ADM2, latitude, longitude, FeatureID,
+// character offset — and a wrong count means the entry cannot be read
+// positionally, exactly as for a row.
+const LOCATION_PARTS = 9;
+const LOCATION = { name: 1, countryCode: 2, latitude: 5, longitude: 6, featureId: 7, charOffset: 8 } as const;
+
+function coordinate(value: string | undefined, limit: number): number | null | undefined {
+  const text = textOf(value);
+  // Empty is honest absence: GKG reports no coordinates for a location it could
+  // not place. `undefined` means present but unreadable, which the caller drops —
+  // storing garbage as null would make it indistinguishable from absence.
+  if (text === null) return null;
+  const parsed = Number.parseFloat(text);
+  return Number.isFinite(parsed) && Math.abs(parsed) <= limit ? parsed : undefined;
+}
+
+function parseLocationAnnotations(field: string | undefined): ParsedAnnotation[] {
+  return (field ?? "").split(";").flatMap((entry) => {
+    const parts = entry.split("#");
+    if (parts.length !== LOCATION_PARTS) return [];
+    const surfaceName = surfaceNameOf(parts[LOCATION.name]);
+    const charOffset = charOffsetOf(parts[LOCATION.charOffset]);
+    const latitude = coordinate(parts[LOCATION.latitude], 90);
+    const longitude = coordinate(parts[LOCATION.longitude], 180);
+    if (surfaceName === null || charOffset === null || latitude === undefined || longitude === undefined) return [];
+    return [
+      {
+        kind: "location" as const,
+        surfaceName,
+        charOffset,
+        locationDetail: {
+          // A FeatureID is a GNS/GNIS number for a place and a country code for a
+          // whole country, so it stays a string. ADM1/ADM2 are dropped: nothing
+          // in ADR-0019 resolves on them.
+          featureId: textOf(parts[LOCATION.featureId]),
+          countryCode: textOf(parts[LOCATION.countryCode]),
+          latitude,
+          longitude,
+        },
+      },
+    ];
+  });
+}
+
+function parseAnnotations(fields: string[]): ParsedAnnotation[] {
+  return [
+    ...parseNameAnnotations(fields[FIELD.persons], "person"),
+    ...parseNameAnnotations(fields[FIELD.organizations], "organization"),
+    ...parseNameAnnotations(fields[FIELD.themes], "theme"),
+    ...parseLocationAnnotations(fields[FIELD.locations]),
+  ];
+}
+
 function toGkgRow(fields: string[]): GkgRow {
   // A row that is not exactly 27 fields cannot be read positionally at all — a
   // truncated record has no V2EXTRASXML, and an extra tab shifts every index, so
@@ -137,6 +251,7 @@ function toGkgRow(fields: string[]): GkgRow {
       title: null,
       publishedAt: null,
       tone: null,
+      annotations: [],
     };
   }
   const extras = textOf(fields[FIELD.extrasXml]);
@@ -152,6 +267,7 @@ function toGkgRow(fields: string[]): GkgRow {
     // publishedAt — so the publisher's own value is preferred where it exists.
     publishedAt: parseStamp(extraTag(extras, "PAGE_PRECISEPUBTIMESTAMP")) ?? parseStamp(textOf(fields[FIELD.date])),
     tone: averageTone(fields[FIELD.tone]),
+    annotations: parseAnnotations(fields),
   };
 }
 

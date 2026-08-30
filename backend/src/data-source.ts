@@ -11,6 +11,7 @@ import { CreateIngestionRuns1755746000000 } from "./migrations/1755746000000-Cre
 import { AlignAnalysisTextMode1755747000000 } from "./migrations/1755747000000-AlignAnalysisTextMode";
 import { AddPublisherTermsClass1755748000000 } from "./migrations/1755748000000-AddPublisherTermsClass";
 import { AddArticleToneAndDedupeIndex1755749000000 } from "./migrations/1755749000000-AddArticleToneAndDedupeIndex";
+import { CreateGkgAnnotations1755750000000 } from "./migrations/1755750000000-CreateGkgAnnotations";
 import { User } from "./entities/User";
 import { Publisher } from "./entities/Publisher";
 import { Story } from "./entities/Story";
@@ -19,6 +20,7 @@ import { IntelligenceBrief } from "./entities/IntelligenceBrief";
 import { BriefArticle } from "./entities/BriefArticle";
 import { IngestionConnector } from "./entities/IngestionConnector";
 import { IngestionRun } from "./entities/IngestionRun";
+import { GkgAnnotation } from "./entities/GkgAnnotation";
 
 const url = process.env.DATABASE_URL;
 
@@ -36,7 +38,17 @@ export const AppDataSource = new DataSource({
   // require()/import() on the file path, which can't parse raw .ts outside a
   // ts-node/tsx-registered process (e.g. inside Vitest workers). Add entity
   // classes to the array above the same way.
-  entities: [User, Publisher, Story, Article, IntelligenceBrief, BriefArticle, IngestionConnector, IngestionRun],
+  entities: [
+    User,
+    Publisher,
+    Story,
+    Article,
+    IntelligenceBrief,
+    BriefArticle,
+    IngestionConnector,
+    IngestionRun,
+    GkgAnnotation,
+  ],
   migrations: [
     InitPgvector1755740000000,
     CreateUsers1755741000000,
@@ -48,6 +60,7 @@ export const AppDataSource = new DataSource({
     AlignAnalysisTextMode1755747000000,
     AddPublisherTermsClass1755748000000,
     AddArticleToneAndDedupeIndex1755749000000,
+    CreateGkgAnnotations1755750000000,
   ],
   synchronize: false,
   logging: false,

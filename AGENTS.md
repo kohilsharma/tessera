@@ -45,8 +45,14 @@ job id is the connector's id, so a trigger landing mid-run adds no second run, a
 concurrency is 1. `src/ingestion/queue.ts` is the enqueue side, `src/ingestion/jobs.ts` the
 handler. Run history is still read from Postgres, never the queue, so the Admin console
 renders with the worker stopped. There is no retention yet (#45).
-The DOC connector, GKG Annotation staging, and Phase 3.5 (graph/timeline) are not
-built yet.
+**GKG Annotation staging** (#43) is in: the parser also reads GDELT's four enhanced fields
+(persons, organizations, themes, locations) into surface-name occurrences, and a run stages
+them per Article in one `gkg_annotations` table (kind + surface name + character offset, plus
+a nullable `locationDetail` JSONB carrying FeatureID, coordinates and country). Occurrences
+are the row identity, so re-reading a window stages nothing twice and a sighting whose only
+contribution is annotations counts as an Enrichment. Nothing reads them yet — Phase 3.5
+resolves Entities from them and builds co-occurrence edges by self-joining.
+The DOC connector and Phase 3.5 (graph/timeline) are not built yet.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
 `/register`, `/account`), role dashboards (`/dashboard/:role`), browsing the corpus

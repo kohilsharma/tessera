@@ -8,6 +8,7 @@ import request from "supertest";
 import { createApp } from "../src/app";
 import { AppDataSource } from "../src/data-source";
 import { Article, isStrongerAnalysisTextMode } from "../src/entities/Article";
+import { GkgAnnotation } from "../src/entities/GkgAnnotation";
 import { IngestionConnector } from "../src/entities/IngestionConnector";
 import { IngestionRun } from "../src/entities/IngestionRun";
 import { Publisher } from "../src/entities/Publisher";
@@ -625,6 +626,7 @@ describe("runConnector over a GKG window", () => {
     const deps = gkgFixture("20260830190000.gkg.csv");
 
     expect((await runConnector(connector, deps))!.inserted).toBe(4);
+    const staged = await AppDataSource.getRepository(GkgAnnotation).count();
     const second = await runConnector(connector, deps);
 
     expect(second!.inserted).toBe(0);
@@ -632,6 +634,104 @@ describe("runConnector over a GKG window", () => {
     // A metadata_only sighting is the weakest rung, so it can never enrich.
     expect(second!.enriched).toBe(0);
     expect(await AppDataSource.getRepository(Article).count()).toBe(4);
+    // ...and one occurrence is one row, so the second reading of the same window
+    // stages nothing new either (#43). That idempotence is what lets staging run
+    // on every sighting rather than only on insert.
+    expect(await AppDataSource.getRepository(GkgAnnotation).count()).toBe(staged);
+  });
+
+  // #43. CONTEXT.md "GKG Annotation": the pre-resolution raw material Phase 3.5
+  // resolves canonical Entities from, staged per Article exactly as GKG reported
+  // it.
+  it("stages every GKG Annotation against its Article, queryable per Article", async () => {
+    const connector = await createGkgConnector();
+
+    await runConnector(connector, gkgFixture("20260830190000.gkg.csv"));
+
+    const annotations = AppDataSource.getRepository(GkgAnnotation);
+    expect(await annotations.count()).toBe(273);
+    const article = await AppDataSource.getRepository(Article).findOneByOrFail({
+      url: "https://www.thehindu.com/news/cities/chennai/the-hindu-in-school-educators-confluence-2026-to-be-held-on-sept-2/article71408318.ece",
+    });
+    const staged = await annotations.find({
+      where: { articleId: article.id },
+      order: { kind: "ASC", charOffset: "ASC" },
+    });
+
+    expect(staged).toHaveLength(41);
+    expect(staged.filter((row) => row.kind === "person").map((row) => row.surfaceName)).toEqual([
+      "Lakshmi Vijayakumar",
+      "Ramya Venkataraman",
+    ]);
+    // Locations keep GKG's gazetteer detail; the other three kinds have none.
+    expect(staged.find((row) => row.kind === "location")).toMatchObject({
+      surfaceName: "Chennai, Tamil Nadu, India",
+      charOffset: 85,
+      locationDetail: { featureId: "-2103041", countryCode: "IN", latitude: 13.0833, longitude: 80.2833 },
+    });
+    expect(staged.every((row) => (row.kind === "location") === (row.locationDetail !== null))).toBe(true);
+    // Stored as reported: GDELT's title-cased organization and its uppercase
+    // taxonomy label both survive the trip, because resolution is Phase 3.5's job
+    // and it needs the surface form to resolve *from*.
+    expect(staged.map((row) => row.surfaceName)).toContain("Centre For Teacher Accreditation");
+    expect(staged.map((row) => row.surfaceName)).toContain("WB_1305_HEALTH_SERVICES_DELIVERY");
+  });
+
+  it("returns an Article's co-occurring names from a self-join over its annotations", async () => {
+    const connector = await createGkgConnector();
+    await runConnector(connector, gkgFixture("20260830190000.gkg.csv"));
+    const article = await AppDataSource.getRepository(Article).findOneByOrFail({
+      url: "https://timesofindia.indiatimes.com/city/guwahati/manipur-cm-khemchand-urges-people-to-avoid-bandhs-amid-nrc-demand/articleshow/133635705.cms",
+    });
+
+    // ADR-0019's co-occurrence edge, as the query that will build it: distinct
+    // unordered pairs of person/organization names in one Article. `>` rather
+    // than `<>` is what makes a pair one row instead of two.
+    const pairs = await AppDataSource.query(
+      `SELECT DISTINCT a."surfaceName" AS "nameA", b."surfaceName" AS "nameB"
+         FROM gkg_annotations a
+         JOIN gkg_annotations b ON b."articleId" = a."articleId" AND b."surfaceName" > a."surfaceName"
+        WHERE a."articleId" = $1
+          AND a."kind" IN ('person', 'organization')
+          AND b."kind" IN ('person', 'organization')
+        ORDER BY 1, 2`,
+      [article.id],
+    );
+
+    expect(pairs).toEqual([
+      { nameA: "Campaign For Just", nameB: "National Register Of Citizens" },
+      { nameA: "Campaign For Just", nameB: "Yumnam Khemchand Singh" },
+      { nameA: "National Register Of Citizens", nameB: "Yumnam Khemchand Singh" },
+    ]);
+  });
+
+  it("counts a sighting whose only contribution is annotations as an Enrichment", async () => {
+    const gkgConnector = await createGkgConnector();
+    const publisher = await AppDataSource.getRepository(Publisher).save({
+      name: "India Times",
+      domain: "indiatimes.com",
+    });
+    const held = await AppDataSource.getRepository(Article).save({
+      storyId: null,
+      publisherId: publisher.id,
+      title: "Manipur CM Khemchand urges people to avoid bandhs amid NRC demand",
+      url: "https://timesofindia.indiatimes.com/city/guwahati/manipur-cm-khemchand-urges-people-to-avoid-bandhs-amid-nrc-demand/articleshow/133635705.cms",
+      analysisText: null,
+      analysisTextMode: "metadata_only",
+      // Already held, and already attributed to GKG's own source domain — so
+      // neither tone nor Publisher identity is this sighting's contribution. The
+      // annotations are the only thing left, and they are enough (CONTEXT.md
+      // "Enrichment").
+      tone: -1.5,
+      publishedAt: new Date("2026-08-30T19:00:00Z"),
+    });
+
+    const run = await runConnector(gkgConnector, gkgFixture("20260830190000.gkg.csv"));
+
+    expect(run!.enriched).toBe(1);
+    expect(run!.duplicate).toBe(0);
+    expect(countersSumToDiscovered(run!)).toBe(true);
+    expect(await AppDataSource.getRepository(GkgAnnotation).countBy({ articleId: held.id })).toBe(66);
   });
 
   it("atomically deduplicates different URLs across GKG apex and RSS subdomain Publishers", async () => {

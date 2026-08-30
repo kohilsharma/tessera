@@ -2,7 +2,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { strToU8, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
-import { parseGkgCsv, readGkgArchive, resolveGkgWindowUrl } from "../src/ingestion/gkg";
+import type { GkgAnnotationKind } from "../src/entities/GkgAnnotation";
+import { parseGkgCsv, readGkgArchive, resolveGkgWindowUrl, type GkgRow } from "../src/ingestion/gkg";
 import { httpFetchBytes, httpFetchText } from "../src/ingestion/runConnector";
 
 // No database here: the GKG parser is pure, so its tests need neither a container
@@ -159,6 +160,8 @@ describe("parseGkgCsv", () => {
     expect(rows[0].documentIdentifier).not.toBeNull();
     // Truncated after six fields: no V2EXTRASXML, so no title.
     expect(rows[1].title).toBeNull();
+    // ...and nothing positional at all, so no annotations either.
+    expect(rows[1].annotations).toEqual([]);
     // Intact but for an empty document identifier.
     expect(rows[2].title).not.toBeNull();
     expect(rows[2].documentIdentifier).toBeNull();
@@ -175,6 +178,7 @@ describe("parseGkgCsv", () => {
     expect(row.documentIdentifier).toBeNull();
     expect(row.title).toBeNull();
     expect(row.publishedAt).toBeNull();
+    expect(row.annotations).toEqual([]);
   });
 
   // A publisher's own <title> reaches us through GDELT unaltered, so a mangled
@@ -191,6 +195,129 @@ describe("parseGkgCsv", () => {
 
   it("throws when the body is not a GKG window at all", () => {
     expect(() => parseGkgCsv("<html><body>503 from the CDN</body></html>")).toThrow(/Not a GKG 2\.1 CSV/);
+  });
+});
+
+// #43. CONTEXT.md "GKG Annotation": the persons, organizations, locations and
+// themes GDELT already extracted, as surface-name occurrences, before any
+// resolution. Read out of the *enhanced* fields (12, 14, 8, 10) rather than their
+// V1 twins, because only those carry the character offset that makes an
+// occurrence distinct — and a co-occurrence self-join meaningful (ADR-0019).
+describe("GKG Annotations", () => {
+  const kindOf = (row: GkgRow, kind: GkgAnnotationKind) =>
+    row.annotations.filter((annotation) => annotation.kind === kind);
+
+  it("reads every occurrence of all four kinds, with the names and offsets GKG reported", async () => {
+    const rows = parseGkgCsv(await windowCsv());
+
+    // Both offsets for a repeated name, in GDELT's own order: the same person
+    // named twice in one document is two occurrences, not one.
+    expect(kindOf(rows[0], "person")).toEqual([
+      { kind: "person", surfaceName: "Mark Carney", charOffset: 709, locationDetail: null },
+      { kind: "person", surfaceName: "Mark Carney", charOffset: 2059, locationDetail: null },
+      { kind: "person", surfaceName: "Doug Ford", charOffset: 25, locationDetail: null },
+      { kind: "person", surfaceName: "Doug Ford", charOffset: 513, locationDetail: null },
+      { kind: "person", surfaceName: "Doug Ford", charOffset: 1643, locationDetail: null },
+      { kind: "person", surfaceName: "Keito Newman", charOffset: 1775, locationDetail: null },
+      { kind: "person", surfaceName: "Kathy Hochul", charOffset: 3553, locationDetail: null },
+    ]);
+    // Surface names exactly as GKG reported them: GDELT's own title-casing on an
+    // organization it recognised, its uppercase taxonomy label on a theme.
+    // Nothing is folded, decoded or resolved here — Phase 3.5 resolves canonical
+    // Entities *from* these strings.
+    expect(kindOf(rows[1], "organization")).toContainEqual({
+      kind: "organization",
+      surfaceName: "Head Of The Department Of Psychiatry",
+      charOffset: 609,
+      locationDetail: null,
+    });
+    expect(kindOf(rows[0], "theme")[0]).toEqual({
+      kind: "theme",
+      surfaceName: "MEDIA_SOCIAL",
+      charOffset: 2585,
+      locationDetail: null,
+    });
+    // The whole slice, kind by kind — a change in any field index shows up here.
+    expect(rows.map((row) => row.annotations.length)).toEqual([147, 41, 66, 19]);
+    expect(rows.map((row) => kindOf(row, "person").length)).toEqual([7, 2, 1, 1]);
+    expect(rows.map((row) => kindOf(row, "organization").length)).toEqual([8, 6, 2, 3]);
+    expect(rows.map((row) => kindOf(row, "location").length)).toEqual([59, 1, 24, 5]);
+  });
+
+  it("keeps a location's FeatureID, coordinates and country, and nothing else's", async () => {
+    const rows = parseGkgCsv(await windowCsv());
+
+    // A location's full name is comma-bearing, which is why the enhanced location
+    // field is `#`-separated and read differently from the other three.
+    expect(kindOf(rows[1], "location")).toEqual([
+      {
+        kind: "location",
+        surfaceName: "Chennai, Tamil Nadu, India",
+        charOffset: 85,
+        locationDetail: { featureId: "-2103041", countryCode: "IN", latitude: 13.0833, longitude: 80.2833 },
+      },
+    ]);
+    // A whole country's FeatureID is its country code rather than a GNS number,
+    // which is why the field stays a string.
+    expect(kindOf(rows[0], "location")[0].locationDetail).toEqual({
+      featureId: "US",
+      countryCode: "US",
+      latitude: 39.828175,
+      longitude: -98.5795,
+    });
+    // GKG reports no gazetteer detail for the other three kinds, so they carry
+    // none rather than an empty object.
+    expect(
+      rows.every((row) =>
+        row.annotations.every(
+          (annotation) => (annotation.kind === "location") === (annotation.locationDetail !== null),
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  // Every one of these fields reaches us through GDELT from a publisher's page,
+  // so they are untrusted input on the way into the database.
+  it("drops an occurrence with no usable name or offset instead of inventing one", async () => {
+    const fields = (await windowCsv()).split("\n")[0].split("\t");
+    fields[12] = `Real Person,42;No Offset;Bad Offset,x;,77;Trailing Comma,;Negative,-3`;
+    // Past the column's own bound, so it is dropped rather than truncated: a
+    // shortened name would be a name GKG never reported.
+    fields[14] = `${"A".repeat(513)},5`;
+    // The first entry is short of the nine `#`-separated components, so it cannot
+    // be read positionally — the same rule the row itself follows.
+    fields[10] = `4#Too Few#IN#IN25#13#80;4#Chennai, Tamil Nadu, India#IN#IN25#70251#13.0833#80.2833#-2103041#85`;
+
+    const [row] = parseGkgCsv(fields.join("\t"));
+
+    expect(kindOf(row, "person")).toEqual([
+      { kind: "person", surfaceName: "Real Person", charOffset: 42, locationDetail: null },
+    ]);
+    expect(kindOf(row, "organization")).toEqual([]);
+    expect(kindOf(row, "location").map((annotation) => annotation.charOffset)).toEqual([85]);
+  });
+
+  // Absence and garbage must not arrive looking the same: a null latitude has to
+  // mean GKG placed none, or the Phase-3.5 map cannot tell an unplaceable
+  // location from a mangled one.
+  it("keeps a location GKG gave no coordinates for and drops one whose coordinates are garbage", async () => {
+    const fields = (await windowCsv()).split("\n")[0].split("\t");
+    fields[10] = [
+      `1#Unplaced#IN#IN##  #  #IN#10`,
+      `4#Off The Globe, India#IN#IN25#70251#913.0833#80.2833#-2103041#20`,
+      `4#Not A Number, India#IN#IN25#70251#13.0833#east#-2103041#30`,
+    ].join(";");
+
+    const [row] = parseGkgCsv(fields.join("\t"));
+
+    expect(kindOf(row, "location")).toEqual([
+      {
+        kind: "location",
+        surfaceName: "Unplaced",
+        charOffset: 10,
+        locationDetail: { featureId: "IN", countryCode: "IN", latitude: null, longitude: null },
+      },
+    ]);
   });
 });
 

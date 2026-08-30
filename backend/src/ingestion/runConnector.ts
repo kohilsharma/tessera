@@ -4,9 +4,10 @@ import { Article, isStrongerAnalysisTextMode } from "../entities/Article";
 import type { AnalysisTextMode } from "../entities/Article";
 import { IngestionConnector } from "../entities/IngestionConnector";
 import { IngestionRun } from "../entities/IngestionRun";
+import { GkgAnnotation } from "../entities/GkgAnnotation";
 import { Publisher, mayServeText, mayStoreText } from "../entities/Publisher";
 import { canonicalizeUrl, normalizeTitle, publisherDomain } from "./canonicalUrl";
-import { parseGkgCsv, readGkgArchive, resolveGkgWindowUrl } from "./gkg";
+import { parseGkgCsv, readGkgArchive, resolveGkgWindowUrl, type ParsedAnnotation } from "./gkg";
 import { parseRssFeed } from "./rss";
 
 // The one new seam in Phase 2 (#38): a plain async function taking the connector
@@ -239,6 +240,60 @@ async function reconcileWithHeld(
   return toneUpdate?.affected === 1 || publisherUpdated || nameUpdated ? "enriched" : "duplicate";
 }
 
+// CONTEXT.md "GKG Annotation": stage the occurrences GKG already extracted
+// against the Article they were reported for, once it has an id. Idempotent —
+// the unique occurrence index makes re-reading a window insert nothing — so this
+// can run on every sighting rather than only on insert, which is what lets GKG
+// contribute annotations to an Article another connector found first.
+// Returns how many were new, because that is what distinguishes an Enrichment
+// from a Duplicate.
+async function stageAnnotations(
+  manager: EntityManager,
+  articleId: string,
+  annotations: ParsedAnnotation[] | undefined,
+): Promise<number> {
+  if (!annotations || annotations.length === 0) return 0;
+  const staged = await manager
+    .getRepository(GkgAnnotation)
+    .createQueryBuilder()
+    .insert()
+    .values(annotations.map((annotation) => ({ articleId, ...annotation })))
+    .orIgnore()
+    .returning(["id"])
+    .execute();
+  return staged.raw.length;
+}
+
+// Both same-URL paths — the Article we already held, and the one that won a race
+// with our own insert — reconcile the sighting and then stage its annotations
+// against the row that survived. One function, so the ordering of the two steps
+// and reconcileWithHeld's long argument list each exist in exactly one place.
+async function reconcileAndStage(
+  manager: EntityManager,
+  existing: HeldArticle,
+  item: DiscoveredItem,
+  connectorId: string,
+  text: string | null,
+  sourcePublisherId: string | null,
+): Promise<ItemOutcome> {
+  const outcome = await reconcileWithHeld(
+    manager,
+    existing,
+    connectorId,
+    text,
+    item.mode,
+    item.tone,
+    sourcePublisherId,
+    item.publisherName,
+  );
+  // An item declined on rights grounds must leave no derived rows behind.
+  if (outcome === "rejectedByPolicy") return outcome;
+  const staged = await stageAnnotations(manager, existing.id, item.annotations);
+  // A sighting that staged occurrences nobody held contributed something, so it
+  // is an Enrichment even with nothing else to add (CONTEXT.md "Enrichment").
+  return outcome === "duplicate" && staged > 0 ? "enriched" : outcome;
+}
+
 // What every connector reduces to before anything touches the database: one
 // discovered document, already carrying the rung it can honestly claim. Nullable
 // where a source may simply not say — validated per item below, so a source that
@@ -255,6 +310,9 @@ type DiscoveredItem = {
   // connectors such as RSS that derive it from the canonical URL; null means a
   // source that promised the field supplied no usable value.
   sourceDomain?: string | null;
+  // The pre-resolution entity occurrences the source already extracted (#43).
+  // Absent for every connector but GKG — nothing else reports them.
+  annotations?: ParsedAnnotation[];
   // The publisher's display name where the source gives one. Null lets the domain
   // name it — GKG supplies nothing better, and a Publisher is keyed on domain
   // regardless.
@@ -298,6 +356,7 @@ async function discoverGkg(connector: IngestionConnector, deps: RunConnectorDeps
       tone: row.tone,
       sourceDomain: row.sourceDomain,
       publisherName: null,
+      annotations: row.annotations,
     })),
   };
 }
@@ -375,16 +434,7 @@ async function ingestItem(item: DiscoveredItem, connector: IngestionConnector): 
     if (held) {
       const sourcePublisher =
         sourceDomain === null ? null : await resolvePublisher(manager, sourceDomain, item.publisherName ?? sourceDomain);
-      return reconcileWithHeld(
-        manager,
-        held,
-        connector.id,
-        text,
-        item.mode,
-        item.tone,
-        sourcePublisher?.id ?? null,
-        item.publisherName,
-      );
+      return reconcileAndStage(manager, held, item, connector.id, text, sourcePublisher?.id ?? null);
     }
 
     const existingPublisher = await manager.getRepository(Publisher).findOneBy({ domain });
@@ -416,7 +466,10 @@ async function ingestItem(item: DiscoveredItem, connector: IngestionConnector): 
       .orIgnore()
       .returning(["id"])
       .execute();
-    if (inserted.raw.length > 0) return "inserted";
+    if (inserted.raw.length > 0) {
+      await stageAnnotations(manager, inserted.raw[0].id, item.annotations);
+      return "inserted";
+    }
 
     // A differently-titled item can use a different advisory lock while racing
     // on the same canonical URL. ON CONFLICT keeps the transaction usable so we
@@ -426,16 +479,7 @@ async function ingestItem(item: DiscoveredItem, connector: IngestionConnector): 
       select: { id: true, publisherId: true, analysisTextMode: true, discoveredByConnectorId: true },
     });
     if (!raced) throw new Error(`Article insert was ignored without a canonical URL conflict: ${url}`);
-    return reconcileWithHeld(
-      manager,
-      raced,
-      connector.id,
-      text,
-      item.mode,
-      item.tone,
-      sourceDomain === null ? null : publisher.id,
-      item.publisherName,
-    );
+    return reconcileAndStage(manager, raced, item, connector.id, text, sourceDomain === null ? null : publisher.id);
   });
 }
 
