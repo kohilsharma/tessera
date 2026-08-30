@@ -1,4 +1,4 @@
-import { IsNull, type EntityManager } from "typeorm";
+import { IsNull, Not, type EntityManager } from "typeorm";
 import { AppDataSource } from "../data-source";
 import { Article, isStrongerAnalysisTextMode } from "../entities/Article";
 import type { AnalysisTextMode } from "../entities/Article";
@@ -7,7 +7,15 @@ import { IngestionRun } from "../entities/IngestionRun";
 import { GkgAnnotation } from "../entities/GkgAnnotation";
 import { Publisher, mayServeText, mayStoreText } from "../entities/Publisher";
 import { canonicalizeUrl, normalizeTitle, publisherDomain } from "./canonicalUrl";
-import { parseGkgCsv, readGkgArchive, resolveGkgWindowUrl, type ParsedAnnotation } from "./gkg";
+import {
+  MAX_CATCH_UP_WINDOWS,
+  gkgWindowUrl,
+  parseGkgCsv,
+  planGkgCatchUp,
+  readGkgArchive,
+  resolveGkgWindowUrl,
+  type ParsedAnnotation,
+} from "./gkg";
 import { parseRssFeed } from "./rss";
 
 // The one new seam in Phase 2 (#38): a plain async function taking the connector
@@ -319,9 +327,10 @@ type DiscoveredItem = {
   publisherName: string | null;
 };
 
-// A run's whole discovery step: the items it found, plus the nearest thing the
-// source has to a cursor.
-type Discovery = { items: DiscoveredItem[]; cursor: string | null };
+// A run's whole discovery step: the items it found, the nearest thing the source
+// has to a cursor, and anything about the *discovery* an operator needs to know —
+// as against the per-item failures the run loop collects below.
+type Discovery = { items: DiscoveredItem[]; cursor: string | null; notes?: string[] };
 
 async function discoverRss(connector: IngestionConnector, deps: RunConnectorDeps): Promise<Discovery> {
   const feed = parseRssFeed(await deps.fetchText(connector.endpoint));
@@ -337,28 +346,78 @@ async function discoverRss(connector: IngestionConnector, deps: RunConnectorDeps
   };
 }
 
+// #45. CONTEXT.md "Window Cursor": the last window this connector *finished*, in
+// GDELT's own 14-digit terms, read back from the runs it persisted rather than
+// held anywhere else. Ordered by the cursor itself rather than by time, because
+// the stamps are fixed-width — lexical order is chronological order — so the
+// cursor cannot go backwards because a run completed out of order. Only succeeded
+// runs count: re-reading a window is idempotent, so a failed run's window is
+// simply read again.
+async function lastProcessedWindow(connectorId: string): Promise<string | null> {
+  const run = await AppDataSource.getRepository(IngestionRun).findOne({
+    where: { connectorId, status: "succeeded", cursor: Not(IsNull()) },
+    order: { cursor: "DESC" },
+    select: { cursor: true },
+  });
+  return run?.cursor ?? null;
+}
+
 // ADR-0018: poll `lastupdate.txt`, take the current 15-minute GKG window, and turn
 // its rows into Articles. ADR-0024: GKG has no body and no snippet at all, so
 // every row is the ladder's weakest rung — `metadata_only`, with genuinely null
 // text rather than a title copied into the text column, which is the lie the rung
 // was added to prevent.
+//
+// #45: `lastupdate.txt` names only the *current* window, so a worker that was off
+// heals the windows between its cursor and that one before going live, bounded by
+// the catch-up cap.
 async function discoverGkg(connector: IngestionConnector, deps: RunConnectorDeps): Promise<Discovery> {
-  const window = resolveGkgWindowUrl(await deps.fetchText(connector.endpoint), connector.endpoint);
-  const csv = readGkgArchive(await (deps.fetchBytes ?? httpFetchBytes)(window.url));
-  return {
-    cursor: window.stamp,
-    items: parseGkgCsv(csv).map((row) => ({
-      title: row.title,
-      link: row.documentIdentifier,
-      publishedAt: row.publishedAt,
-      text: null,
-      mode: "metadata_only",
-      tone: row.tone,
-      sourceDomain: row.sourceDomain,
-      publisherName: null,
-      annotations: row.annotations,
-    })),
-  };
+  const fetchBytes = deps.fetchBytes ?? httpFetchBytes;
+  const current = resolveGkgWindowUrl(await deps.fetchText(connector.endpoint), connector.endpoint);
+  const held = await lastProcessedWindow(connector.id);
+  const { stamps, skippedWindows } = planGkgCatchUp(held, current.stamp);
+  const notes: string[] =
+    skippedWindows > 0
+      ? [
+          `skipped ${skippedWindows} missed window(s) before ${current.stamp}: over the ` +
+            `${MAX_CATCH_UP_WINDOWS}-window catch-up cap`,
+        ]
+      : [];
+
+  const items: DiscoveredItem[] = [];
+  const failures: string[] = [];
+  // The cursor advances only over a window that was read, and the stamps ascend
+  // with the current window last — so a window GDELT never published, or one the
+  // CDN refused, is reported and stepped over rather than wedging the connector on
+  // it forever, while a failure on the *current* window leaves the cursor short of
+  // it and the next run reads it again.
+  let cursor = held;
+  for (const stamp of stamps) {
+    try {
+      const csv = readGkgArchive(await fetchBytes(gkgWindowUrl(current, stamp)));
+      items.push(
+        ...parseGkgCsv(csv).map((row) => ({
+          title: row.title,
+          link: row.documentIdentifier,
+          publishedAt: row.publishedAt,
+          text: null,
+          mode: "metadata_only" as const,
+          tone: row.tone,
+          sourceDomain: row.sourceDomain,
+          publisherName: null,
+          annotations: row.annotations,
+        })),
+      );
+      cursor = stamp;
+    } catch (err) {
+      failures.push(`window ${stamp} failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  // Nothing read at all is a failed run, not a successful run that happened to
+  // discover nothing — the distinction an operator reads the status for.
+  if (stamps.length > 0 && failures.length === stamps.length) throw new Error(failures.join("; "));
+
+  return { items, cursor, notes: [...notes, ...failures] };
 }
 
 async function discover(connector: IngestionConnector, deps: RunConnectorDeps): Promise<Discovery> {
@@ -506,10 +565,16 @@ export async function runConnector(
   const itemFailures = new Set<string>();
   let discovered = 0;
   let cursor: string | null = null;
+  // Discovery-level faults, as against the per-item ones below: a gap skipped for
+  // being past the cap, or a window that would not download (#45). Both belong on
+  // errorSummary with the item failures — it is the one field the Admin console
+  // states a run's reasons on.
+  let notes: string[] = [];
 
   try {
     const discovery = await discover(connector, deps);
     cursor = discovery.cursor;
+    notes = discovery.notes ?? [];
     discovered = discovery.items.length;
 
     for (const item of discovery.items) {
@@ -526,6 +591,7 @@ export async function runConnector(
       }
     }
 
+    const summary = [...notes, ...itemFailures];
     await runs.update(
       { id: run.id },
       {
@@ -534,7 +600,7 @@ export async function runConnector(
         discovered,
         ...counters,
         cursor,
-        errorSummary: itemFailures.size > 0 ? [...itemFailures].join("; ") : null,
+        errorSummary: summary.length > 0 ? summary.join("; ") : null,
       },
     );
   } catch (err) {
@@ -549,7 +615,7 @@ export async function runConnector(
         discovered,
         ...counters,
         cursor,
-        errorSummary: err instanceof Error ? err.message : String(err),
+        errorSummary: [...notes, err instanceof Error ? err.message : String(err)].join("; "),
       },
     );
   }

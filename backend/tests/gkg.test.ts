@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { strToU8, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import type { GkgAnnotationKind } from "../src/entities/GkgAnnotation";
-import { parseGkgCsv, readGkgArchive, resolveGkgWindowUrl, type GkgRow } from "../src/ingestion/gkg";
+import { parseGkgCsv, planGkgCatchUp, readGkgArchive, resolveGkgWindowUrl, gkgWindowUrl, type GkgRow } from "../src/ingestion/gkg";
 import { httpFetchBytes, httpFetchText } from "../src/ingestion/runConnector";
 
 // No database here: the GKG parser is pure, so its tests need neither a container
@@ -49,6 +49,87 @@ describe("resolveGkgWindowUrl", () => {
     const hostile = "12 abc http://169.254.169.254/latest/20260830190000.gkg.csv.zip";
 
     expect(() => resolveGkgWindowUrl(hostile, GKG_ENDPOINT)).toThrow(/off the connector's own host/);
+  });
+});
+
+// #45. The worker is not a 24/7 service, so a gap in the firehose is normal.
+// `lastupdate.txt` names only the current window, and `masterfilelist.txt` is
+// 127 MB — so the missed windows are named arithmetically off GDELT's own
+// 15-minute grid instead.
+describe("planGkgCatchUp", () => {
+  const CURRENT = "20260830190000";
+
+  it("reads only the current window when the cursor is the window before it", () => {
+    expect(planGkgCatchUp("20260830184500", CURRENT)).toEqual({ stamps: [CURRENT], skippedWindows: 0 });
+  });
+
+  it("reads nothing when the cursor already names the current window", () => {
+    // GDELT has published nothing since, so there is no file worth downloading —
+    // re-reading would be idempotent but still 3 MB over the wire.
+    expect(planGkgCatchUp(CURRENT, CURRENT)).toEqual({ stamps: [], skippedWindows: 0 });
+    // A cursor *ahead* of the current window (a clock correction upstream) is the
+    // same answer rather than arithmetic run backwards.
+    expect(planGkgCatchUp("20260830191500", CURRENT)).toEqual({ stamps: [], skippedWindows: 0 });
+  });
+
+  it("names every missed window between the cursor and now, oldest first", () => {
+    // An hour off, crossing the hour boundary — the case a plain `+15` on the
+    // minute field gets wrong.
+    expect(planGkgCatchUp("20260830180000", CURRENT).stamps).toEqual([
+      "20260830181500",
+      "20260830183000",
+      "20260830184500",
+      CURRENT,
+    ]);
+    // ...and across midnight, where the date has to roll too.
+    expect(planGkgCatchUp("20260830233000", "20260831001500").stamps).toEqual([
+      "20260830234500",
+      "20260831000000",
+      "20260831001500",
+    ]);
+  });
+
+  it("heals a gap at the cap and skips one past it, saying how much it dropped", () => {
+    // Eight missed windows is two hours: the last gap that is healed rather than
+    // skipped, and nine files to read counting the current one.
+    const atCap = planGkgCatchUp("20260830164500", CURRENT);
+    expect(atCap.stamps).toHaveLength(9);
+    expect(atCap.stamps.at(0)).toBe("20260830170000");
+    expect(atCap.stamps.at(-1)).toBe(CURRENT);
+    expect(atCap.skippedWindows).toBe(0);
+
+    // One window further back and the backfill is refused outright rather than
+    // trimmed: the run goes live and reports what it passed over.
+    expect(planGkgCatchUp("20260830163000", CURRENT)).toEqual({ stamps: [CURRENT], skippedWindows: 9 });
+    // A machine off for a week does not attempt 672 downloads.
+    expect(planGkgCatchUp("20260823190000", CURRENT)).toEqual({ stamps: [CURRENT], skippedWindows: 671 });
+  });
+
+  it("goes live with no cursor at all, and treats an unreadable one the same way", () => {
+    expect(planGkgCatchUp(null, CURRENT)).toEqual({ stamps: [CURRENT], skippedWindows: 0 });
+    // An RSS `lastBuildDate` in the cursor column would be a mis-seeded
+    // connector; going live beats generating file names out of it.
+    expect(planGkgCatchUp("Sat, 30 Aug 2026 19:00:00 GMT", CURRENT)).toEqual({
+      stamps: [CURRENT],
+      skippedWindows: 0,
+    });
+  });
+
+  it("snaps an off-grid cursor onto GDELT's own quarter-hour boundaries", () => {
+    // Nothing should write such a cursor, but the value decides which file names
+    // are requested — off-grid arithmetic would ask for windows GDELT never
+    // published.
+    expect(planGkgCatchUp("20260830183712", CURRENT).stamps).toEqual(["20260830184500", CURRENT]);
+  });
+});
+
+describe("gkgWindowUrl", () => {
+  it("names a missed window beside the file GDELT itself named", () => {
+    const current = resolveGkgWindowUrl(LAST_UPDATE, GKG_ENDPOINT);
+
+    expect(gkgWindowUrl(current, "20260830184500")).toBe(
+      "http://data.gdeltproject.org/gdeltv2/20260830184500.gkg.csv.zip",
+    );
   });
 });
 

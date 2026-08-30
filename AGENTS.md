@@ -44,7 +44,15 @@ that same queue and answers `202 {status:"accepted"}`, so there is one execution
 job id is the connector's id, so a trigger landing mid-run adds no second run, and worker
 concurrency is 1. `src/ingestion/queue.ts` is the enqueue side, `src/ingestion/jobs.ts` the
 handler. Run history is still read from Postgres, never the queue, so the Admin console
-renders with the worker stopped. There is no retention yet (#45).
+renders with the worker stopped.
+**The window cursor and retention** (#45) make gaps in the firehose ordinary: a GKG run reads
+back the last window it *finished* off its own succeeded runs, names the windows missed since
+then arithmetically off the 15-minute grid (`masterfilelist.txt` is never requested), and reads
+them oldest-first before going live — capped at 8 missed windows, past which the gap is skipped
+rather than backfilled and the skip is stated in the run's `errorSummary`. The same tick prunes:
+GKG-derived Articles stored more than 7 days ago are deleted, taking their Annotations with
+them, and only while they are still `metadata_only`, unclustered and uncited — so RSS reporting,
+enriched text and the curated corpus never age out (`src/ingestion/retention.ts`).
 **GKG Annotation staging** (#43) is in: the parser also reads GDELT's four enhanced fields
 (persons, organizations, themes, locations) into surface-name occurrences, and a run stages
 them per Article in one `gkg_annotations` table (kind + surface name + character offset, plus

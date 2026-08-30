@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import bcrypt from "bcryptjs";
@@ -8,9 +9,11 @@ import request from "supertest";
 import { createApp } from "../src/app";
 import { AppDataSource } from "../src/data-source";
 import { Article, isStrongerAnalysisTextMode } from "../src/entities/Article";
+import type { AnalysisTextMode } from "../src/entities/Article";
 import { GkgAnnotation } from "../src/entities/GkgAnnotation";
 import { IngestionConnector } from "../src/entities/IngestionConnector";
 import { IngestionRun } from "../src/entities/IngestionRun";
+import { IntelligenceBrief } from "../src/entities/IntelligenceBrief";
 import { Publisher } from "../src/entities/Publisher";
 import { Story } from "../src/entities/Story";
 import { User } from "../src/entities/User";
@@ -19,6 +22,7 @@ import { canonicalizeUrl, publisherDomain } from "../src/ingestion/canonicalUrl"
 import { parseGkgCsv } from "../src/ingestion/gkg";
 import { runIngestionJob } from "../src/ingestion/jobs";
 import { RUN_JOB, TICK_JOB } from "../src/ingestion/queue";
+import { GKG_RETENTION_DAYS, pruneExpiredGkgArticles } from "../src/ingestion/retention";
 import { runConnector, type FetchText, type RunConnectorDeps } from "../src/ingestion/runConnector";
 import { setupTestDb } from "./setupTestDb";
 
@@ -632,20 +636,27 @@ describe("runConnector over a GKG window", () => {
     expect(await AppDataSource.getRepository(Article).count()).toBe(0);
   });
 
-  it("re-running the same window inserts nothing", async () => {
+  it("re-reading rows GDELT carries into a later window inserts nothing", async () => {
     const connector = await createGkgConnector();
     const deps = gkgFixture("20260830190000.gkg.csv");
 
     expect((await runConnector(connector, deps))!.inserted).toBe(4);
     const staged = await AppDataSource.getRepository(GkgAnnotation).count();
-    const second = await runConnector(connector, deps);
+    // The cursor (#45) means one window is never downloaded twice, so the re-read
+    // worth proving is the one GDELT actually produces: the same document reported
+    // again in the following window.
+    const second = await runConnector(connector, {
+      fetchText: async () => GKG_LAST_UPDATE.replace("20260830190000", "20260830191500"),
+      fetchBytes: deps.fetchBytes,
+    });
 
     expect(second!.inserted).toBe(0);
     expect(second!.duplicate).toBe(4);
     // A metadata_only sighting is the weakest rung, so it can never enrich.
     expect(second!.enriched).toBe(0);
+    expect(second!.cursor).toBe("20260830191500");
     expect(await AppDataSource.getRepository(Article).count()).toBe(4);
-    // ...and one occurrence is one row, so the second reading of the same window
+    // ...and one occurrence is one row, so the second reading of the same rows
     // stages nothing new either (#43). That idempotence is what lets staging run
     // on every sighting rather than only on insert.
     expect(await AppDataSource.getRepository(GkgAnnotation).count()).toBe(staged);
@@ -991,6 +1002,278 @@ describe("runConnector over a GKG window", () => {
 
     expect((await publishers.findOneByOrFail({ domain: "indiatimes.com" })).name).toBe("Times of India");
     expect(await publishers.findOneBy({ domain: "timesofindia.indiatimes.com" })).toBeNull();
+  });
+
+  // #45. CONTEXT.md "Window Cursor": the worker is not a 24/7 service, so gaps are
+  // the normal state. `lastupdate.txt` names only the current window, so the
+  // missed ones are named off the 15-minute grid and read before going live.
+  describe("catching up on missed windows", () => {
+    const windowUrl = (stamp: string) => `http://data.gdeltproject.org/gdeltv2/${stamp}.gkg.csv.zip`;
+
+    // Records what the run asked GDELT for, which is the only way to see that the
+    // missed file names were computed rather than looked up.
+    function recordingDeps(failing: (url: string) => boolean = () => false) {
+      const requested: string[] = [];
+      const deps: RunConnectorDeps = {
+        fetchText: async () => GKG_LAST_UPDATE,
+        fetchBytes: async (url) => {
+          requested.push(url);
+          if (failing(url)) throw new Error("responded 404");
+          const csv = await readFile(join(__dirname, "fixtures", "gkg", "20260830190000.gkg.csv"), "utf-8");
+          return zipSync({ "window.gkg.csv": strToU8(csv) });
+        },
+      };
+      return { requested, deps };
+    }
+
+    // The cursor is read back off the runs the connector persisted, so a prior
+    // window is stated the same way a real run would state it.
+    const processedThrough = (connectorId: string, cursor: string) =>
+      AppDataSource.getRepository(IngestionRun).save({
+        connectorId,
+        status: "succeeded" as const,
+        startedAt: new Date(),
+        completedAt: new Date(),
+        cursor,
+      });
+
+    it("reads every window missed since its cursor, named arithmetically", async () => {
+      const connector = await createGkgConnector();
+      await processedThrough(connector.id, "20260830180000");
+      const { requested, deps } = recordingDeps();
+
+      const run = await runConnector(connector, deps);
+
+      expect(requested).toEqual([
+        windowUrl("20260830181500"),
+        windowUrl("20260830183000"),
+        windowUrl("20260830184500"),
+        windowUrl("20260830190000"),
+      ]);
+      // `masterfilelist.txt` is 127 MB to learn what modulo already knows — the
+      // names above prove it is never needed.
+      expect(requested.every((url) => !url.includes("masterfilelist"))).toBe(true);
+      expect(run!.status).toBe("succeeded");
+      // Four rows per window, all four windows parsed. The fixture is the same
+      // reporting each time, so only the first window's rows are new.
+      expect(run!.discovered).toBe(16);
+      expect(run!.inserted).toBe(4);
+      expect(run!.duplicate).toBe(12);
+      expect(run!.cursor).toBe("20260830190000");
+    });
+
+    it("asks for nothing once its cursor names the window GDELT is publishing", async () => {
+      const connector = await createGkgConnector();
+      const { requested, deps } = recordingDeps();
+      await runConnector(connector, deps);
+
+      const second = await runConnector(connector, deps);
+
+      // The download is what the cursor saves: re-reading a window is idempotent
+      // but still 3 MB over the wire for nothing.
+      expect(requested).toEqual([windowUrl("20260830190000")]);
+      expect(second!.status).toBe("succeeded");
+      expect(second!.discovered).toBe(0);
+      expect(second!.cursor).toBe("20260830190000");
+      // Nothing to read is not a fault, so nothing lands on errorSummary either.
+      expect(second!.errorSummary).toBeNull();
+    });
+
+    it("skips a gap past the two-hour cap and goes live, saying what it dropped", async () => {
+      const connector = await createGkgConnector();
+      await processedThrough(connector.id, "20260823190000");
+      const { requested, deps } = recordingDeps();
+
+      const run = await runConnector(connector, deps);
+
+      expect(requested).toEqual([windowUrl("20260830190000")]);
+      expect(run!.status).toBe("succeeded");
+      // Visible on the run rather than only in the log: errorSummary is what the
+      // Admin console states for a run that is not what an operator expected.
+      expect(run!.errorSummary).toMatch(/skipped 671 missed window\(s\) before 20260830190000/);
+      expect(run!.errorSummary).toMatch(/8-window catch-up cap/);
+      expect(run!.cursor).toBe("20260830190000");
+    });
+
+    it("steps over a missed window GDELT never published, reporting it", async () => {
+      const connector = await createGkgConnector();
+      await processedThrough(connector.id, "20260830183000");
+      const { deps } = recordingDeps((url) => url.includes("20260830184500"));
+
+      const run = await runConnector(connector, deps);
+
+      expect(run!.status).toBe("succeeded");
+      expect(run!.errorSummary).toMatch(/window 20260830184500 failed: responded 404/);
+      // The current window was read, so the cursor moves past the missing one
+      // instead of the connector retrying it forever.
+      expect(run!.cursor).toBe("20260830190000");
+      expect(run!.discovered).toBe(4);
+    });
+
+    it("holds the cursor short of a current window that would not download", async () => {
+      const connector = await createGkgConnector();
+      await processedThrough(connector.id, "20260830183000");
+      const { deps } = recordingDeps((url) => url.includes("20260830190000"));
+
+      const run = await runConnector(connector, deps);
+
+      expect(run!.status).toBe("succeeded");
+      expect(run!.errorSummary).toMatch(/window 20260830190000 failed/);
+      // Short of the current window, so the next run reads it again — a transient
+      // refusal must not lose the window that matters most.
+      expect(run!.cursor).toBe("20260830184500");
+    });
+
+    it("records a run whose only window would not download as failed", async () => {
+      const connector = await createGkgConnector();
+      const { deps } = recordingDeps(() => true);
+
+      const run = await runConnector(connector, deps);
+
+      // Nothing read at all is a failed run, not a successful run that discovered
+      // nothing — and the cursor stays where it was.
+      expect(run!.status).toBe("failed");
+      expect(run!.errorSummary).toMatch(/window 20260830190000 failed: responded 404/);
+      expect(run!.discovered).toBe(0);
+      expect(run!.cursor).toBeNull();
+    });
+  });
+});
+
+// #45. The firehose is unbounded, so what it leaves behind ages out on a rolling
+// window and disk use has a ceiling. Narrow by design: only rows a GKG connector
+// discovered that nothing has since enriched with text.
+describe("GKG retention", () => {
+  const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  // A minute either side of the boundary, so the assertion is about the boundary
+  // and not about how long the test took to run.
+  const MINUTE = 60 * 1000;
+  const expired = () => new Date(daysAgo(GKG_RETENTION_DAYS).getTime() - MINUTE);
+  const inside = () => new Date(daysAgo(GKG_RETENTION_DAYS).getTime() + MINUTE);
+
+  beforeEach(async () => {
+    await AppDataSource.query(`TRUNCATE "articles", "publishers", "ingestion_runs" CASCADE`);
+  });
+
+  // `storedAt` is the axis retention reads, and TypeORM writes @CreateDateColumn
+  // itself on insert — so it is backdated afterwards rather than passed in.
+  async function stored(
+    connector: IngestionConnector | null,
+    storedAt: Date,
+    mode: AnalysisTextMode = "metadata_only",
+  ): Promise<Article> {
+    const publishers = AppDataSource.getRepository(Publisher);
+    const publisher =
+      (await publishers.findOneBy({ domain: "retention.example" })) ??
+      (await publishers.save({ name: "Retention Example", domain: "retention.example" }));
+    const article = await AppDataSource.getRepository(Article).save({
+      storyId: null,
+      publisherId: publisher.id,
+      discoveredByConnectorId: connector?.id ?? null,
+      title: `Reporting ${randomUUID()}`,
+      url: `https://retention.example/${randomUUID()}`,
+      analysisText: mode === "metadata_only" ? null : "The excerpt a feed carried.",
+      analysisTextMode: mode,
+      tone: null,
+      publishedAt: storedAt,
+    });
+    await AppDataSource.query(`UPDATE articles SET "createdAt" = $1 WHERE id = $2`, [storedAt, article.id]);
+    return article;
+  }
+
+  const heldIds = async () =>
+    (await AppDataSource.getRepository(Article).find({ select: { id: true } })).map((article) => article.id);
+
+  it("removes GKG rows past the seven-day boundary and keeps the ones inside it", async () => {
+    const connector = await createGkgConnector();
+    const aged = await stored(connector, expired());
+    const fresh = await stored(connector, inside());
+    // The bulk of the bytes are the occurrences, which go with the Article
+    // (ON DELETE CASCADE) rather than being left orphaned.
+    await AppDataSource.getRepository(GkgAnnotation).save({
+      articleId: aged.id,
+      kind: "person" as const,
+      surfaceName: "Mark Carney",
+      charOffset: 12,
+      locationDetail: null,
+    });
+
+    expect(await pruneExpiredGkgArticles()).toBe(1);
+
+    expect(await heldIds()).toEqual([fresh.id]);
+    expect(await AppDataSource.getRepository(GkgAnnotation).countBy({ articleId: aged.id })).toBe(0);
+  });
+
+  // The horizon is when the row was stored, not what it reports on: GDELT carries
+  // documents whose own timestamp is old, and pruning on that would insert them,
+  // delete them, and insert them again from the next window that mentions them.
+  it("keeps a freshly stored row that reports on something older than the horizon", async () => {
+    const connector = await createGkgConnector();
+    const old = await stored(connector, inside());
+    await AppDataSource.getRepository(Article).update({ id: old.id }, { publishedAt: daysAgo(400) });
+
+    expect(await pruneExpiredGkgArticles()).toBe(0);
+
+    expect(await heldIds()).toEqual([old.id]);
+  });
+
+  it("never removes RSS-discovered reporting, enriched text, or the curated corpus", async () => {
+    const gkg = await createGkgConnector();
+    const rss = await createRssConnector("https://retention.example/feed.xml");
+    // All three are well past the horizon; none of them is firehose metadata.
+    const feedDiscovered = await stored(rss, daysAgo(90), "feed_excerpt");
+    // A GKG row an RSS feed later gave an excerpt to keeps the GKG connector as
+    // its discoverer, so the ladder rung is what has to save it.
+    const enriched = await stored(gkg, daysAgo(90), "feed_excerpt");
+    // Seeded fixtures were discovered by nothing at all (ADR-0007).
+    const seeded = await stored(null, daysAgo(90), "manual_fixture");
+
+    expect(await pruneExpiredGkgArticles()).toBe(0);
+
+    expect((await heldIds()).sort()).toEqual([feedDiscovered.id, enriched.id, seeded.id].sort());
+  });
+
+  it("declines to delete a GKG row a Story or a Brief has taken hold of", async () => {
+    const connector = await createGkgConnector();
+    const clustered = await stored(connector, expired());
+    const cited = await stored(connector, expired());
+    const story = await AppDataSource.getRepository(Story).save({
+      slug: `retention-story-${randomUUID()}`,
+      title: "A Story Phase 3 clustered",
+      summary: "Nothing clusters metadata_only rows yet; retention runs unattended anyway.",
+      category: "technology",
+      firstSeenAt: expired(),
+      lastSeenAt: expired(),
+    });
+    await AppDataSource.getRepository(Article).update({ id: clustered.id }, { storyId: story.id });
+    const owner = await AppDataSource.getRepository(User).save({
+      email: `retention-owner-${randomUUID()}@example.com`,
+      passwordHash: await bcrypt.hash("correct-horse", 10),
+      role: "investor" as const,
+    });
+    const brief = await AppDataSource.getRepository(IntelligenceBrief).save({
+      ownerId: owner.id,
+      title: "A Brief citing a firehose row",
+      category: "technology" as const,
+      body: "Both references cascade, so retention has to refuse rather than rely on the FK.",
+    });
+    await AppDataSource.query(`INSERT INTO brief_articles ("briefId", "articleId") VALUES ($1, $2)`, [
+      brief.id,
+      cited.id,
+    ]);
+
+    expect(await pruneExpiredGkgArticles()).toBe(0);
+
+    expect((await heldIds()).sort()).toEqual([clustered.id, cited.id].sort());
+  });
+
+  it("ages rows out on the 15-minute tick, alongside enqueueing the fleet", async () => {
+    const connector = await createGkgConnector();
+    await stored(connector, expired());
+
+    await runIngestionJob({ name: TICK_JOB, data: {} });
+
+    expect(await AppDataSource.getRepository(Article).count()).toBe(0);
   });
 });
 

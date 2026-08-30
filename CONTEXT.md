@@ -112,6 +112,23 @@ Terms are canonical: use these words in code, docs, and conversation.
   pre-resolution raw material an **Entity** is later resolved *from*. _Avoid_: "GKG mention" —
   GDELT ships a `mentions` file meaning something else entirely (an event referenced in an
   article). (ADR-0018, ADR-0019)
+- **Window Cursor** — Where a connector's source got to, in that source's own terms: for GKG
+  the 14-digit stamp of the last 15-minute window a run *finished*, for RSS the feed's
+  `lastBuildDate`. Read back off the connector's own succeeded IngestionRuns, so it lives
+  wherever the runs do. The Ingestion Worker is not a 24/7 service, so a **gap** in the
+  firehose is the normal state rather than a fault: on its next run a GKG connector heals the
+  windows between its cursor and the one GDELT is publishing now, naming their files
+  arithmetically off the 15-minute grid (GDELT's `masterfilelist.txt` is never requested — it
+  is 127 MB to learn something modulo already knows). A gap wider than the two-hour cap is
+  **skipped rather than backfilled**, and the skip is stated on the run. _Avoid_: treating a
+  gap as an error state; the cursor exists because gaps are expected. (#45)
+- **Retention Window** — The seven days beyond which a GKG-derived Article is removed, measured
+  from when the row was *stored*, so an unbounded firehose has a ceiling on disk. Narrow by
+  design: only rows a GKG connector discovered that are still `metadata_only`. RSS-discovered
+  reporting, anything enriched with text, an Article a Story or a Brief has taken hold of, and
+  the curated fixture corpus all outlive it. GKG Annotations go with the Article they were
+  staged against. _Avoid_: expiring on `publishedAt` — GDELT reports documents whose own
+  timestamp is old, and that would insert, prune, and re-insert them window after window. (#45)
 
 ## Deferred (startup-only, behind interfaces — NOT in graded build)
 

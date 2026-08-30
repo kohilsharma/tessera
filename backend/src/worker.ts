@@ -9,11 +9,12 @@ import { INGESTION_QUEUE, TICK_JOB, closeIngestionQueue, ingestionQueue, redisUr
 // `npm run worker` in development, `npm run start:worker` from dist/.
 
 // GDELT publishes a new GKG window every 15 minutes on the quarter hour
-// (ADR-0018), so the tick sits on that boundary — six fields, so second 0.
-// ponytail: a tick whose fleet is still draining 15 minutes later has its
-// re-enqueue swallowed by the per-connector job id, and GKG keeps no cursor yet,
-// so that window is skipped rather than deferred. Bounded by the fetch timeouts
-// (a full fleet is minutes, not a quarter hour) and #45's cursor is the fix.
+// (ADR-0018), so the tick sits on that boundary — six fields, so second 0. The
+// tick is also what ages GKG rows out (ingestion/retention.ts).
+// A tick whose fleet is still draining 15 minutes later has its re-enqueue
+// swallowed by the per-connector job id, and the worker is not a 24/7 service
+// either — so neither a missed tick nor a stopped worker loses a window: the GKG
+// connector's cursor (#45) heals the gap on its next run, up to a two-hour cap.
 const TICK_SCHEDULE = { pattern: "0 */15 * * * *" };
 
 // One at a time. A GKG window is ~700 rows and holding the whole fleet behind it

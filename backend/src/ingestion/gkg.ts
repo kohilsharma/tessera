@@ -82,6 +82,74 @@ export function resolveGkgWindowUrl(lastUpdate: string, endpoint: string): GkgWi
   return { url, stamp };
 }
 
+// #45. The worker is not a 24/7 service (ADR-0015 runs it natively beside the
+// demo), so a gap in the firehose is the normal state rather than a fault. Window
+// files sit on GDELT's own 15-minute grid, so the names of the missed ones are
+// arithmetic: `masterfilelist.txt` is never requested, because it is 127 MB
+// downloaded to learn something modulo already knows.
+const GKG_WINDOW_MS = 15 * 60 * 1000;
+
+// Two hours. Enough to heal a lunch break, a restart, or a tick whose fleet was
+// still draining; short enough that a machine which was off all weekend refuses
+// the backfill rather than attempting it — eight windows is already ~25 MB over
+// the wire and ~5,000 rows through the per-item path.
+export const MAX_CATCH_UP_WINDOWS = 8;
+
+export type GkgCatchUp = {
+  // The windows to read, oldest first, ending with the current one. Empty when
+  // the cursor already names the current window — GDELT has published nothing
+  // since, so there is no file worth downloading.
+  stamps: string[];
+  // How many windows were passed over for exceeding the cap. Nonzero means
+  // reporting was dropped deliberately, which is why the run reports it.
+  skippedWindows: number;
+};
+
+// GDELT window stamps are fixed-width UTC digits, so a window is a number of
+// 15-minute steps and nothing here needs a calendar library.
+function formatStamp(at: number): string {
+  return new Date(at).toISOString().replace(/\D/g, "").slice(0, 14);
+}
+
+// Given the last window this connector finished and the one GDELT is publishing
+// now, which windows to read. The cap is what keeps a long absence from turning
+// the next run into an unbounded backfill.
+export function planGkgCatchUp(
+  cursor: string | null,
+  current: string,
+  cap: number = MAX_CATCH_UP_WINDOWS,
+): GkgCatchUp {
+  const currentAt = parseStamp(current);
+  if (!currentAt) throw new Error(`Not a 15-minute window stamp: ${current}`);
+  // No cursor at all — a connector's first run. Going live is the only honest
+  // option: there is no gap, because there is no history to have a gap in.
+  const held = parseStamp(cursor);
+  if (!held) return { stamps: [current], skippedWindows: 0 };
+  // Epoch 0 is itself on a 15-minute boundary in UTC, so flooring by the window
+  // length lands on GDELT's grid. Without it an off-grid cursor would generate
+  // file names GDELT never published.
+  const from = Math.floor(held.getTime() / GKG_WINDOW_MS) * GKG_WINDOW_MS;
+  const missed = Math.round((currentAt.getTime() - from) / GKG_WINDOW_MS) - 1;
+  // Negative covers both "the cursor is the current window" and a cursor ahead of
+  // it, which a clock correction upstream can produce.
+  if (missed < 0) return { stamps: [], skippedWindows: 0 };
+  if (missed > cap) return { stamps: [current], skippedWindows: missed };
+  return {
+    stamps: [
+      ...Array.from({ length: missed }, (_, step) => formatStamp(from + (step + 1) * GKG_WINDOW_MS)),
+      current,
+    ],
+    skippedWindows: 0,
+  };
+}
+
+// A missed window's file sits beside the current one, so its URL is derived from
+// the URL GDELT itself named rather than composed from a path of our own — which
+// also means it inherits the host check resolveGkgWindowUrl already made.
+export function gkgWindowUrl(current: GkgWindow, stamp: string): string {
+  return new URL(`${stamp}.gkg.csv.zip`, current.url).toString();
+}
+
 // GDELT ships one deflated CSV per window inside a zip. A dependency rather than
 // a hand-rolled reader over `zlib.inflateRaw`: the container has data descriptors
 // and zip64 to get right, this is a free public service whose output we do not

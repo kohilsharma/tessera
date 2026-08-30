@@ -63,12 +63,17 @@ export class IngestionRun {
   @Column({ type: "integer", default: 0 })
   failed!: number;
 
-  // Story 10: a failed run has to be diagnosable without reading server logs.
+  // Story 10: a failed run has to be diagnosable without reading server logs. Also
+  // carries what discovery itself could not do — a gap skipped for being past the
+  // catch-up cap, or a window that would not download (#45) — so a succeeded run
+  // that lost reporting says so.
   @Column({ type: "text", nullable: true })
   errorSummary!: string | null;
 
   // Where the connector got to, in whatever terms its source keeps time: an RSS
-  // feed's lastBuildDate now, a GKG window filename from #45.
+  // feed's lastBuildDate, or — CONTEXT.md "Window Cursor" — the 14-digit stamp of
+  // the last 15-minute GKG window a run finished (#45). Read back off this column
+  // on the next run, which is why it is written on every terminal status.
   @Column({ type: "varchar", nullable: true })
   cursor!: string | null;
 }
