@@ -538,9 +538,9 @@ export async function runConnector(
       },
     );
   } catch (err) {
-    // The run itself failed — an unreachable feed, a body that is not RSS. The
-    // counters keep whatever was accumulated before the failure so a partial run
-    // is still legible.
+    // Anything discovered but not yet classified when the run itself fails is a
+    // failed item too: every persisted run keeps one outcome per discovery.
+    counters.failed += discovered - Object.values(counters).reduce((sum, count) => sum + count, 0);
     await runs.update(
       { id: run.id },
       {

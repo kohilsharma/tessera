@@ -103,17 +103,12 @@ function countersSumToDiscovered(run: IngestionRun): boolean {
 }
 
 // #44: the same ledger invariant for *every* run the suite persists, not only the
-// ones a test thought to check. A succeeded run's five outcomes sum to what it
-// discovered; a run that failed part-way keeps what it accumulated, so it is only
-// ever short by what it never reached.
+// ones a test thought to check.
 afterEach(async () => {
   const offenders = await AppDataSource.query(
     `SELECT id, status, discovered, inserted, enriched, duplicate, "rejectedByPolicy", failed
        FROM ingestion_runs
-      WHERE (status = 'succeeded'
-             AND inserted + enriched + duplicate + "rejectedByPolicy" + failed <> discovered)
-         OR (status <> 'succeeded'
-             AND inserted + enriched + duplicate + "rejectedByPolicy" + failed > discovered)`,
+      WHERE inserted + enriched + duplicate + "rejectedByPolicy" + failed <> discovered`,
   );
   expect(offenders).toEqual([]);
 });
@@ -798,14 +793,11 @@ describe("runConnector over a GKG window", () => {
   // ADR-0024 §4 (#44): the two connectors constantly discover the same document
   // and each carries what the other lacks — GKG the annotations and tone, RSS the
   // excerpt — so whichever arrives second must enrich rather than insert, reject,
-  // or overwrite. Both orderings are driven end to end below, over the committed
-  // window and a feed carrying that window's own first document URL, so no
-  // contribution can be lost to arrival order. The feed is written inline because
-  // the URL is the thing under test and it comes from the committed fixture.
+  // or overwrite. Both orderings are driven end to end below against committed
+  // GKG and RSS fixtures, so no contribution can be lost to arrival order.
   const wmukUrl =
     "https://www.wmuk.org/npr-news/2026-08-30/canada-claps-back-at-trumps-efforts-to-rename-lake-ontario-as-lake-america";
-  const wmukFeed: FetchText = async () =>
-    `<?xml version="1.0"?><rss version="2.0"><channel><title>WMUK NPR News</title><item><title>Canada claps back at Trump's efforts to rename Lake Ontario as 'Lake America'</title><link>${wmukUrl}?utm_source=rss</link><pubDate>Sun, 30 Aug 2026 19:00:00 GMT</pubDate><description>Broadcast excerpt the station's feed supplied.</description></item></channel></rss>`;
+  const wmukFeed = fixture("wmuk-npr-news.xml");
 
   it("raises a GKG row to feed_excerpt when RSS sights the same canonical URL second", async () => {
     const gkgConnector = await createGkgConnector();

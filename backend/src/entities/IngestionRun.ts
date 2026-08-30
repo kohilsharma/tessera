@@ -34,10 +34,8 @@ export class IngestionRun {
   completedAt!: Date | null;
 
   // Every item a connector discovers ends in exactly one of the five counters
-  // below, so on a run that reached the end they sum to `discovered`. An operator
-  // reading a succeeded run that does not add up is reading a bug. (A run that
-  // failed part-way keeps the counters it had accumulated, which is more useful
-  // than zeroing them, and then the sum is short by what it never reached.)
+  // below, so they sum to `discovered` for every persisted run. If the run itself
+  // fails part-way, anything it did not reach is classified as failed.
   //
   // ADR-0024 §5 calls these `insertedCount` / `enrichedCount` / `duplicateCount`;
   // the suffix is dropped because every column on this row is a count.
