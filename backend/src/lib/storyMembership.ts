@@ -20,9 +20,10 @@ export function acceptedMembership(alias: string): string {
 
 // ADR-0026's centroid, as one definition: the mean of a Story's *accepted* members'
 // vectors. Written once because clustering recomputes it, revalidates against it and
-// updates it, review's accept path updates it, and merge (#52) will recompute it —
-// five sites where the same subquery drifting by one condition would let a proposal
-// silently move the target every later candidate is scored against.
+// updates it, review's accept path updates it, and merge (#52) recomputes it from the
+// merged membership — five sites where the same subquery drifting by one condition
+// would let a proposal silently move the target every later candidate is scored
+// against.
 export function acceptedCentroid(storyAlias: string): string {
   return `(SELECT avg(member."embedding") FROM "articles" member
            WHERE member."storyId" = ${storyAlias}."id"

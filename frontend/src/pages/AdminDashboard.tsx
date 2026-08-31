@@ -1,9 +1,12 @@
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
   decidePendingAssignment,
   getAdminDashboard,
   getPendingAssignments,
+  getStories,
+  mergeStories,
   runClustering,
   runIngestionConnector,
   setConnectorEnabled,
@@ -48,11 +51,21 @@ const TERMS_CLASS_LABEL: Record<TermsClass, string> = {
   licensed: "Licensed",
 };
 
-// The Admin surface (#36, #39, #49, #50): six operator registers, in three shapes,
-// so they are told apart before they are read — standing totals as plates, the
-// connector fleet and the clustering review queue as registers an operator acts on,
-// ingestion and clustering history as ledgers of runs, publishers as a coverage
-// register.
+// The merge picker's reach (#52), which is the list endpoint's own page-size ceiling:
+// an operator merges Stories they have just read about, and the picker is ordered by
+// when a Story was first seen, so those are the ones it offers.
+//
+// ponytail: two selects over the most recently opened Stories, so an older pair
+// cannot be merged from here. The upgrade path is the Index archetype's filters on the
+// picker, or a merge control on Story detail — worth it once someone needs a pair this
+// misses.
+const MERGE_PICKER_STORIES = 50;
+
+// The Admin surface (#36, #39, #49, #50, #52): seven operator registers, in four
+// shapes, so they are told apart before they are read — standing totals as plates,
+// the connector fleet and the clustering review queue as registers an operator acts
+// on, ingestion and clustering history as ledgers of runs, the Story merge as a
+// command form, publishers as a coverage register.
 export default function AdminDashboard() {
   const query = useQuery({ queryKey: ["dashboard", "admin"], queryFn: getAdminDashboard });
   // The review queue is its own request, unlike every other register here: it is a
@@ -60,7 +73,16 @@ export default function AdminDashboard() {
   // console, and it is refetched on its own after each decision. So it carries its
   // own four UI states inside the register, where the rest share the page's.
   const review = useQuery({ queryKey: ["clustering", "pending"], queryFn: getPendingAssignments });
+  // The merge picker's own request, for the same reason: a list of Stories is not
+  // part of the console payload, and it is refetched after a merge because one of
+  // the two it offered has stopped existing.
+  const storyPicker = useQuery({
+    queryKey: ["stories", "merge-picker"],
+    queryFn: () => getStories({ pageSize: MERGE_PICKER_STORIES, sort: "firstSeenAt:desc" }),
+  });
   const queryClient = useQueryClient();
+  const [survivorStoryId, setSurvivorStoryId] = useState("");
+  const [mergedStoryId, setMergedStoryId] = useState("");
 
   // Both mutations change what this same payload says, so both refetch it — the
   // run counts, the new IngestionRun, and the publishers it may have created all
@@ -86,6 +108,20 @@ export default function AdminDashboard() {
   });
   const commandError = run.error?.message ?? toggle.error?.message ?? null;
 
+  // #52: a merge changes the Stories the picker offers, the counts the console
+  // states, and any proposal that named the Story that is gone — so all three are
+  // refetched. The Story merged away is cleared from the picker's selection because
+  // it no longer exists; the survivor stays selected, since it does.
+  const merge = useMutation({
+    mutationFn: () => mergeStories(survivorStoryId, mergedStoryId),
+    onSuccess: () => {
+      setMergedStoryId("");
+      void queryClient.invalidateQueries({ queryKey: ["stories"] });
+      void queryClient.invalidateQueries({ queryKey: ["clustering", "pending"] });
+      invalidate();
+    },
+  });
+
   // Firing any command clears the others' refusals first: a mutation keeps its
   // error until it is reset, so a failed Run would otherwise stay stated above the
   // register through a later successful Disable, describing something that is no
@@ -95,6 +131,7 @@ export default function AdminDashboard() {
     toggle.reset();
     cluster.reset();
     decide.reset();
+    merge.reset();
     fire();
   }
 
@@ -349,6 +386,96 @@ export default function AdminDashboard() {
                       );
                     })}
                   </EntryList>
+                ))}
+            </DashboardRegister>
+
+            {/* #52: the correction the review queue cannot make. A proposal is about
+                one Article; this is about two Stories an operator has read and judged
+                to be one event. A command form rather than a register of rows,
+                because the thing being acted on is a pair the operator chooses —
+                there is no row to hang it on. */}
+            <DashboardRegister
+              heading="Story merge"
+              folio={storyPicker.data ? `${storyPicker.data.total} Stories` : "Two Stories, one event"}
+            >
+              {storyPicker.isPending && <PendingState>Loading Stories…</PendingState>}
+              {storyPicker.isError && (
+                <RetryableError
+                  message={storyPicker.error.message}
+                  onRetry={() => void storyPicker.refetch()}
+                  retrying={storyPicker.isFetching}
+                />
+              )}
+              {merge.error && <ErrorState>{merge.error.message}</ErrorState>}
+              {/* Done, not queued — a merge is executed in the request, unlike every
+                  other command on this console. Same stated-note treatment because it
+                  is the same kind of line: what the command did, said where it was
+                  fired, and announced (role="status") for a reader who cannot see the
+                  registers around it refresh. */}
+              {merge.isSuccess && (
+                <PendingState>
+                  Merged. {merge.data.movedArticles} Article
+                  {merge.data.movedArticles === 1 ? "" : "s"} moved to the surviving Story, and the emptied Story is
+                  gone.
+                </PendingState>
+              )}
+              {storyPicker.data &&
+                (storyPicker.data.items.length < 2 ? (
+                  <EmptyState>
+                    <p>
+                      Fewer than two Stories, so there is no pair to merge. Clustering creates Stories from ingested
+                      reporting.
+                    </p>
+                  </EmptyState>
+                ) : (
+                  <form
+                    className="filter-register"
+                    aria-label="Merge two Stories"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      command(() => merge.mutate());
+                    }}
+                  >
+                    {/* The survivor first, in reading order: what is kept, then what
+                        is folded into it. Both lists are the same Stories — the
+                        server refuses the pair that names one Story twice, and the
+                        button does not offer it. */}
+                    <label className="filter-field">
+                      Surviving Story{" "}
+                      <select value={survivorStoryId} onChange={(e) => setSurvivorStoryId(e.target.value)}>
+                        <option value="">Choose…</option>
+                        {storyPicker.data.items.map((story) => (
+                          <option key={story.id} value={story.id}>
+                            {story.title}
+                          </option>
+                        ))}
+                      </select>
+                    </label>{" "}
+                    <label className="filter-field">
+                      Merged into it{" "}
+                      <select value={mergedStoryId} onChange={(e) => setMergedStoryId(e.target.value)}>
+                        <option value="">Choose…</option>
+                        {storyPicker.data.items.map((story) => (
+                          <option key={story.id} value={story.id}>
+                            {story.title}
+                          </option>
+                        ))}
+                      </select>
+                    </label>{" "}
+                    <div className="entry-action">
+                      <button
+                        type="submit"
+                        disabled={
+                          merge.isPending ||
+                          survivorStoryId === "" ||
+                          mergedStoryId === "" ||
+                          survivorStoryId === mergedStoryId
+                        }
+                      >
+                        {merge.isPending ? "Merging…" : "Merge"}
+                      </button>
+                    </div>
+                  </form>
                 ))}
             </DashboardRegister>
 

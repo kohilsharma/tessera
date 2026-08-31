@@ -474,3 +474,16 @@ export function decidePendingAssignment(
 ): Promise<DecidedAssignment> {
   return sendJson("PATCH", `/api/v1/clustering/pending/${articleId}`, { decision }, "Could not record this decision");
 }
+
+// #52: the merge. Unlike the run trigger this is not an enqueue — the Stories are
+// one Story by the time it answers, so what comes back is what it did.
+export type StoryMerge = { survivorStoryId: string; mergedStoryId: string; movedArticles: number };
+
+export function mergeStories(survivorStoryId: string, mergedStoryId: string): Promise<StoryMerge> {
+  return sendJson(
+    "POST",
+    "/api/v1/clustering/merges",
+    { survivorStoryId, mergedStoryId },
+    "Could not merge these Stories",
+  );
+}

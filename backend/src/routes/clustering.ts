@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AppDataSource } from "../data-source";
 import { enqueueClusteringRun } from "../clustering/queue";
+import { mergeStories, type StoryMergeRefusal } from "../clustering/merge";
 import { ASSIGNMENT_DECISIONS, decidePendingAssignment, type AssignmentDecision } from "../clustering/review";
 import { Article } from "../entities/Article";
 import { asyncHandler } from "../middleware/asyncHandler";
@@ -16,6 +17,13 @@ export const clusteringRouter = Router();
 // ADR-0004: operating the pipeline is an Admin capability — a Student or Investor
 // gets 403 on every route here, and an anonymous caller 401 (requireAuth).
 const adminOnly = [requireAuth, requireRole("admin")] as const;
+
+// What a refused merge (#52) tells the operator. `not_found` is not here: it is the
+// one refusal that is not a 422, and it is answered where the status is chosen.
+const MERGE_REFUSALS: Record<Exclude<StoryMergeRefusal, "not_found">, string> = {
+  same_story: "A Story cannot be merged into itself",
+  curated: "A Story in the Curated Corpus cannot be merged",
+};
 
 // The trigger enqueues and the worker executes, exactly as ingestion's does (#42):
 // the hourly scheduler feeds the same queue, so there is one execution path and
@@ -87,6 +95,46 @@ clusteringRouter.get(
         total,
       ),
     );
+  }),
+);
+
+// The merge (#52), and the one command on this surface that is not an enqueue: it
+// is a correction to two named rows an operator is looking at, so it is done in the
+// request and answered with what it did. Nothing about it is expensive — no model
+// call, no embedding, one transaction — so a queue would only make the console lie
+// about when the Stories became one.
+//
+// A collection POST rather than a PATCH on either Story: the survivor and the
+// emptied Story are both changed, and one of them stops existing.
+clusteringRouter.post(
+  "/clustering/merges",
+  ...adminOnly,
+  asyncHandler(async (req, res) => {
+    const { survivorStoryId, mergedStoryId } = (req.body ?? {}) as Record<string, unknown>;
+    if (!isUuid(survivorStoryId) || !isUuid(mergedStoryId)) {
+      res.status(422).json({ error: "survivorStoryId and mergedStoryId must both be Story ids" });
+      return;
+    }
+
+    const merged = await mergeStories(survivorStoryId, mergedStoryId);
+    if (merged.status === "merged") {
+      res.json({
+        survivorStoryId: merged.survivorStoryId,
+        mergedStoryId: merged.mergedStoryId,
+        movedArticles: merged.movedArticles,
+      });
+      return;
+    }
+    // Each refusal answers the question the operator actually asked. A missing Story
+    // is a 404 because the pair named does not exist to merge; the other two are
+    // refusals of a merge that does exist and would be wrong. A map rather than a
+    // ternary, and `Exclude` rather than `Partial` (as ANALYSIS_TEXT_MODE_RANK does):
+    // a fourth refusal reason fails to compile until it is given its own wording.
+    if (merged.reason === "not_found") {
+      res.status(404).json({ error: "Story not found" });
+      return;
+    }
+    res.status(422).json({ error: MERGE_REFUSALS[merged.reason] });
   }),
 );
 

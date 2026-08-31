@@ -122,7 +122,18 @@ decision; accepting makes the Article a member and recomputes the Story, rejecti
 Unclustered and remembers the pairing in `rejected_story_assignments` so no later run proposes
 it again. A run also voids any proposal whose vector enrichment has cleared, since a score
 describing replaced text is not a judgement anyone should be shown, and rescores the Article in
-the same pass. Story merge is #52; Phase 3.5 (graph/timeline) is not built yet.
+the same pass.
+**Story merge** (#52) is the correction the tight threshold makes necessary, and the one Admin
+command here that is not an enqueue: `POST /api/v1/clustering/merges {survivorStoryId,
+mergedStoryId}` (`src/clustering/merge.ts`) moves every Article to the survivor with its
+decision intact — a proposal stays a proposal, for the survivor now, rescored against the
+survivor's recomputed centroid (unscored where there is nothing to compare, since a run never
+rescores a proposal) — recomputes the survivor's
+centroid and span from the merged membership, and *deletes* the emptied row rather than
+tombstoning it, guarded by a leftover check because `articles."storyId"` cascades on delete. It
+refuses a self-merge, an unknown Story, and either side being in the Curated Corpus, which
+ADR-0026 closes in both directions. A Brief is untouched: evidence pins Articles, not Stories.
+Phase 3.5 (graph/timeline) is not built yet.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
 `/register`, `/account`), role dashboards (`/dashboard/:role`), browsing the corpus
@@ -143,7 +154,11 @@ the worker is what executes it, #42), and each publisher row shows its Terms
 Class beside its article count (#40). A fifth register carries **ClusteringRun** history with a
 Run-clustering command on the register itself (#49 — one pass over the whole corpus, so there is
 no row to hang it on), and a sixth is the **clustering review queue** (#50) — the one register
-with its own request, so it owns all four UI states, with Accept/Reject on each proposal row. The
+with its own request, so it owns all four UI states, with Accept/Reject on each proposal row. A
+seventh is **Story merge** (#52), the console's one command *form*: two selects over the 50 most
+recent Stories (its own request, refetched after a merge since one of the pair is gone), a Merge
+command refused client-side for a Story named twice, and a stated note reporting what the merge
+did rather than what it queued. The
 **design prototype** for the Phase-3 flagship (`src/versions/BureauPrototype.tsx` +
 `bureau.tsx` over hardcoded `src/data.ts`, styled by `src/styles.css`) sits at
 `/design-prototype`, out of the Phase-1 path.

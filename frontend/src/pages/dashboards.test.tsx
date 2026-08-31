@@ -95,15 +95,33 @@ describe("Admin dashboard", () => {
     ...overrides,
   });
 
-  // Two requests feed this console since #50 — the payload and the review queue —
-  // so the mock answers by URL and method rather than by call order, which is not
-  // something any of these tests mean to assert. `command` is what a mutation gets
-  // back; `pending` is null to leave the queue's own request hanging.
+  const storySummary = (id: string, title: string) => ({
+    id,
+    slug: title.toLowerCase().replace(/\W+/g, "-"),
+    title,
+    summary: null,
+    category: "business",
+    firstSeenAt: "2026-08-30T09:00:00.000Z",
+    lastSeenAt: "2026-08-31T09:00:00.000Z",
+    articleCount: 3,
+  });
+
+  // Three requests feed this console since #52 — the payload, the review queue, and
+  // the merge picker's Stories — so the mock answers by URL and method rather than by
+  // call order, which is not something any of these tests mean to assert. `command`
+  // is what a mutation gets back; `pending` is null to leave the queue's own request
+  // hanging.
   function mockConsole({
     payload = adminPayload(),
     pending = [] as Record<string, unknown>[] | null,
+    stories = [storySummary("s1", "Grid interconnector delayed"), storySummary("s2", "Interconnector timetable slips")],
     command = jsonResponse({ status: "accepted" }, 202),
-  }: { payload?: unknown; pending?: Record<string, unknown>[] | null; command?: Response } = {}) {
+  }: {
+    payload?: unknown;
+    pending?: Record<string, unknown>[] | null;
+    stories?: Record<string, unknown>[];
+    command?: Response;
+  } = {}) {
     vi.mocked(fetch).mockImplementation((input, init) => {
       const method = (init as RequestInit | undefined)?.method;
       if (method && method !== "GET") return Promise.resolve(command);
@@ -112,6 +130,7 @@ describe("Admin dashboard", () => {
           ? new Promise<Response>(() => {})
           : Promise.resolve(jsonResponse(listEnvelope(pending)));
       }
+      if (String(input).startsWith("/api/v1/stories")) return Promise.resolve(jsonResponse(listEnvelope(stories)));
       return Promise.resolve(jsonResponse(payload));
     });
   }
@@ -260,6 +279,7 @@ describe("Admin dashboard", () => {
       if (String(input).startsWith("/api/v1/clustering/pending")) {
         return Promise.resolve(jsonResponse(listEnvelope([])));
       }
+      if (String(input).startsWith("/api/v1/stories")) return Promise.resolve(jsonResponse(listEnvelope([])));
       return Promise.resolve(jsonResponse(adminPayload({ connectors })));
     });
 
@@ -368,13 +388,13 @@ describe("Admin dashboard", () => {
   });
 
   it("offers a retry when the review queue alone cannot be loaded", async () => {
-    vi.mocked(fetch).mockImplementation((input) =>
-      Promise.resolve(
-        String(input).startsWith("/api/v1/clustering/pending")
-          ? jsonResponse({ error: "Review queue unavailable" }, 500)
-          : jsonResponse(adminPayload()),
-      ),
-    );
+    vi.mocked(fetch).mockImplementation((input) => {
+      if (String(input).startsWith("/api/v1/clustering/pending")) {
+        return Promise.resolve(jsonResponse({ error: "Review queue unavailable" }, 500));
+      }
+      if (String(input).startsWith("/api/v1/stories")) return Promise.resolve(jsonResponse(listEnvelope([])));
+      return Promise.resolve(jsonResponse(adminPayload()));
+    });
 
     renderWithProviders(<AdminDashboard />);
 
@@ -443,6 +463,69 @@ describe("Admin dashboard", () => {
     const review = await screen.findByRole("region", { name: "Clustering review" });
     expect(within(review).getByRole("alert")).toHaveTextContent("Pending assignment not found");
     expect(screen.getByRole("region", { name: "Publishers" })).toBeInTheDocument();
+  });
+
+  // #52: the merge, the one command here that is not an enqueue — so unlike the run
+  // triggers it reports what it did, not what it queued.
+  it("merges the pair an operator chooses, naming the survivor first", async () => {
+    mockConsole({ command: jsonResponse({ survivorStoryId: "s1", mergedStoryId: "s2", movedArticles: 4 }) });
+
+    renderWithProviders(<AdminDashboard />);
+
+    const register = await screen.findByRole("region", { name: "Story merge" });
+    await userEvent.selectOptions(within(register).getByLabelText(/Surviving Story/), "s1");
+    await userEvent.selectOptions(within(register).getByLabelText(/Merged into it/), "s2");
+    await userEvent.click(within(register).getByRole("button", { name: "Merge" }));
+
+    expect(callTo("/api/v1/clustering/merges")?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({ survivorStoryId: "s1", mergedStoryId: "s2" }),
+    });
+    // What it did, stated where it was fired: the Stories are one Story already, so
+    // "queued" would be the wrong tense.
+    expect(within(register).getByRole("status")).toHaveTextContent(/4 Articles moved/);
+  });
+
+  it("does not offer a merge until two different Stories are named", async () => {
+    mockConsole();
+
+    renderWithProviders(<AdminDashboard />);
+
+    const register = await screen.findByRole("region", { name: "Story merge" });
+    const command = within(register).getByRole("button", { name: "Merge" });
+    expect(command).toBeDisabled();
+
+    // The same Story on both sides is the one pair the command must never send: it
+    // would delete the Story it was asked to keep.
+    await userEvent.selectOptions(within(register).getByLabelText(/Surviving Story/), "s1");
+    await userEvent.selectOptions(within(register).getByLabelText(/Merged into it/), "s1");
+    expect(command).toBeDisabled();
+
+    await userEvent.selectOptions(within(register).getByLabelText(/Merged into it/), "s2");
+    expect(command).toBeEnabled();
+  });
+
+  it("states a refused merge in its own register, and says when there is no pair to merge", async () => {
+    mockConsole({ command: jsonResponse({ error: "A Story in the Curated Corpus cannot be merged" }, 422) });
+
+    const { unmount } = renderWithProviders(<AdminDashboard />);
+
+    const register = await screen.findByRole("region", { name: "Story merge" });
+    await userEvent.selectOptions(within(register).getByLabelText(/Surviving Story/), "s1");
+    await userEvent.selectOptions(within(register).getByLabelText(/Merged into it/), "s2");
+    await userEvent.click(within(register).getByRole("button", { name: "Merge" }));
+
+    expect(within(register).getByRole("alert")).toHaveTextContent("Curated Corpus");
+    expect(screen.getByRole("region", { name: "Publishers" })).toBeInTheDocument();
+    unmount();
+
+    // And the empty state: one Story is not a pair, which is a different thing from
+    // a picker that would not load.
+    mockConsole({ stories: [storySummary("s1", "Grid interconnector delayed")] });
+    renderWithProviders(<AdminDashboard />);
+
+    const alone = await screen.findByRole("region", { name: "Story merge" });
+    expect(within(alone).getByText(/Fewer than two Stories/)).toBeInTheDocument();
   });
 });
 

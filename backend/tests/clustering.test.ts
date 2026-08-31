@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import bcrypt from "bcryptjs";
@@ -1348,6 +1349,225 @@ describe("the Admin review queue", () => {
       .send({ decision: "reject" });
     expect(again.status).toBe(404);
     expect(await AppDataSource.getRepository(RejectedStoryAssignment).count()).toBe(0);
+  });
+});
+
+// The other half of the Admin's clustering surface (#52): the correction a
+// deliberately tight threshold makes necessary. Not a proposal anyone made — an
+// operator has read both Stories and decided they are one event.
+describe("merging two Stories", () => {
+  async function seedMergeablePair() {
+    const first = await createPublisher("one.example");
+    const second = await createPublisher("two.example");
+    const survivor = await createStory({ title: "Refinery outage", lastSeenAt: hoursAgo(8) });
+    const merged = await createStory({ title: "Refinery fire", lastSeenAt: hoursAgo(3) });
+    // Two accepted members each, on two planes, so a centroid recomputed from the
+    // merged membership is a different number from either Story's own.
+    const kept = [
+      await createArticle({
+        publisherId: first.id,
+        title: "Outage cuts refinery output",
+        storyId: survivor.id,
+        vector: axisVector(0),
+        publishedAt: hoursAgo(10),
+      }),
+      await createArticle({
+        publisherId: second.id,
+        title: "Refining output down after outage",
+        storyId: survivor.id,
+        vector: axisVector(0),
+        publishedAt: hoursAgo(8),
+      }),
+    ];
+    const moved = [
+      await createArticle({
+        publisherId: first.id,
+        title: "Fire at the refinery",
+        storyId: merged.id,
+        vector: axisVector(1),
+        publishedAt: hoursAgo(6),
+      }),
+      await createArticle({
+        publisherId: second.id,
+        title: "Blaze halts refining",
+        storyId: merged.id,
+        vector: axisVector(1),
+        publishedAt: hoursAgo(3),
+      }),
+    ];
+    // A proposal on the Story being merged away: a decision nobody has made, which
+    // the merge must carry over rather than settle on an Admin's behalf.
+    const proposal = await createArticle({
+      publisherId: second.id,
+      title: "Fuel prices tick up",
+      storyId: merged.id,
+      assignmentStatus: "pending_review",
+      assignmentScore: 0.79,
+      vector: axisVector(5),
+      publishedAt: hoursAgo(1),
+    });
+    return { survivor, merged, kept, moved, proposal };
+  }
+
+  const merge = (token: string, body: Record<string, unknown>) =>
+    request(app()).post("/api/v1/clustering/merges").set("Authorization", `Bearer ${token}`).send(body);
+
+  it("moves every Article to the survivor, recomputes it, and deletes the emptied Story", async () => {
+    const { survivor, merged, kept, moved, proposal } = await seedMergeablePair();
+    const token = await createAdminToken("merge-operator@example.com");
+
+    const res = await merge(token, { survivorStoryId: survivor.id, mergedStoryId: merged.id });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ survivorStoryId: survivor.id, mergedStoryId: merged.id, movedArticles: 3 });
+
+    const articles = AppDataSource.getRepository(Article);
+    for (const article of [...moved, proposal]) {
+      expect((await articles.findOneByOrFail({ id: article.id })).storyId).toBe(survivor.id);
+    }
+    // Pending before, pending after: a merge is a correction to the Stories, not a
+    // decision about the Articles. Its score is rescored against the survivor, which
+    // the test below is about.
+    const held = await articles.findOneByOrFail({ id: proposal.id });
+    expect(held.storyAssignmentStatus).toBe("pending_review");
+
+    // ADR-0026's centroid over the merged membership: the mean of four accepted
+    // members, two on each plane. The proposal moved with the rest and counts for
+    // neither the mean nor the span (#50).
+    const centroid = await storyCentroid(survivor.id);
+    expect(centroid![0]).toBeCloseTo(0.5, 6);
+    expect(centroid![2]).toBeCloseTo(0.5, 6);
+    expect(centroid![10]).toBeCloseTo(0, 6);
+
+    const grown = await AppDataSource.getRepository(Story).findOneByOrFail({ id: survivor.id });
+    expect(grown.firstSeenAt.getTime()).toBe(kept[0].publishedAt.getTime());
+    expect(grown.lastSeenAt.getTime()).toBe(moved[1].publishedAt.getTime());
+
+    // Deleted, not tombstoned — and it took no Articles with it, though
+    // articles."storyId" cascades on delete.
+    expect(await AppDataSource.getRepository(Story).findOneBy({ id: merged.id })).toBeNull();
+    expect(await articles.count()).toBe(5);
+
+    // What a reader sees: one Story carrying both sets of reporting.
+    const reader = await registerAndLogin("merge-reader@example.com", "student");
+    const detail = await request(app())
+      .get(`/api/v1/stories/${survivor.id}`)
+      .set("Authorization", `Bearer ${reader}`);
+    expect(detail.status).toBe(200);
+    expect(detail.body.articleCount).toBe(4);
+  });
+
+  it("leaves a Brief citing a moved Article untouched", async () => {
+    const { survivor, merged, moved } = await seedMergeablePair();
+    const reader = await registerAndLogin("merge-brief-owner@example.com", "student");
+    const auth = { Authorization: `Bearer ${reader}` };
+    const brief = await request(app()).post("/api/v1/briefs").set(auth).send({
+      title: "Refinery exposure",
+      category: "business",
+    });
+    expect(brief.status).toBe(201);
+    expect(
+      (await request(app()).post(`/api/v1/briefs/${brief.body.id}/articles`).set(auth).send({ articleId: moved[0].id }))
+        .status,
+    ).toBe(201);
+
+    const token = await createAdminToken("merge-brief-operator@example.com");
+    expect((await merge(token, { survivorStoryId: survivor.id, mergedStoryId: merged.id })).status).toBe(200);
+
+    // Evidence is pinned to Articles, so the Story it was reached through changing
+    // underneath it must not disturb what a Brief cites.
+    const after = await request(app()).get(`/api/v1/briefs/${brief.body.id}`).set(auth);
+    expect(after.status).toBe(200);
+    expect(after.body.articles.map((article: { id: string }) => article.id)).toEqual([moved[0].id]);
+  });
+
+  it("rescores a moved proposal against the survivor, and unscores one it cannot score", async () => {
+    const { survivor, merged, proposal } = await seedMergeablePair();
+    // A proposal with no vector left: what enrichment leaves behind when it writes
+    // new text (ADR-0026).
+    const unscorable = await createArticle({
+      publisherId: proposal.publisherId,
+      title: "held on text since replaced",
+      storyId: merged.id,
+      assignmentStatus: "pending_review",
+      assignmentScore: 0.83,
+    });
+    await AppDataSource.query(`UPDATE "articles" SET "embedding" = NULL WHERE "id" = $1`, [unscorable.id]);
+    const token = await createAdminToken("merge-rescorer@example.com");
+
+    expect((await merge(token, { survivorStoryId: survivor.id, mergedStoryId: merged.id })).status).toBe(200);
+
+    // The queue states this number and sorts by it, so after the merge it has to
+    // describe the survivor: the proposal's vector is orthogonal to the survivor's
+    // recomputed centroid, so 0 — not the 0.79 measured against a Story that is gone.
+    const articles = AppDataSource.getRepository(Article);
+    expect((await articles.findOneByOrFail({ id: proposal.id })).storyAssignmentScore).toBeCloseTo(0, 6);
+    // Nothing to compare, so no number rather than a stale one. Still pending: a
+    // merge decides nothing about the Articles.
+    const held = await articles.findOneByOrFail({ id: unscorable.id });
+    expect(held.storyAssignmentScore).toBeNull();
+    expect(held.storyAssignmentStatus).toBe("pending_review");
+    expect(held.storyId).toBe(survivor.id);
+  });
+
+  it("refuses a merge that would not be a correction", async () => {
+    const { survivor, merged } = await seedMergeablePair();
+    const token = await createAdminToken("merge-refuser@example.com");
+
+    const itself = await merge(token, { survivorStoryId: survivor.id, mergedStoryId: survivor.id });
+    expect(itself.status).toBe(422);
+    expect(itself.body.error).toMatch(/itself/);
+
+    // A well-formed id for a Story that is not there is a 404; anything that is not
+    // a Story id at all never described one, so it is refused as a bad request.
+    expect((await merge(token, { survivorStoryId: survivor.id, mergedStoryId: randomUUID() })).status).toBe(404);
+    expect((await merge(token, { survivorStoryId: "not-a-uuid", mergedStoryId: merged.id })).status).toBe(422);
+    expect((await merge(token, {})).status).toBe(422);
+
+    // Refused five times, so both Stories and every Article are where they were.
+    expect(await AppDataSource.getRepository(Story).count()).toBe(2);
+    expect(await AppDataSource.getRepository(Article).countBy({ storyId: merged.id })).toBe(3);
+  });
+
+  it("refuses a merge into or out of the Curated Corpus", async () => {
+    const { survivor, merged } = await seedMergeablePair();
+    const fixtures = await createPublisher("fixture.example");
+    const curated = await createStory({ title: "Curated Story", lastSeenAt: hoursAgo(5) });
+    await createArticle({
+      publisherId: fixtures.id,
+      title: "seeded fixture piece",
+      mode: "manual_fixture",
+      storyId: curated.id,
+      vector: axisVector(2),
+    });
+    const token = await createAdminToken("merge-curated@example.com");
+
+    // ADR-0026 closes the Curated Corpus in both directions, and a merge by hand is
+    // still a move: neither into it nor out of it.
+    for (const body of [
+      { survivorStoryId: curated.id, mergedStoryId: merged.id },
+      { survivorStoryId: survivor.id, mergedStoryId: curated.id },
+    ]) {
+      const res = await merge(token, body);
+      expect(res.status).toBe(422);
+      expect(res.body.error).toMatch(/Curated Corpus/);
+    }
+
+    expect(await AppDataSource.getRepository(Story).count()).toBe(3);
+    expect(await AppDataSource.getRepository(Article).countBy({ storyId: curated.id })).toBe(1);
+  });
+
+  it("is Admin-only", async () => {
+    const { survivor, merged } = await seedMergeablePair();
+    const body = { survivorStoryId: survivor.id, mergedStoryId: merged.id };
+
+    expect((await request(app()).post("/api/v1/clustering/merges").send(body)).status).toBe(401);
+    for (const role of ["student", "investor"] as const) {
+      const token = await registerAndLogin(`merge-${role}@example.com`, role);
+      expect((await merge(token, body)).status).toBe(403);
+    }
+
+    expect(await AppDataSource.getRepository(Story).count()).toBe(2);
   });
 });
 

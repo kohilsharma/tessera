@@ -77,10 +77,22 @@ Terms are canonical: use these words in code, docs, and conversation.
   says the event is wrong, not that the reporting is unusable. _Avoid_: "blacklist", which
   suggests the Article itself is barred. (ADR-0026)
 
+- **Story merge** — An Admin folding one Story into another when a deliberately tight
+  threshold split one event in two. Every Article moves to the survivor with its decision
+  intact — a pending assignment stays pending, now proposed for the survivor, and is rescored
+  against the survivor's recomputed centroid (left *unscored* where there is nothing to
+  compare) so the review queue never states a score measured against a Story that is gone.
+  The survivor's centroid and its first/last-seen span are recomputed from the merged
+  membership, and the emptied Story row is *deleted*, not tombstoned. Refused in either
+  direction for a Story in the *Curated Corpus*, and refused for a Story merged into itself.
+  Split, move and mark-duplicate are deferred. _Avoid_: "deduplicate", which is what ingestion
+  does to Articles by canonical URL. (ADR-0026)
+
 - **Clustering Run** — One invocation of the clustering job, and the record of what it did:
   how many Articles it embedded, assigned, held for review and left unclustered, and how many
-  Stories it created or merged. The counterpart of an *IngestionRun*, and read from Postgres
-  for the same reason — the Admin view must render with the worker down. (ADR-0026)
+  Stories it created. The counterpart of an *IngestionRun*, and read from Postgres
+  for the same reason — the Admin view must render with the worker down. A *Story merge* is
+  not part of a run: it is an Admin command, recorded only in its effect. (ADR-0026)
 
 - **Curated Corpus** — The hand-authored fixture Stories and Articles: synthetic reporting
   from invented Publishers, guaranteed clean, multi-source and reproducible, and the
