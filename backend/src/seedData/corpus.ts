@@ -50,10 +50,8 @@ const SEED_RSS_FEEDS: { name: string; endpoint: string }[] = [
 ];
 
 export const SEED_CONNECTORS: SeedConnector[] = [
-  // #41 built the GKG connector, so the firehose is runnable and enabled. The DOC
-  // connector stays disabled until #46 exists: runConnector fails a run it has no
-  // implementation for, and an operator should not have to learn that by pressing
-  // the button.
+  // #41 built the GKG connector and #46 the DOC one, so all three of ADR-0018's
+  // surfaces are runnable and enabled.
   {
     name: "GDELT GKG firehose",
     kind: "gdelt_gkg",
@@ -63,10 +61,27 @@ export const SEED_CONNECTORS: SeedConnector[] = [
     enabled: true,
   },
   {
+    // #46: DOC answers a question rather than streaming a window, so the question
+    // is the connector — it lives in the endpoint's query string, where an Admin
+    // can change what Tessera searches for without a migration or a column.
+    //
+    // `sourcelang:english` because everything downstream (Postgres FTS, the
+    // embedding model, synthesis) is English. `sort=datedesc` so the 250-record cap
+    // GDELT enforces drops the *oldest* matches rather than an arbitrary slice.
+    // `timespan=1h` to match the tick rather than exceed it: at four times the
+    // 15-minute interval a missed tick still heals, while a day-wide window on a
+    // quarter-hourly tick would re-read the same newest 250 records every run and
+    // leave anything past 250 matches/day permanently unreachable. `mode`, `format`
+    // and `maxrecords` are not here: the connector sets them, because the parser
+    // reads one output shape and the truncation check only means anything at the
+    // maximum.
     name: "GDELT DOC API",
     kind: "gdelt_doc",
-    endpoint: "https://api.gdeltproject.org/api/v2/doc/doc",
-    enabled: false,
+    endpoint:
+      "https://api.gdeltproject.org/api/v2/doc/doc" +
+      "?query=%28%22artificial%20intelligence%22%20OR%20semiconductor%29%20sourcelang%3Aenglish" +
+      "&sort=datedesc&timespan=1h",
+    enabled: true,
   },
   ...SEED_RSS_FEEDS.map(({ name, endpoint }): SeedConnector => ({ name, kind: "rss", endpoint, enabled: true })),
 ];

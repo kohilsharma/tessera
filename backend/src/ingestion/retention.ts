@@ -4,15 +4,22 @@ import type { ConnectorKind } from "../entities/IngestionConnector";
 
 // #45. The GKG firehose is unbounded — one window every 15 minutes, forever, at
 // ~656 rows and ~68 annotation occurrences each — so what it leaves behind ages
-// out on a rolling window and disk use has a ceiling.
+// out on a rolling window and disk use has a ceiling. #46 put the DOC API on the
+// same footing: it produces the same text-free metadata rows, up to 250 of them
+// per run, on the same 15-minute tick.
 //
 // Bounded on when the row was *stored*, not on `publishedAt`: the ceiling is on
 // ingest volume, which is what actually consumes disk, and a document GDELT
 // reports with an old timestamp would otherwise be inserted, pruned, and inserted
 // again by the next window that carries it.
-export const GKG_RETENTION_DAYS = 7;
+export const GDELT_RETENTION_DAYS = 7;
 
-// Deliberately narrow: only rows a GKG connector discovered *and* that nothing has
+// The GDELT-sourced kinds, named rather than inferred: RSS reporting arrives with
+// an excerpt and is never firehose metadata, so it is out of scope by kind as well
+// as by text mode.
+const EXPIRING_KINDS: ConnectorKind[] = ["gdelt_gkg", "gdelt_doc"];
+
+// Deliberately narrow: only rows a GDELT connector discovered *and* that nothing has
 // since enriched with text. ADR-0024's ladder makes that second half one column —
 // anything above `metadata_only` is reporting Tessera acquired rather than
 // firehose metadata, so a GKG row an RSS feed later gave an excerpt to outlives
@@ -26,8 +33,8 @@ export const GKG_RETENTION_DAYS = 7;
 // once and holds the locks while it does. Deleting in batches, or by
 // `createdAt`-ordered slices, is the upgrade if a pass ever takes long enough to
 // notice; each subsequent tick only ever covers a window's worth of rows.
-export async function pruneExpiredGkgArticles(): Promise<number> {
-  const cutoff = new Date(Date.now() - GKG_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+export async function pruneExpiredGdeltArticles(): Promise<number> {
+  const cutoff = new Date(Date.now() - GDELT_RETENTION_DAYS * 24 * 60 * 60 * 1000);
   const pruned = await AppDataSource.getRepository(Article)
     .createQueryBuilder()
     .delete()
@@ -36,10 +43,10 @@ export async function pruneExpiredGkgArticles(): Promise<number> {
       mode: "metadata_only" satisfies AnalysisTextMode,
     })
     // A seeded fixture Article has no discovering connector at all (ADR-0007), so
-    // `IN` excludes the curated corpus without a clause of its own. The kind is
-    // bound rather than inlined so tsc still checks it against the union.
-    .andWhere(`"discoveredByConnectorId" IN (SELECT id FROM ingestion_connectors WHERE kind = :kind)`, {
-      kind: "gdelt_gkg" satisfies ConnectorKind,
+    // `IN` excludes the curated corpus without a clause of its own. The kinds are
+    // bound rather than inlined so tsc still checks them against the union.
+    .andWhere(`"discoveredByConnectorId" IN (SELECT id FROM ingestion_connectors WHERE kind IN (:...kinds))`, {
+      kinds: EXPIRING_KINDS,
     })
     // Both references below are ON DELETE CASCADE and this runs unattended every
     // 15 minutes, so without these two clauses retention would one day silently

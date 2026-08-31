@@ -19,11 +19,19 @@ import { Story } from "../src/entities/Story";
 import { User } from "../src/entities/User";
 import { signToken } from "../src/auth/jwt";
 import { canonicalizeUrl, publisherDomain } from "../src/ingestion/canonicalUrl";
+import { DOC_MAX_RECORDS } from "../src/ingestion/doc";
 import { parseGkgCsv } from "../src/ingestion/gkg";
 import { runIngestionJob } from "../src/ingestion/jobs";
 import { RUN_JOB, TICK_JOB } from "../src/ingestion/queue";
-import { GKG_RETENTION_DAYS, pruneExpiredGkgArticles } from "../src/ingestion/retention";
-import { runConnector, type FetchText, type RunConnectorDeps } from "../src/ingestion/runConnector";
+import { GDELT_RETENTION_DAYS, pruneExpiredGdeltArticles } from "../src/ingestion/retention";
+import {
+  DOC_MIN_INTERVAL_MS,
+  runConnector,
+  spaceDocRequest,
+  type FetchText,
+  type RunConnectorDeps,
+} from "../src/ingestion/runConnector";
+import { SEED_CONNECTORS } from "../src/seedData/corpus";
 import { setupTestDb } from "./setupTestDb";
 
 // #42: Redis is deliberately not in the test stack — the suite needs only the
@@ -65,6 +73,23 @@ const gkgFixture = (name: string): RunConnectorDeps => ({
 
 const failingFetch: FetchText = () => Promise.reject(new Error("getaddrinfo ENOTFOUND feed.invalid"));
 
+// #46. The DOC API's own artlist responses, captured live on 2026-08-31: a
+// five-record one and a full 250-record one. Both are read through `fetchDoc`
+// rather than `fetchText`, because the DOC API demands its own caller identity and
+// pacing — and passing a fetcher that refuses to be called is how each DOC test
+// also proves the connector never reaches for the feed one.
+const unusedFetch: FetchText = () =>
+  Promise.reject(new Error("the DOC connector must not use the feed fetcher"));
+
+const docFixture = (name: string): RunConnectorDeps => ({
+  fetchText: unusedFetch,
+  fetchDoc: () => readFile(join(__dirname, "fixtures", "doc", name), "utf-8"),
+});
+
+// The seeded connector's own endpoint, so what these tests drive and what the demo
+// configures cannot drift.
+const DOC_ENDPOINT = SEED_CONNECTORS.find((connector) => connector.kind === "gdelt_doc")!.endpoint;
+
 let nextConnector = 0;
 
 async function createRssConnector(endpoint: string, enabled = true): Promise<IngestionConnector> {
@@ -83,6 +108,16 @@ async function createGkgConnector(): Promise<IngestionConnector> {
     name: `Test GKG ${nextConnector}`,
     kind: "gdelt_gkg",
     endpoint: "http://data.gdeltproject.org/gdeltv2/lastupdate.txt",
+    enabled: true,
+  });
+}
+
+async function createDocConnector(endpoint = DOC_ENDPOINT): Promise<IngestionConnector> {
+  nextConnector += 1;
+  return AppDataSource.getRepository(IngestionConnector).save({
+    name: `Test DOC ${nextConnector}`,
+    kind: "gdelt_doc",
+    endpoint,
     enabled: true,
   });
 }
@@ -497,20 +532,6 @@ describe("runConnector over an RSS feed", () => {
     expect(run).toBeNull();
     expect(await AppDataSource.getRepository(IngestionRun).countBy({ connectorId: connector.id })).toBe(0);
     expect(await AppDataSource.getRepository(Article).countBy({ discoveredByConnectorId: connector.id })).toBe(0);
-  });
-
-  it("fails a run for a connector kind that has no implementation yet", async () => {
-    const connector = await AppDataSource.getRepository(IngestionConnector).save({
-      name: "DOC not yet built",
-      kind: "gdelt_doc",
-      endpoint: "https://api.gdeltproject.org/api/v2/doc/doc",
-      enabled: true,
-    });
-
-    const run = await runConnector(connector, { fetchText: failingFetch });
-
-    expect(run!.status).toBe("failed");
-    expect(run!.errorSummary).toContain("gdelt_doc");
   });
 });
 
@@ -1153,16 +1174,206 @@ describe("runConnector over a GKG window", () => {
   });
 });
 
+// #46. ADR-0018's third surface, and the one that is mostly a parser over machinery
+// that already exists: the same run function, the same canonical-URL identity, the
+// same dedup and the same enrichment path. What is genuinely new is the request
+// (a query the operator owns, a cap GDELT enforces) and the response shape.
+//
+// The reconcile path is connector-agnostic, so DOC's behaviour when it meets another
+// connector's Article is what #44 already drives end to end; what is asserted here
+// is everything either side of it.
+describe("runConnector over the GDELT DOC API", () => {
+  beforeEach(async () => {
+    await AppDataSource.query(`TRUNCATE "articles", "publishers", "ingestion_runs" CASCADE`);
+  });
+
+  it("refuses an endpoint with no query rather than asking GDELT for everything", async () => {
+    const connector = await createDocConnector("https://api.gdeltproject.org/api/v2/doc/doc?timespan=1d");
+
+    const run = await runConnector(connector, docFixture("artlist.json"));
+
+    expect(run!.status).toBe("failed");
+    expect(run!.errorSummary).toMatch(/carries no "query" parameter/);
+    expect(run!.discovered).toBe(0);
+  });
+
+  it("lands real DOC results as text-free Unclustered Articles, deduplicating within the response", async () => {
+    const connector = await createDocConnector();
+
+    const run = await runConnector(connector, docFixture("artlist.json"));
+
+    expect(run!.status).toBe("succeeded");
+    expect(run!.discovered).toBe(5);
+    // The captured response really does carry the same Motley Fool article twice —
+    // once bare, once with a `?source=` referrer tag that survives canonicalization
+    // — so the second copy is caught by title + publisher + day, not by URL.
+    expect(run!.inserted).toBe(4);
+    expect(run!.duplicate).toBe(1);
+    expect(run!.failed).toBe(0);
+    expect(countersSumToDiscovered(run!)).toBe(true);
+    // DOC has nothing resumable to hold: the cap truncates a result set that is
+    // re-ranked on every request.
+    expect(run!.cursor).toBeNull();
+    expect(run!.errorSummary).toBeNull();
+
+    const articles = await AppDataSource.getRepository(Article).find({
+      where: { discoveredByConnectorId: connector.id },
+      relations: { publisher: true },
+    });
+    expect(articles).toHaveLength(4);
+    for (const article of articles) {
+      expect(article.storyId).toBeNull();
+      // ADR-0024: an artlist record carries no body and no snippet, so a DOC row
+      // sits on the same weakest rung as a GKG row, with the absence held as null.
+      expect(article.analysisTextMode).toBe("metadata_only");
+      expect(article.analysisText).toBeNull();
+      // Tone is GKG's alone.
+      expect(article.tone).toBeNull();
+      expect(article.publisher.termsClass).toBe("internal_only");
+      // DOC names no publisher beyond the host, so the domain names it.
+      expect(article.publisher.name).toBe(article.publisher.domain);
+    }
+    // The same headline at a second publisher is syndication, not duplication —
+    // ADR-0024 leaves it as two legitimate sources.
+    expect(articles.map((article) => article.publisher.domain).sort()).toEqual([
+      "aol.com",
+      "arynews.tv",
+      "finance.yahoo.com",
+      "fool.com",
+    ]);
+    // GDELT tokenizes titles, so this spacing is the real surface form. Only the
+    // whitespace tokenization left behind is collapsed; guessing which spaces were
+    // not in the headline would be guessing.
+    expect(articles.map((article) => article.title)).toContain(
+      "Not Nvidia . Not AMD . This Semiconductor Giant Will Be the Ultimate Winner of the " +
+        "Artificial Intelligence ( AI ) Hardware Race .",
+    );
+    // `seendate` is when GDELT saw the document — DOC reports no publication time
+    // of its own, and inventing one would be a claim the timeline (ADR-0020) then
+    // orders by.
+    const pakistan = articles.find((article) => article.publisher.domain === "arynews.tv");
+    expect(pakistan!.publishedAt.toISOString()).toBe("2026-08-29T16:00:00.000Z");
+  });
+
+  it("counts a second connector's DOC sighting as a duplicate, since it can contribute nothing", async () => {
+    const first = await createDocConnector();
+    const second = await createDocConnector();
+
+    expect((await runConnector(first, docFixture("artlist.json")))!.inserted).toBe(4);
+    const run = await runConnector(second, docFixture("artlist.json"));
+
+    // DOC is the only connector whose sighting carries no text, no tone, no
+    // annotations and no publisher name — the shape ADR-0024's enrichment rule has
+    // to decline. `metadata_only` is the weakest rung, so it can never raise
+    // another connector's Article, and an enrichment count that ticked here would
+    // tell an operator nothing (CONTEXT.md "Enrichment").
+    expect(run!.status).toBe("succeeded");
+    expect(run!.inserted).toBe(0);
+    expect(run!.enriched).toBe(0);
+    expect(run!.duplicate).toBe(5);
+    expect(countersSumToDiscovered(run!)).toBe(true);
+    // One document, one Article, whichever connector saw it.
+    expect(await AppDataSource.getRepository(Article).count()).toBe(4);
+    expect(await AppDataSource.getRepository(Article).countBy({ discoveredByConnectorId: second.id })).toBe(0);
+  });
+
+  it("states that a full result set is truncated rather than reporting it as complete", async () => {
+    const connector = await createDocConnector();
+
+    const run = await runConnector(connector, docFixture("artlist-capped.json"));
+
+    expect(run!.status).toBe("succeeded");
+    expect(run!.discovered).toBe(DOC_MAX_RECORDS);
+    expect(countersSumToDiscovered(run!)).toBe(true);
+    // GDELT offers no paging cursor past the cap, so the only honest thing a run
+    // can do about the matches it did not receive is say they exist.
+    expect(run!.errorSummary).toMatch(/250-record cap/);
+    expect(run!.errorSummary).toMatch(/truncated/);
+    expect(run!.inserted).toBeGreaterThan(0);
+  });
+
+  it("fails the run with a readable summary when the API answers with something other than JSON", async () => {
+    const connector = await createDocConnector();
+
+    // ADR-0018's warning, as it actually arrives: a caller the DOC API has decided
+    // to block gets a 200 and a page, not a status code.
+    const run = await runConnector(connector, {
+      fetchText: unusedFetch,
+      fetchDoc: async () => "<html><head><title>429 Too Many Requests</title></head><body>Rate limited.</body></html>",
+    });
+
+    expect(run!.status).toBe("failed");
+    expect(run!.errorSummary).toMatch(/non-JSON body/);
+    expect(run!.errorSummary).toMatch(/429 Too Many Requests/);
+    expect(run!.discovered).toBe(0);
+    expect(await AppDataSource.getRepository(Article).count()).toBe(0);
+  });
+
+  it("fails the run gracefully when the API drops the connection instead of answering", async () => {
+    const connector = await createDocConnector();
+
+    // The other half of being blocked, measured against the live endpoint: the TLS
+    // connection is closed mid-handshake, so there is no body and no status at all.
+    const run = await runConnector(connector, {
+      fetchText: unusedFetch,
+      fetchDoc: () => Promise.reject(new Error("write EPROTO ... SSL routines::unexpected eof while reading")),
+    });
+
+    expect(run!.status).toBe("failed");
+    expect(run!.errorSummary).toMatch(/unexpected eof/);
+    expect(run!.completedAt).not.toBeNull();
+  });
+
+  it("treats an empty result set as a run that discovered nothing", async () => {
+    const connector = await createDocConnector();
+
+    // A well-formed response carrying no records is not a fault.
+    const run = await runConnector(connector, {
+      fetchText: unusedFetch,
+      fetchDoc: async () => `{"articles": []}`,
+    });
+
+    expect(run!.status).toBe("succeeded");
+    expect(run!.discovered).toBe(0);
+    expect(run!.errorSummary).toBeNull();
+  });
+
+  // ADR-0018: the DOC API blocks a caller that asks too often, and one run is one
+  // request — so the pacing has to live between runs, which is what this holds.
+  it("spaces consecutive DOC requests by the interval ADR-0018 asks for", async () => {
+    vi.useFakeTimers();
+    try {
+      // Clear whatever spacing an earlier call left claimed, so the assertion is
+      // about the gap this test creates.
+      await vi.advanceTimersByTimeAsync(DOC_MIN_INTERVAL_MS);
+      await spaceDocRequest();
+
+      let released = false;
+      const second = spaceDocRequest().then(() => {
+        released = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(DOC_MIN_INTERVAL_MS - 1);
+      expect(released).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await second;
+      expect(released).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 // #45. The firehose is unbounded, so what it leaves behind ages out on a rolling
-// window and disk use has a ceiling. Narrow by design: only rows a GKG connector
+// window and disk use has a ceiling. Narrow by design: only rows a GDELT connector
 // discovered that nothing has since enriched with text.
-describe("GKG retention", () => {
+describe("GDELT retention", () => {
   const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000);
   // A minute either side of the boundary, so the assertion is about the boundary
   // and not about how long the test took to run.
   const MINUTE = 60 * 1000;
-  const expired = () => new Date(daysAgo(GKG_RETENTION_DAYS).getTime() - MINUTE);
-  const inside = () => new Date(daysAgo(GKG_RETENTION_DAYS).getTime() + MINUTE);
+  const expired = () => new Date(daysAgo(GDELT_RETENTION_DAYS).getTime() - MINUTE);
+  const inside = () => new Date(daysAgo(GDELT_RETENTION_DAYS).getTime() + MINUTE);
 
   beforeEach(async () => {
     await AppDataSource.query(`TRUNCATE "articles", "publishers", "ingestion_runs" CASCADE`);
@@ -1211,10 +1422,24 @@ describe("GKG retention", () => {
       locationDetail: null,
     });
 
-    expect(await pruneExpiredGkgArticles()).toBe(1);
+    expect(await pruneExpiredGdeltArticles()).toBe(1);
 
     expect(await heldIds()).toEqual([fresh.id]);
     expect(await AppDataSource.getRepository(GkgAnnotation).countBy({ articleId: aged.id })).toBe(0);
+  });
+
+  // #46: the DOC API produces the same text-free metadata rows the firehose does —
+  // up to 250 per run, on the same 15-minute tick — so it ages out on the same
+  // terms. Without this the connector added in #46 would be an unbounded producer
+  // with no expiry at all.
+  it("removes expired DOC rows on the same terms as firehose rows", async () => {
+    const connector = await createDocConnector();
+    await stored(connector, expired());
+    const fresh = await stored(connector, inside());
+
+    expect(await pruneExpiredGdeltArticles()).toBe(1);
+
+    expect(await heldIds()).toEqual([fresh.id]);
   });
 
   // The horizon is when the row was stored, not what it reports on: GDELT carries
@@ -1225,7 +1450,7 @@ describe("GKG retention", () => {
     const old = await stored(connector, inside());
     await AppDataSource.getRepository(Article).update({ id: old.id }, { publishedAt: daysAgo(400) });
 
-    expect(await pruneExpiredGkgArticles()).toBe(0);
+    expect(await pruneExpiredGdeltArticles()).toBe(0);
 
     expect(await heldIds()).toEqual([old.id]);
   });
@@ -1241,7 +1466,7 @@ describe("GKG retention", () => {
     // Seeded fixtures were discovered by nothing at all (ADR-0007).
     const seeded = await stored(null, daysAgo(90), "manual_fixture");
 
-    expect(await pruneExpiredGkgArticles()).toBe(0);
+    expect(await pruneExpiredGdeltArticles()).toBe(0);
 
     expect((await heldIds()).sort()).toEqual([feedDiscovered.id, enriched.id, seeded.id].sort());
   });
@@ -1275,7 +1500,7 @@ describe("GKG retention", () => {
       cited.id,
     ]);
 
-    expect(await pruneExpiredGkgArticles()).toBe(0);
+    expect(await pruneExpiredGdeltArticles()).toBe(0);
 
     expect((await heldIds()).sort()).toEqual([clustered.id, cited.id].sort());
   });

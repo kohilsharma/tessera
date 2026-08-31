@@ -68,10 +68,14 @@ describe("npm run seed", () => {
     const connectors = await AppDataSource.getRepository(IngestionConnector).find();
     expect(connectors.length).toBeGreaterThan(0);
     expect(connectors.map((c) => c.kind)).toContain("gdelt_gkg");
-    // #41 built the GKG connector, so the firehose is enabled and an Admin's Run
-    // button on that row does something. DOC stays off until #46 implements it.
+    // #41 built the GKG connector and #46 the DOC one, so both are enabled and an
+    // Admin's Run button on either row does something.
     expect(connectors.find((connector) => connector.kind === "gdelt_gkg")!.enabled).toBe(true);
-    expect(connectors.find((connector) => connector.kind === "gdelt_doc")!.enabled).toBe(false);
+    const doc = connectors.find((connector) => connector.kind === "gdelt_doc")!;
+    expect(doc.enabled).toBe(true);
+    // #46: DOC answers a question, so the question is the connector — a DOC
+    // endpoint with no query is one no run can succeed against.
+    expect(new URL(doc.endpoint).searchParams.get("query")).toBeTruthy();
 
     // #39: the curated RSS list is what ingestion actually runs, so it has to be
     // real feeds — the placeholder it replaced pointed at a domain that cannot
@@ -131,5 +135,30 @@ describe("npm run seed", () => {
 
     const backfilled = await repo.findOneOrFail({ where: { title: SEED_BRIEF_TITLE } });
     expect(backfilled.coverImageKey).toMatch(/\.png$/);
+  });
+
+  // #46: a database seeded before the DOC connector had a query would hold an
+  // endpoint no run can succeed against, and there is no API for editing one.
+  // `enabled` deliberately does not converge — an Admin who turned a connector off
+  // must not have a re-seed turn it back on.
+  it("converges a stale connector endpoint without overriding an Admin's enabled flag", async () => {
+    const repo = AppDataSource.getRepository(IngestionConnector);
+    const seeded = SEED_CONNECTORS.find((connector) => connector.kind === "gdelt_doc")!;
+    // Restored either way: a failure here must not leave the connector disabled for
+    // whatever test runs next.
+    try {
+      await repo.update(
+        { name: seeded.name },
+        { endpoint: "https://api.gdeltproject.org/api/v2/doc/doc", enabled: false },
+      );
+
+      await seedAll();
+
+      const converged = await repo.findOneByOrFail({ name: seeded.name });
+      expect(converged.endpoint).toBe(seeded.endpoint);
+      expect(converged.enabled).toBe(false);
+    } finally {
+      await repo.update({ name: seeded.name }, { enabled: seeded.enabled });
+    }
   });
 });

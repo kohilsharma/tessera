@@ -35,8 +35,8 @@ The **GKG connector** (#41) is in: a run resolves the current 15-minute window f
 `lastupdate.txt`, downloads and unzips it, and parses the 27 tab-separated fields
 (`src/ingestion/gkg.ts`), dropping GCAM at parse time. Its rows land on the ladder's weakest
 rung — `metadata_only`, with genuinely null `analysisText`, since GKG carries no body and no
-snippet — and keep GDELT's average tone in `articles.tone` for the Phase-3.5 timeline. The GKG
-firehose connector is enabled in the seed; DOC is still off.
+snippet — and keep GDELT's average tone in `articles.tone` for the Phase-3.5 timeline. All three
+of ADR-0018's surfaces are enabled in the seed.
 The **worker** (#42) closes the loop: `src/worker.ts` is its own process (natively, not in
 Compose — ADR-0015) draining a BullMQ `ingestion` queue, with a repeatable tick on the
 quarter hour that enqueues one run per enabled connector. The Admin trigger enqueues onto
@@ -50,9 +50,10 @@ back the last window it *finished* off its own succeeded runs, names the windows
 then arithmetically off the 15-minute grid (`masterfilelist.txt` is never requested), and reads
 them oldest-first before going live — capped at 8 missed windows, past which the gap is skipped
 rather than backfilled and the skip is stated in the run's `errorSummary`. The same tick prunes:
-GKG-derived Articles stored more than 7 days ago are deleted, taking their Annotations with
-them, and only while they are still `metadata_only`, unclustered and uncited — so RSS reporting,
-enriched text and the curated corpus never age out (`src/ingestion/retention.ts`).
+GDELT-derived Articles (GKG or DOC) stored more than 7 days ago are deleted, taking their
+Annotations with them, and only while they are still `metadata_only`, unclustered and uncited —
+so RSS reporting, enriched text and the curated corpus never age out
+(`src/ingestion/retention.ts`).
 **GKG Annotation staging** (#43) is in: the parser also reads GDELT's four enhanced fields
 (persons, organizations, themes, locations) into surface-name occurrences, and a run stages
 them per Article in one `gkg_annotations` table (kind + surface name + character offset, plus
@@ -67,7 +68,19 @@ is counted as `enriched` — its own outcome beside inserted, duplicate, rejecte
 failed, which sum to `discovered` (asserted for every run the suite persists) and are all on the
 Admin console. Both arrival orderings — GKG then RSS, RSS then GKG — are driven end to end
 against the committed GKG window, with each connector's real pipeline enriching the other's row.
-The DOC connector and Phase 3.5 (graph/timeline) are not built yet.
+The **DOC connector** (#46) closes ADR-0018's third surface and is mostly a parser
+(`src/ingestion/doc.ts`) over machinery that already existed — the same `runConnector`, the same
+canonical-URL identity, the same dedup and enrichment. What is new: the query lives in the
+connector's `endpoint` query string (a seed constant an Admin cannot yet PATCH — only `enabled`
+is API-editable) while the connector forces `mode=artlist&format=json&maxrecords=250`; the API
+gets a
+browser-like User-Agent and a 5-second floor between requests, because it blocks a caller that
+looks like a bot or asks too often (measured: it drops the TLS connection rather than answering);
+a full 250-record response is stated as **truncated** on the run rather than reported as
+complete; and artlist carries no body or snippet at all, so DOC rows land on the same
+`metadata_only` rung as GKG's and are pruned by the same retention pass (now
+`pruneExpiredGdeltArticles`, covering both GDELT kinds). Phase 3.5 (graph/timeline) is not built
+yet.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
 `/register`, `/account`), role dashboards (`/dashboard/:role`), browsing the corpus
@@ -232,14 +245,16 @@ npm run build     # tsc -> dist/
 npm run migrate   # apply TypeORM migrations
 npm run seed      # demo users for all three roles (only path to an Admin, ADR-0015) + the
                   # Story/Article/Publisher corpus + one owned Brief with a cover image +
-                  # 10 curated real RSS connectors + the enabled GKG firehose (#39, #41);
+                  # 10 curated real RSS connectors + the enabled GKG firehose (#39, #41) +
+                  # the enabled DOC API connector carrying its query (#46);
                   # embedded with the hosted provider
                   # when GEMINI_API_KEY is set, else the Mock (ADR-0023 — switching providers
                   # needs a fresh volume, see SETUP.md)
 npm test          # vitest; spins up an ephemeral Postgres via Testcontainers, needs docker access
                   # No Redis in the test stack: the enqueue is stubbed (#42)
-                  # GDELT_LIVE_SMOKE=1 additionally runs the one live GKG check (#41),
-                  # skipped by default so the suite stays offline
+                  # GDELT_LIVE_SMOKE=1 additionally runs the two live GDELT checks — the GKG
+                  # window (#41) and the DOC query (#46) — skipped by default so the suite
+                  # stays offline
 ```
 
 No lint script exists yet. Do not claim it passes until implemented.

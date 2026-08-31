@@ -7,6 +7,7 @@ import { IngestionRun } from "../entities/IngestionRun";
 import { GkgAnnotation } from "../entities/GkgAnnotation";
 import { Publisher, mayServeText, mayStoreText } from "../entities/Publisher";
 import { canonicalizeUrl, normalizeTitle, publisherDomain } from "./canonicalUrl";
+import { DOC_MAX_RECORDS, docRequestUrl, parseDocArtList } from "./doc";
 import {
   MAX_CATCH_UP_WINDOWS,
   gkgWindowUrl,
@@ -33,8 +34,10 @@ export type FetchBytes = (url: string) => Promise<Uint8Array>;
 
 // `fetchBytes` is optional so the RSS path — which has no use for it — keeps a
 // one-key deps object; the GKG path falls back to the real fetcher, and its tests
-// always inject.
-export type RunConnectorDeps = { fetchText: FetchText; fetchBytes?: FetchBytes };
+// always inject. `fetchDoc` is separate from `fetchText` rather than a flag on it
+// because the DOC API demands a different caller identity and its own pacing (see
+// httpFetchDocText).
+export type RunConnectorDeps = { fetchText: FetchText; fetchBytes?: FetchBytes; fetchDoc?: FetchText };
 
 const FETCH_TIMEOUT_MS = 15_000;
 // A GKG window is ~3 MB compressed, so it gets a download-shaped timeout rather
@@ -65,6 +68,42 @@ export async function httpFetchBytes(url: string): Promise<Uint8Array> {
   });
   if (!res.ok) throw new Error(`${url} responded ${res.status}`);
   return new Uint8Array(await res.arrayBuffer());
+}
+
+// ADR-0018 warns that the DOC API blocks a caller that identifies itself as a bot
+// or asks too often, and it does: measured 2026-08-31, consecutive requests get the
+// TLS connection dropped rather than a status code. So it gets a browser-like
+// User-Agent — the courtesy USER_AGENT above is what this endpoint refuses — and a
+// floor on the interval between requests.
+const DOC_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+export const DOC_MIN_INTERVAL_MS = 5_000;
+
+// ponytail: the spacing is held in a module variable, so it paces this process
+// only. That holds today — the worker is a single process at concurrency 1
+// (ADR-0015, #42) and nothing else fetches DOC — and the upgrade path if the worker
+// is ever scaled out is a Redis-held timestamp, since Redis is already a
+// dependency.
+let docReadyAt = 0;
+
+export async function spaceDocRequest(): Promise<void> {
+  const now = Date.now();
+  const waitMs = Math.max(0, docReadyAt - now);
+  // The slot is claimed before awaiting, so two callers in the same tick queue
+  // behind each other instead of both reading the same free slot.
+  docReadyAt = Math.max(now, docReadyAt) + DOC_MIN_INTERVAL_MS;
+  if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+}
+
+export async function httpFetchDocText(url: string): Promise<string> {
+  await spaceDocRequest();
+  const res = await fetch(url, {
+    headers: { "User-Agent": DOC_USER_AGENT, Accept: "application/json, */*" },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    redirect: "follow",
+  });
+  if (!res.ok) throw new Error(`${url} responded ${res.status}`);
+  return res.text();
 }
 
 // The five terminal outcomes for one discovered item. Every item ends in exactly
@@ -433,11 +472,55 @@ async function discoverGkg(connector: IngestionConnector, deps: RunConnectorDeps
   return { items, cursor, notes: [...notes, ...failures] };
 }
 
+// #46. ADR-0018's third surface: on-demand keyword and `theme:` search, one request
+// per run. ADR-0024 puts its rows on the same weakest rung as GKG's — the artlist
+// response carries no body and no snippet — so what DOC actually contributes is
+// *reach*: documents inside GDELT's last ~3 months that no curated feed carries and
+// no 15-minute window Tessera happened to be running for.
+//
+// No cursor. DOC has nothing resumable to hold: the record cap truncates from one
+// end of a result set that is re-ranked on every request, so a stamp taken from it
+// would name a position no later request can be resumed at. `discovered` and the
+// truncation note below are what an operator reads instead.
+async function discoverDoc(connector: IngestionConnector, deps: RunConnectorDeps): Promise<Discovery> {
+  const fetchDoc = deps.fetchDoc ?? httpFetchDocText;
+  const articles = parseDocArtList(await fetchDoc(docRequestUrl(connector.endpoint)));
+  return {
+    cursor: null,
+    // The cap is GDELT's and there is no paging past it, so a full response means
+    // matches were dropped and the run has to say so — a truncated result set
+    // silently reported as a complete one is a claim about coverage we cannot
+    // support.
+    notes:
+      articles.length >= DOC_MAX_RECORDS
+        ? [
+            `hit the ${DOC_MAX_RECORDS}-record cap: this result set is truncated, not the full ` +
+              `match set for the query — narrow the query or shorten its timespan`,
+          ]
+        : [],
+    items: articles.map((article) => ({
+      title: article.title,
+      link: article.url,
+      publishedAt: article.seenAt,
+      // ADR-0024: null rather than the title, which is the lie the rung prevents.
+      text: null,
+      mode: "metadata_only" as const,
+      // Tone is GKG's; DOC reports none.
+      tone: null,
+      // DOC names no publisher beyond the host, which the canonical URL already
+      // carries — so the domain names the Publisher, exactly as for a GKG row.
+      publisherName: null,
+    })),
+  };
+}
+
 async function discover(connector: IngestionConnector, deps: RunConnectorDeps): Promise<Discovery> {
-  // #46 adds gdelt_doc here. Until then an unimplemented kind is a failed run
-  // with a legible reason, not a run that quietly discovers nothing.
   if (connector.kind === "rss") return discoverRss(connector, deps);
   if (connector.kind === "gdelt_gkg") return discoverGkg(connector, deps);
+  if (connector.kind === "gdelt_doc") return discoverDoc(connector, deps);
+  // ADR-0018's three surfaces are all implemented as of #46, so this is reachable
+  // only if the `kind` column outgrows the union — and then it is a failed run
+  // with a legible reason, not a run that quietly discovers nothing.
   throw new Error(`No connector implementation for kind "${connector.kind}"`);
 }
 

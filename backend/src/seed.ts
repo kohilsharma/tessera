@@ -123,8 +123,19 @@ async function seedConnectors(): Promise<void> {
   await connectors.delete({ name: "Meridian Wire RSS" });
 
   for (const seedConnector of SEED_CONNECTORS) {
-    if (await connectors.findOne({ where: { name: seedConnector.name } })) {
-      console.log(`= connector ${seedConnector.name} already seeded`);
+    const held = await connectors.findOne({ where: { name: seedConnector.name } });
+    if (held) {
+      // The endpoint converges; `enabled` deliberately does not. #46 gave the DOC
+      // connector the query that makes it runnable at all, and a database seeded
+      // before that would otherwise hold an endpoint no run can succeed against —
+      // but an Admin who turned a connector off must not have it turned back on by
+      // a re-seed.
+      if (held.endpoint !== seedConnector.endpoint) {
+        await connectors.update({ id: held.id }, { endpoint: seedConnector.endpoint });
+        console.log(`~ connector ${seedConnector.name} endpoint converged`);
+      } else {
+        console.log(`= connector ${seedConnector.name} already seeded`);
+      }
       continue;
     }
     await connectors.save(seedConnector);

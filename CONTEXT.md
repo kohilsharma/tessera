@@ -70,7 +70,12 @@ Terms are canonical: use these words in code, docs, and conversation.
 
 - **Publisher** — Who originates reporting. Owns rights fields (see *Terms Class*).
 - **IngestionConnector** — *How* Tessera discovers/receives data (RSS, GDELT_DOC, etc).
-  A connector is not a publisher; a GDELT connector spans many publishers.
+  A connector is not a publisher; a GDELT connector spans many publishers. For a source that
+  answers a *question* rather than streaming — the DOC API — the question is part of the
+  connector: it lives in the endpoint's query string. That is a data change rather than a code
+  change, but it is not yet an operator-facing one: the seed owns every seeded connector's
+  endpoint and converges a stale one, so changing the standing query means changing the seed
+  constant. Only `enabled` is the Admin's to set through the API. (#46)
 - **IngestionRun** — One invocation of one connector, and the only record of what that
   invocation did: how much it discovered, inserted, enriched, rejected as duplicate, rejected
   on rights, and failed. Persisted in Postgres, never read back from the queue — the Admin
@@ -114,7 +119,9 @@ Terms are canonical: use these words in code, docs, and conversation.
   article). (ADR-0018, ADR-0019)
 - **Window Cursor** — Where a connector's source got to, in that source's own terms: for GKG
   the 14-digit stamp of the last 15-minute window a run *finished*, for RSS the feed's
-  `lastBuildDate`. Read back off the connector's own succeeded IngestionRuns, so it lives
+  `lastBuildDate`, and for the DOC API **nothing at all** — its result set is re-ranked on
+  every request and truncated at GDELT's 250-record cap, so no position in it is resumable.
+  Read back off the connector's own succeeded IngestionRuns, so it lives
   wherever the runs do. The Ingestion Worker is not a 24/7 service, so a **gap** in the
   firehose is the normal state rather than a fault: on its next run a GKG connector heals the
   windows between its cursor and the one GDELT is publishing now, naming their files
@@ -122,13 +129,20 @@ Terms are canonical: use these words in code, docs, and conversation.
   is 127 MB to learn something modulo already knows). A gap wider than the two-hour cap is
   **skipped rather than backfilled**, and the skip is stated on the run. _Avoid_: treating a
   gap as an error state; the cursor exists because gaps are expected. (#45)
-- **Retention Window** — The seven days beyond which a GKG-derived Article is removed, measured
-  from when the row was *stored*, so an unbounded firehose has a ceiling on disk. Narrow by
-  design: only rows a GKG connector discovered that are still `metadata_only`. RSS-discovered
-  reporting, anything enriched with text, an Article a Story or a Brief has taken hold of, and
+- **Record Cap** — GDELT's DOC API returns at most 250 records per query and offers no paging
+  past that. A run therefore always asks for the maximum and states on the IngestionRun when it
+  received exactly that many, because a truncated result set silently reported as a complete one
+  is a coverage claim Tessera cannot support. _Avoid_: reading `discovered` as "everything that
+  matched". (#46, ADR-0018)
+- **Retention Window** — The seven days beyond which a GDELT-derived Article is removed, measured
+  from when the row was *stored*, so unbounded metadata producers have a ceiling on disk. Narrow
+  by design: only rows a GKG **or DOC** connector discovered that are still `metadata_only`.
+  RSS-discovered reporting, anything enriched with text, an Article a Story or a Brief has taken
+  hold of, and
   the curated fixture corpus all outlive it. GKG Annotations go with the Article they were
   staged against. _Avoid_: expiring on `publishedAt` — GDELT reports documents whose own
-  timestamp is old, and that would insert, prune, and re-insert them window after window. (#45)
+  timestamp is old, and that would insert, prune, and re-insert them window after window. (#45,
+  #46)
 
 ## Deferred (startup-only, behind interfaces — NOT in graded build)
 

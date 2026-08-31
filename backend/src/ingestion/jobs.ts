@@ -1,7 +1,7 @@
 import { AppDataSource } from "../data-source";
 import { IngestionConnector } from "../entities/IngestionConnector";
 import { RUN_JOB, TICK_JOB, enqueueConnectorRun, type RunJobData } from "./queue";
-import { pruneExpiredGkgArticles } from "./retention";
+import { pruneExpiredGdeltArticles } from "./retention";
 import { httpFetchText, runConnector } from "./runConnector";
 
 // What the worker actually does, kept out of src/worker.ts for the same reason
@@ -28,8 +28,8 @@ export async function runIngestionJob(job: { name: string; data: Partial<RunJobD
     // the same 15-minute clock, and one pass per tick keeps each pass to a
     // window's worth of rows. Enqueued first, so a prune that throws cannot hold
     // the fleet up — it fails the tick job, which the worker logs.
-    const pruned = await pruneExpiredGkgArticles();
-    console.log(`[worker] tick enqueued ${enqueued} connector(s), pruned ${pruned} expired GKG article(s)`);
+    const pruned = await pruneExpiredGdeltArticles();
+    console.log(`[worker] tick enqueued ${enqueued} connector(s), pruned ${pruned} expired GDELT article(s)`);
     return;
   }
   if (job.name !== RUN_JOB) throw new Error(`Unknown ingestion job "${job.name}"`);

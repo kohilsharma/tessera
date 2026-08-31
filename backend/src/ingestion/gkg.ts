@@ -115,11 +115,11 @@ function formatStamp(at: number): string {
 // now, which windows to read. The cap is what keeps a long absence from turning
 // the next run into an unbounded backfill.
 export function planGkgCatchUp(cursor: string | null, current: string): GkgCatchUp {
-  const currentAt = parseStamp(current);
+  const currentAt = parseGdeltStamp(current);
   if (!currentAt) throw new Error(`Not a 15-minute window stamp: ${current}`);
   // No cursor at all — a connector's first run. Going live is the only honest
   // option: there is no gap, because there is no history to have a gap in.
-  const held = parseStamp(cursor);
+  const held = parseGdeltStamp(cursor);
   if (!held) return { stamps: [current], skippedWindows: 0 };
   // Epoch 0 is itself on a 15-minute boundary in UTC, so flooring by the window
   // length lands on GDELT's grid. Without it an off-grid cursor would generate
@@ -140,7 +140,7 @@ export function planGkgCatchUp(cursor: string | null, current: string): GkgCatch
 }
 
 export function isGkgWindowStamp(value: string | null): value is string {
-  const parsed = parseStamp(value);
+  const parsed = parseGdeltStamp(value);
   return parsed !== null && parsed.getUTCMinutes() % 15 === 0 && parsed.getUTCSeconds() === 0;
 }
 
@@ -187,7 +187,9 @@ function textOf(value: string | undefined): string | null {
 
 // GDELT stamps are YYYYMMDDHHMMSS in UTC. Date.UTC rolls impossible dates
 // forward, so every component is round-tripped before the value is accepted.
-function parseStamp(value: string | null): Date | null {
+// Exported because the DOC API stamps `seendate` in the same 14 UTC digits (#46) —
+// one reading of GDELT's clock rather than two that could disagree.
+export function parseGdeltStamp(value: string | null): Date | null {
   const digits = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(value ?? "");
   if (!digits) return null;
   const [, year, month, day, hour, minute, second] = digits.map(Number);
@@ -327,7 +329,7 @@ function toGkgRow(fields: string[]): GkgRow {
     // roughly 60% of rows; V2.1DATE (when GDELT saw the document) is the fallback.
     // The window stamp is the weaker of the two — ADR-0020's timeline orders by
     // publishedAt — so the publisher's own value is preferred where it exists.
-    publishedAt: parseStamp(extraTag(extras, "PAGE_PRECISEPUBTIMESTAMP")) ?? parseStamp(textOf(fields[FIELD.date])),
+    publishedAt: parseGdeltStamp(extraTag(extras, "PAGE_PRECISEPUBTIMESTAMP")) ?? parseGdeltStamp(textOf(fields[FIELD.date])),
     tone: averageTone(fields[FIELD.tone]),
     annotations: parseAnnotations(fields),
   };
