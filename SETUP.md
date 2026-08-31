@@ -82,19 +82,69 @@ this step `/dashboard/admin` has no one who can reach it.
 ### Embeddings
 
 The corpus and every search query are embedded with whichever `EmbeddingProvider`
-`GEMINI_API_KEY` selects (ADR-0017/0023's interface):
+`EMBEDDING_PROVIDER` selects (ADR-0017/0023's interface) — `gemini`, `openai`, or
+`mock`. Left unset it infers one from whichever key is present, so an existing
+Gemini-only `.env` keeps working untouched.
 
-- **Set — the intended configuration (ADR-0023):** the hosted
-  `gemini-embedding-001` (Google AI Studio, free tier), truncated to
-  `vector(1024)`. Get a free key at https://aistudio.google.com/apikey and put it
-  in `.env`; `EMBEDDING_MODEL` overrides the model id and `EMBEDDING_API_BASE`
-  the endpoint if needed (ADR-0003: no hardcoded model ids or hosts).
-- **Unset — fallback:** the deterministic Mock provider. No network, no API key,
-  works offline, and it is what every backend test uses (ADR-0003) — but its
-  vectors carry no meaning, so the *semantic* half of hybrid search returns
-  deterministic placeholders rather than real similarity. Lexical (Postgres FTS)
-  results stay genuine either way. The API logs a warning on startup when it
-  falls back, so a demo can't be running on it unnoticed.
+- **`gemini` — ADR-0023's default:** the hosted `gemini-embedding-001` (Google AI
+  Studio, free tier), truncated to `vector(1024)`. Get a free key at
+  https://aistudio.google.com/apikey and set `GEMINI_API_KEY` in `.env`.
+- **`openai` — any OpenAI-compatible `/v1/embeddings` endpoint**, NVIDIA's own
+  included. Set `EMBEDDING_API_KEY`, `EMBEDDING_API_BASE` and `EMBEDDING_MODEL`.
+  For NVIDIA (free key at https://build.nvidia.com, no card): base
+  `https://integrate.api.nvidia.com/v1`, model `nvidia/nemotron-3-embed-1b`,
+  and `EMBEDDING_INPUT_STYLE=input_type`. The provider truncates the model's
+  wider output down to `vector(1024)` and renormalises after the cut, which is
+  what NVIDIA's model card prescribes.
+  **Marking query vs document is load-bearing:** these are asymmetric E5-family
+  models, and unmarked text scores a paraphrase *below* random gibberish
+  (measured: 0.42 vs 0.60; marked, 0.52 vs 0.10). `EMBEDDING_INPUT_STYLE` picks
+  how — `prefix` (default) glues `query: `/`passage: ` on locally, `input_type`
+  sends a body field and lets NIM prefix server-side. Setting both would double
+  the prefix, so pick the one your endpoint wants.
+- **`mock` — fallback, and what you get with no key at all:** deterministic, no
+  network, and what every backend test uses (ADR-0003) — but its vectors carry no
+  meaning, so the *semantic* half of hybrid search returns deterministic
+  placeholders rather than real similarity. Lexical (Postgres FTS) results stay
+  genuine either way. The API logs a warning on startup when it falls back, so a
+  demo can't be running on it unnoticed.
+
+`EMBEDDING_MODEL` overrides the model id and `EMBEDDING_API_BASE` the endpoint for
+whichever provider is active (ADR-0003: no hardcoded model ids or hosts).
+
+### Synthesis (ADR-0003)
+
+`SYNTHESIS_PROVIDER` selects the model that writes cited synthesis: `openai` or
+`mock`, inferred from `SYNTHESIS_API_KEY` when unset. **`openai` names the
+protocol, not the vendor** — NVIDIA, Gemini, DeepSeek and any OpenAI-compatible
+gateway all speak `/chat/completions`, so changing provider is `SYNTHESIS_API_BASE`
++ `SYNTHESIS_MODEL` and no new code.
+
+Measured 2026-08-31, 3 runs each on a cited-synthesis task (valid JSON, three
+claim types, every claim citing real evidence ids):
+
+| Base | Model | Result |
+|---|---|---|
+| `https://integrate.api.nvidia.com/v1` | `openai/gpt-oss-20b` | 3/3 valid, ~17s median |
+| `https://integrate.api.nvidia.com/v1` | `poolside/laguna-xs-2.1` | 3/3 valid, ~1.1s median |
+| `https://integrate.api.nvidia.com/v1` | `minimaxai/minimax-m3` | 3/3 valid, ~23s median |
+| `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-3.5-flash-lite` | 15 RPM / 500 RPD free |
+| `https://api.deepseek.com` | `deepseek-v4-flash` | paid, ~$0.14/$0.28 per 1M |
+
+NVIDIA's larger models (`nemotron-3-ultra-550b`, `nemotron-3-super-120b`,
+`deepseek-v4-pro`, `kimi-k3`, `gemma-4-31b`) were **not** dependable on the free
+tier: 1/3 valid at best, mostly 60s timeouts or `404 Not found for account`.
+Being listed in `/v1/models` does not mean your account can call it.
+
+With no key the deterministic Mock answers, which is what the whole test suite
+uses — no API key is needed to run `npm test` (ADR-0003).
+
+**Rate limits are counted in requests, so embed in batches.** NVIDIA's free tier
+is ~40 requests/minute across the whole key; Gemini's free tier is generous on
+tokens (10M TPM) but capped on daily requests. `embedBatch()` sends many texts in
+one request — the seed uses it per Story — and the provider retries `429`/`5xx`
+with exponential backoff, honouring `Retry-After`. Embedding one article per
+request is what actually trips a limiter, not the volume of text.
 
 **Switching providers means re-embedding from scratch.** Search compares a query's
 vector against whatever embedded the corpus, and the two providers' vector spaces

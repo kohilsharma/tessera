@@ -1,4 +1,4 @@
-import { EMBEDDING_DIMENSIONS, EmbeddingProvider } from "./EmbeddingProvider";
+import { EMBEDDING_DIMENSIONS, EmbeddingKind, EmbeddingProvider, embedSequentially } from "./EmbeddingProvider";
 
 // ADR-0017/0023 define the embedding interface and its 1024-dim space; ADR-0003 is
 // what requires a Mock provider at all. Deterministic, so seeding/tests never need an API
@@ -35,4 +35,10 @@ export class MockEmbeddingProvider implements EmbeddingProvider {
     }
     return normalize(vector);
   }
+
+  // No batch endpoint wired up for this provider — one request per text.
+  embedBatch(texts: string[], kind?: EmbeddingKind): Promise<number[][]> {
+    return embedSequentially(this, texts, kind);
+  }
+
 }

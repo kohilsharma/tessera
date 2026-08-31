@@ -88,6 +88,7 @@ async function seedCorpus(): Promise<void> {
       lastSeenAt: new Date(Math.max(...publishedTimes)),
     });
 
+    const pending: { id: string; text: string }[] = [];
     for (const seedArticle of seedStory.articles) {
       const publisher = publisherByDomain.get(seedArticle.publisherDomain);
       if (!publisher) throw new Error(`Unknown publisher domain in fixture: ${seedArticle.publisherDomain}`);
@@ -102,10 +103,18 @@ async function seedCorpus(): Promise<void> {
         publishedAt: new Date(seedArticle.publishedAt),
       });
 
-      const vector = await embedder.embed(`${seedArticle.title}\n${seedArticle.analysisText}`);
+      pending.push({ id: saved.id, text: `${seedArticle.title}\n${seedArticle.analysisText}` });
+    }
+
+    // One request for the whole story rather than one per article. Hosted
+    // providers meter *requests* — NVIDIA's free tier is ~40/min across the
+    // key — so batching is the difference between seeding in seconds and
+    // tripping a rate limiter.
+    const vectors = await embedder.embedBatch(pending.map((p) => p.text), "passage");
+    for (const [i, row] of pending.entries()) {
       await AppDataSource.query(`UPDATE "articles" SET "embedding" = $1::vector WHERE "id" = $2`, [
-        toVectorLiteral(vector),
-        saved.id,
+        toVectorLiteral(vectors[i]),
+        row.id,
       ]);
     }
     console.log(`+ story ${seedStory.slug} (${seedStory.articles.length} articles)`);

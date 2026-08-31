@@ -1,4 +1,4 @@
-import { EMBEDDING_DIMENSIONS, EmbeddingProvider } from "./EmbeddingProvider";
+import { EMBEDDING_DIMENSIONS, EmbeddingKind, EmbeddingProvider, embedSequentially } from "./EmbeddingProvider";
 
 // ADR-0003 wants the endpoint env-configurable for the same reason as the
 // model: an OpenAI-compatible gateway or a regional host is a config change,
@@ -44,4 +44,10 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
     }
     return values;
   }
+
+  // No batch endpoint wired up for this provider — one request per text.
+  embedBatch(texts: string[], kind?: EmbeddingKind): Promise<number[][]> {
+    return embedSequentially(this, texts, kind);
+  }
+
 }

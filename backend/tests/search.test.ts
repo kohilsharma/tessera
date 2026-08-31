@@ -379,6 +379,7 @@ describe("GET /api/v1/search", () => {
   it("degrades to lexical-only results when the embedding provider fails", async () => {
     const failing = {
       embed: () => Promise.reject(new Error("429 rate limited")),
+      embedBatch: () => Promise.reject(new Error("429 rate limited")),
     };
     const filters = {
       page: 1,

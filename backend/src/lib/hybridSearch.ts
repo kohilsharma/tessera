@@ -59,7 +59,7 @@ async function embedQueryOrNull(
   embedder: EmbeddingProvider,
 ): Promise<string | null> {
   try {
-    return toVectorLiteral(await embedder.embed(queryText));
+    return toVectorLiteral(await embedder.embed(queryText, "query"));
   } catch (err) {
     console.warn("[search] embedding failed, falling back to lexical-only results:", err);
     return null;
