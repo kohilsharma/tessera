@@ -1,7 +1,7 @@
 import { AppDataSource } from "../data-source";
 import { STORY_CATEGORIES, type StoryCategory } from "../entities/Story";
 import type { SynthesisProvider } from "../synthesis";
-import { STORY_NAMING_TIMEOUT_MS } from "./config";
+import { STORY_NAME_MAX_LENGTH, STORY_NAMING_TIMEOUT_MS } from "./config";
 
 // #51: the one non-deterministic step in clustering. Re-running a run reproduces
 // membership — the vectors, thresholds and gates are all deterministic — but not
@@ -25,7 +25,6 @@ const MAX_HEADLINES = 8;
 // to this, because refusing a good 95-character title in favour of the medoid's
 // makes the Story worse to serve a rule nobody reads.
 const ASKED_TITLE_LENGTH = 90;
-const MAX_TITLE_LENGTH = 120;
 
 const SYSTEM = "You name clusters of news reporting for a news analysis system. Answer with a JSON object only.";
 
@@ -67,15 +66,14 @@ function parseName(answer: string): StoryName | null {
   }
   const { title, category } = (parsed ?? {}) as { title?: unknown; category?: unknown };
   const trimmed = typeof title === "string" ? title.replace(/\s+/g, " ").trim() : "";
-  if (trimmed === "" || trimmed.length > MAX_TITLE_LENGTH) return null;
+  if (trimmed === "" || trimmed.length > STORY_NAME_MAX_LENGTH) return null;
   // The vocabulary is closed (Story.category's CHECK constraint). An invented
   // category is not repaired into a neighbour: ADR-0026 fixes the fallback for an
   // off-enum answer as the medoid title, so the whole answer goes back and a Story
   // is never half a model's judgement and half ours. This is the one place ADR-0003's
   // repair loop does not apply — there is a correct answer to fall back to.
-  const named = typeof category === "string" ? category.trim().toLowerCase() : "";
-  if (!(STORY_CATEGORIES as readonly string[]).includes(named)) return null;
-  return { title: trimmed, category: named as StoryCategory };
+  if (typeof category !== "string" || !(STORY_CATEGORIES as readonly string[]).includes(category)) return null;
+  return { title: trimmed, category: category as StoryCategory };
 }
 
 // One call per newly created Story, made after its transaction has committed: a

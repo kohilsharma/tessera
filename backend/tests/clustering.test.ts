@@ -990,9 +990,9 @@ describe("story naming", () => {
     expect(await storyTitles()).toEqual(["Alpha named", "Beta named", "Existing coverage"]);
   });
 
-  it("keeps the medoid name when the answer is off-vocabulary", async () => {
+  it("keeps the medoid name when the answer is not an exact vocabulary value", async () => {
     const medoidTitle = await seedableTrio("regional", 0);
-    const namer = new StubNamer([namingAnswer("A perfectly good title", "geopolitics")]);
+    const namer = new StubNamer([namingAnswer("A perfectly good title", "POLITICS")]);
 
     const run = await cluster(new StubEmbedder({}), namer);
 
@@ -1003,7 +1003,7 @@ describe("story naming", () => {
     const story = await AppDataSource.getRepository(Story).findOneByOrFail({});
     expect(story.title).toBe(medoidTitle);
     expect(story.category).toBe(DEFAULT_STORY_CATEGORY);
-    expect(STORY_CATEGORIES).not.toContain("geopolitics");
+    expect(STORY_CATEGORIES).not.toContain("POLITICS");
   });
 
   it("keeps the medoid name when the call fails or answers with prose", async () => {

@@ -1,8 +1,5 @@
+import { STORY_NAME_MAX_LENGTH } from "../clustering/config";
 import { SynthesisProvider, SynthesisRequest } from "./SynthesisProvider";
-
-// Same ceiling naming accepts (clustering/naming.ts), so the Mock can never be
-// the reason a Story falls back to its medoid title.
-const MAX_MOCK_TITLE = 120;
 
 // ADR-0003 requires a deterministic Mock so the whole suite runs with no API
 // key. It answers in the shape the caller asked for — a JSON object when
@@ -18,7 +15,7 @@ export class MockSynthesisProvider implements SynthesisProvider {
     // tests/clustering.test.ts is what fails if that format ever drifts.
     if (request.task === "story_name") {
       const firstHeadline = request.prompt.match(/^- (.+)$/m)?.[1] ?? "unnamed cluster";
-      return JSON.stringify({ title: `[mock] ${firstHeadline}`.slice(0, MAX_MOCK_TITLE), category: "world" });
+      return JSON.stringify({ title: `[mock] ${firstHeadline}`.slice(0, STORY_NAME_MAX_LENGTH), category: "world" });
     }
     if (!request.json) return `[mock synthesis] ${request.prompt.slice(0, 120)}`;
     // Echoing the evidence ids found in the prompt keeps the Mock honest about

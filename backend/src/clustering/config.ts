@@ -34,3 +34,6 @@ export const DEFAULT_STORY_CATEGORY: StoryCategory = "world";
 // One small call per new Story. Bounded rather than tunable: past this the medoid
 // title is the better answer, because the run behind it is holding the queue.
 export const STORY_NAMING_TIMEOUT_MS = 15_000;
+
+// Shared with the Mock so its deterministic answer always passes naming validation.
+export const STORY_NAME_MAX_LENGTH = 120;
