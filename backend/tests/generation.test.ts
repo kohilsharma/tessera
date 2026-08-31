@@ -383,6 +383,42 @@ describe("evidence selection", () => {
     expect(short[0].includedExcerptSnapshot).toBe("Two publishers reported it.");
   });
 
+  it("renders the provenance frozen before the provider answered", async () => {
+    const { story, first } = await twoPublisherStory();
+    const publisher = await AppDataSource.getRepository(Publisher).findOneByOrFail({ id: first.publisherId });
+    const original = {
+      title: first.title,
+      url: first.url,
+      publishedAt: first.publishedAt.toISOString(),
+      publisherName: publisher.name,
+      publisherDomain: publisher.domain,
+    };
+    synth.provider = {
+      complete: async () => {
+        await AppDataSource.query(
+          `UPDATE "articles" SET "title" = 'changed title', "url" = 'https://changed.example/report',
+                  "publishedAt" = '2026-01-03T00:00:00Z' WHERE "id" = $1`,
+          [first.id],
+        );
+        await AppDataSource.query(
+          `UPDATE "publishers" SET "name" = 'Changed Publisher', "domain" = 'changed.example' WHERE "id" = $1`,
+          [publisher.id],
+        );
+        return claimsAnswer(consensus(["A1", "A2"]));
+      },
+    };
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
+    const frozen = res.body.evidence.find((row: { articleId: string }) => row.articleId === first.id);
+    expect(frozen).toMatchObject({
+      title: original.title,
+      url: original.url,
+      publisher: { id: publisher.id, name: original.publisherName, domain: original.publisherDomain },
+    });
+    expect(new Date(frozen.publishedAt).toISOString()).toBe(original.publishedAt);
+  });
+
   it("refuses a Story with no reporting to cite", async () => {
     const story = await createStory();
     const publisher = await createPublisher("silent.example");
@@ -629,6 +665,62 @@ describe("reuse", () => {
     expect(await AppDataSource.query(`SELECT "id" FROM "evidence_sets"`)).toHaveLength(1);
   });
 
+  it("coalesces simultaneous identical requests before calling the provider", async () => {
+    const { story } = await twoPublisherStory();
+    const token = await tokenFor("student");
+    let markEntered!: () => void;
+    let releaseProvider!: () => void;
+    const entered = new Promise<void>((resolve) => { markEntered = resolve; });
+    const blocked = new Promise<void>((resolve) => { releaseProvider = resolve; });
+    synth.provider = {
+      complete: async () => {
+        markEntered();
+        await blocked;
+        return claimsAnswer(consensus(["A1", "A2"]));
+      },
+    };
+
+    const firstRequest = requestAnalysis(story.id, token).then((res) => res);
+    await entered;
+    const secondRequest = requestAnalysis(story.id, token).then((res) => res);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    releaseProvider();
+    const [first, second] = await Promise.all([firstRequest, secondRequest]);
+
+    expect(second.body.id).toBe(first.body.id);
+    expect([first.body.reused, second.body.reused].sort()).toEqual([false, true]);
+    expect(synth.requests).toHaveLength(1);
+    expect(await AppDataSource.query(`SELECT "id" FROM "generation_runs"`)).toHaveLength(1);
+  });
+
+  it("coalesces simultaneous provider failures without caching the failure", async () => {
+    const { story } = await twoPublisherStory();
+    const token = await tokenFor("student");
+    let markEntered!: () => void;
+    let releaseProvider!: () => void;
+    const entered = new Promise<void>((resolve) => { markEntered = resolve; });
+    const blocked = new Promise<void>((resolve) => { releaseProvider = resolve; });
+    synth.provider = {
+      complete: async () => {
+        markEntered();
+        await blocked;
+        throw new Error("temporary provider failure");
+      },
+    };
+
+    const firstRequest = requestAnalysis(story.id, token).then((res) => res);
+    await entered;
+    const secondRequest = requestAnalysis(story.id, token).then((res) => res);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    releaseProvider();
+    const [first, second] = await Promise.all([firstRequest, secondRequest]);
+
+    expect(second.body.id).toBe(first.body.id);
+    expect(first.body.failureCode).toBe("provider_error");
+    expect([first.body.reused, second.body.reused].sort()).toEqual([false, true]);
+    expect(synth.requests).toHaveLength(1);
+  });
+
   it("is per Lens, so an Investor does not read the Student's analysis", async () => {
     const { story } = await twoPublisherStory();
     answering(claimsAnswer(consensus(["A1"])), claimsAnswer(consensus(["A2"])));
@@ -659,6 +751,54 @@ describe("reuse", () => {
     expect(synth.requests).toHaveLength(2);
   });
 
+  it("does not reuse a run when a different Article has identical text", async () => {
+    const { story, first } = await twoPublisherStory();
+    const token = await tokenFor("student");
+    answering(claimsAnswer(consensus(["A1", "A2"])), claimsAnswer(consensus(["A1", "A2"])));
+
+    const before = await requestAnalysis(story.id, token);
+    await AppDataSource.query(
+      `UPDATE "articles" SET "storyId" = NULL, "storyAssignmentStatus" = NULL,
+              "storyAssignmentScore" = NULL WHERE "id" = $1`,
+      [first.id],
+    );
+    const replacement = await createArticle({
+      storyId: story.id,
+      publisherId: first.publisherId,
+      title: "Replacement carrying the same report",
+      text: first.analysisText,
+      publishedAt: first.publishedAt,
+    });
+
+    const after = await requestAnalysis(story.id, token);
+
+    expect(after.body.id).not.toBe(before.body.id);
+    expect(after.body.evidence.map((row: { articleId: string }) => row.articleId)).toContain(replacement.id);
+    expect(synth.requests).toHaveLength(2);
+  });
+
+  it("does not reuse a legacy run that has no provenance snapshot", async () => {
+    const { story } = await twoPublisherStory();
+    const token = await tokenFor("student");
+    answering(claimsAnswer(consensus(["A1", "A2"])), claimsAnswer(consensus(["A1", "A2"])));
+
+    const legacy = await requestAnalysis(story.id, token);
+    await AppDataSource.query(
+      `UPDATE "evidence_set_articles" SET
+        "titleSnapshot" = NULL, "urlSnapshot" = NULL, "publishedAtSnapshot" = NULL,
+        "analysisTextModeSnapshot" = NULL, "publisherIdSnapshot" = NULL,
+        "publisherNameSnapshot" = NULL, "publisherDomainSnapshot" = NULL
+       WHERE "evidenceSetId" = (SELECT "evidenceSetId" FROM "generation_runs" WHERE "id" = $1)`,
+      [legacy.body.id],
+    );
+
+    const fresh = await requestAnalysis(story.id, token);
+
+    expect(fresh.body.id).not.toBe(legacy.body.id);
+    expect(fresh.body.status).toBe("completed");
+    expect(synth.requests).toHaveLength(2);
+  });
+
   it("does not cache a failure", async () => {
     const { story } = await twoPublisherStory();
     const token = await tokenFor("student");
@@ -682,6 +822,8 @@ describe("reuse", () => {
     // completed run, and configuring a key would otherwise change nothing visible.
     process.env.SYNTHESIS_PROVIDER = "openai";
     process.env.SYNTHESIS_MODEL = "some-cheap-model";
+    process.env.SYNTHESIS_API_BASE = "https://configured-provider.example/v1";
+    process.env.SYNTHESIS_ALLOWED_ORIGIN = "https://configured-provider.example";
     try {
       const withModel = await requestAnalysis(story.id, token);
       expect(withModel.body.id).not.toBe(withMock.body.id);
@@ -689,12 +831,41 @@ describe("reuse", () => {
     } finally {
       delete process.env.SYNTHESIS_PROVIDER;
       delete process.env.SYNTHESIS_MODEL;
+      delete process.env.SYNTHESIS_API_BASE;
+      delete process.env.SYNTHESIS_ALLOWED_ORIGIN;
     }
 
-    const providers: { provider: string }[] = await AppDataSource.query(
-      `SELECT "provider" FROM "generation_runs" ORDER BY "completedAt" ASC`,
+    const providers: { provider: string; model: string }[] = await AppDataSource.query(
+      `SELECT "provider", "model" FROM "generation_runs" ORDER BY "completedAt" ASC`,
     );
-    expect(providers.map((row) => row.provider)).toEqual(["mock", "some-cheap-model"]);
+    expect(providers).toEqual([
+      { provider: "mock", model: "mock" },
+      { provider: "https://configured-provider.example", model: "some-cheap-model" },
+    ]);
+  });
+  it("does not reuse across provider origins that share a model id", async () => {
+    const { story } = await twoPublisherStory();
+    const token = await tokenFor("student");
+    answering(claimsAnswer(consensus(["A1"])), claimsAnswer(consensus(["A2"])));
+    process.env.SYNTHESIS_PROVIDER = "openai";
+    process.env.SYNTHESIS_MODEL = "shared-model";
+    process.env.SYNTHESIS_API_BASE = "https://first-provider.example/v1";
+    process.env.SYNTHESIS_ALLOWED_ORIGIN = "https://first-provider.example";
+
+    try {
+      const first = await requestAnalysis(story.id, token);
+      process.env.SYNTHESIS_API_BASE = "https://second-provider.example/v1";
+      process.env.SYNTHESIS_ALLOWED_ORIGIN = "https://second-provider.example";
+      const second = await requestAnalysis(story.id, token);
+
+      expect(second.body.id).not.toBe(first.body.id);
+      expect(synth.requests).toHaveLength(2);
+    } finally {
+      delete process.env.SYNTHESIS_PROVIDER;
+      delete process.env.SYNTHESIS_MODEL;
+      delete process.env.SYNTHESIS_API_BASE;
+      delete process.env.SYNTHESIS_ALLOWED_ORIGIN;
+    }
   });
 });
 

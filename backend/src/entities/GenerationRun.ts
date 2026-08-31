@@ -87,13 +87,13 @@ export class GenerationRun {
   @Column({ type: "varchar" })
   status!: GenerationRunStatus;
 
-  // What answered: `mock`, or the configured model id (ADR-0003 forbids hardcoding
-  // one, not recording which one ran). Two jobs: it makes ADR-0003's exception —
-  // evidence text may go to the paid, no-training provider — auditable per run, and it
-  // is part of the reuse key, so an analysis the Mock wrote is not still being served
-  // after a key is configured.
+  // The provider origin that received evidence text, kept separate from the model
+  // because model ids are not globally unique.
   @Column({ type: "varchar" })
   provider!: string;
+
+  @Column({ type: "varchar" })
+  model!: string;
 
   // Nullable for the same reason Article.discoveredByConnectorId is: a seeded or
   // scripted run has no person behind it, and a deleted account must not take an

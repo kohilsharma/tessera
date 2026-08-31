@@ -43,13 +43,30 @@ export function contentHashOf(analysisText: string): string {
   return createHash("sha256").update(analysisText).digest("hex");
 }
 
-// ADR-0027's reuse key, evidence half: the rows' evidence ids and the hashes of the
-// Articles' full text, in evidence-id order. A hash rather than a timestamp because
-// enrichment rewrites an Article's text in place (ADR-0024) — a `updatedAt`
-// comparison would serve a cached analysis of a body that has since been replaced.
+// ADR-0027's reuse key, evidence half: the exact frozen rows in evidence-id
+// order. Full-text hashes catch enrichment, while Article ids and provenance stop a
+// different report (or changed model-visible metadata) from inheriting an old run.
 export function evidenceContentHash(selected: SelectedEvidence[]): string {
   const digest = createHash("sha256");
-  for (const row of selected) digest.update(`${row.evidenceId}:${row.articleContentHash}\n`);
+  for (const row of selected) {
+    digest.update(
+      `${JSON.stringify([
+        row.evidenceId,
+        row.articleId,
+        row.articleContentHash,
+        row.title,
+        row.url,
+        row.publishedAt.toISOString(),
+        row.analysisTextMode,
+        row.publisherId,
+        row.publisherName,
+        row.publisherDomain,
+        row.sourceRank,
+        row.selectionReason,
+        row.excerpt,
+      ])}\n`,
+    );
+  }
   return digest.digest("hex");
 }
 
@@ -184,6 +201,13 @@ export async function freezeEvidence(storyId: string, selected: SelectedEvidence
         sourceRank: row.sourceRank,
         selectionReason: row.selectionReason,
         includedExcerptSnapshot: row.excerpt,
+        titleSnapshot: row.title,
+        urlSnapshot: row.url,
+        publishedAtSnapshot: row.publishedAt,
+        analysisTextModeSnapshot: row.analysisTextMode,
+        publisherIdSnapshot: row.publisherId,
+        publisherNameSnapshot: row.publisherName,
+        publisherDomainSnapshot: row.publisherDomain,
       })),
     );
     return set;

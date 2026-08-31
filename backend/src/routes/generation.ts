@@ -5,7 +5,7 @@ import { isGenerationLens, lensForRole } from "../generation/config";
 import { runGeneration } from "../generation/runGeneration";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
-import { createSynthesisProvider, synthesisProviderLabel } from "../synthesis";
+import { createSynthesisProvider, synthesisProviderIdentity } from "../synthesis";
 import { isUuid } from "../lib/uuid";
 
 export const generationRouter = Router();
@@ -50,12 +50,9 @@ generationRouter.post(
     }
     const lens = derived ?? requested;
 
+    const provider = createSynthesisProvider();
     const outcome = await runGeneration(
-      // Resolved per request rather than held, exactly as the clustering job resolves
-      // its providers: a key added to .env takes effect without a restart, and with no
-      // key the Mock answers so an offline clone runs this same path (ADR-0003). The
-      // label is read from the same env, so what the run records is what answered.
-      { synth: createSynthesisProvider(), provider: synthesisProviderLabel() },
+      { synth: provider, ...synthesisProviderIdentity() },
       { storyId: story.id, lens, triggeredByUserId: req.user!.id },
     );
     if (outcome.status === "no_evidence") {

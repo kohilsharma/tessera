@@ -1,5 +1,5 @@
 import { Column, Entity, JoinColumn, ManyToOne, PrimaryColumn } from "typeorm";
-import { Article } from "./Article";
+import { Article, type AnalysisTextMode } from "./Article";
 import { EvidenceSet } from "./EvidenceSet";
 
 // Why an Article was selected (ADR-0027: selection is deterministic and
@@ -48,4 +48,25 @@ export class EvidenceSetArticle {
 
   @Column({ type: "text" })
   includedExcerptSnapshot!: string;
+
+  @Column({ type: "varchar", nullable: true })
+  titleSnapshot!: string | null;
+
+  @Column({ type: "varchar", nullable: true })
+  urlSnapshot!: string | null;
+
+  @Column({ type: "timestamptz", nullable: true })
+  publishedAtSnapshot!: Date | null;
+
+  @Column({ type: "varchar", nullable: true })
+  analysisTextModeSnapshot!: AnalysisTextMode | null;
+
+  @Column({ type: "uuid", nullable: true })
+  publisherIdSnapshot!: string | null;
+
+  @Column({ type: "varchar", nullable: true })
+  publisherNameSnapshot!: string | null;
+
+  @Column({ type: "varchar", nullable: true })
+  publisherDomainSnapshot!: string | null;
 }

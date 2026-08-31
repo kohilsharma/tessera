@@ -37,9 +37,10 @@ import { validateAnalysis, type ParsedClaim } from "./validate";
 
 export type GenerationDeps = {
   synth: SynthesisProvider;
-  // What answered, as one label: `mock`, or the configured model id (see
-  // synthesisProviderLabel). Recorded on the run and part of the reuse key.
+  // The provider origin and model that answered. Both are recorded and both take
+  // part in reuse because model ids are not globally unique.
   provider: string;
+  model: string;
 };
 
 export type EvidenceView = {
@@ -87,25 +88,26 @@ export type GenerationOutcome =
 // The provider is in the key because otherwise the first thing a demo does is cache
 // itself: a clone with no key persists `[mock synthesis]` claims as a completed run,
 // and adding SYNTHESIS_API_KEY would change nothing anybody can see.
-//
-// ponytail: two readers asking at the same moment both miss this and both pay, since
-// nothing locks the Story for the length of a model call. The ceiling is one wasted
-// call, not a wrong answer — the later run simply becomes the one reuse finds. An
-// advisory lock on (storyId, lens) is the upgrade if that is ever measurable.
 async function reusableRunId(
   storyId: string,
   lens: GenerationLens,
   provider: string,
+  model: string,
   evidenceHash: string,
 ): Promise<string | null> {
   const rows: { id: string }[] = await AppDataSource.query(
     `SELECT r."id" FROM "generation_runs" r
        JOIN "evidence_sets" e ON e."id" = r."evidenceSetId"
-      WHERE r."storyId" = $1 AND r."lens" = $2 AND r."promptVersion" = $3 AND r."provider" = $4
-        AND r."status" = 'completed' AND e."contentHash" = $5
+      WHERE r."storyId" = $1 AND r."lens" = $2 AND r."promptVersion" = $3
+        AND r."provider" = $4 AND r."model" = $5
+        AND r."status" = 'completed' AND e."contentHash" = $6
+        AND NOT EXISTS (
+          SELECT 1 FROM "evidence_set_articles" legacy
+           WHERE legacy."evidenceSetId" = e."id" AND legacy."titleSnapshot" IS NULL
+        )
       ORDER BY r."completedAt" DESC
       LIMIT 1`,
-    [storyId, lens, PROMPT_VERSION, provider, evidenceHash],
+    [storyId, lens, PROMPT_VERSION, provider, model, evidenceHash],
   );
   return rows[0]?.id ?? null;
 }
@@ -115,6 +117,7 @@ type RunFields = {
   evidenceSetId: string;
   lens: GenerationLens;
   provider: string;
+  model: string;
   triggeredByUserId: string | null;
   startedAt: Date;
   rawResponse: string | null;
@@ -163,7 +166,12 @@ async function persistClaims(
   }
 }
 
-export async function runGeneration(
+// ponytail: the app is one native process (ADR-0015), so coalescing in memory
+// avoids holding a database connection across a model call. Use a distributed
+// request lock if the app is ever horizontally scaled.
+const inFlightGenerations = new Map<string, Promise<GenerationOutcome>>();
+
+async function generateOnce(
   deps: GenerationDeps,
   request: { storyId: string; lens: GenerationLens; triggeredByUserId: string | null },
 ): Promise<GenerationOutcome> {
@@ -179,7 +187,13 @@ export async function runGeneration(
   // members ingestion keeps enriching, pays per request. The ceiling is cost, not
   // correctness; a per-user rate limit is the upgrade, and it belongs beside the other
   // operator controls rather than inside the pipeline.
-  const reused = await reusableRunId(storyId, lens, deps.provider, evidenceContentHash(selected));
+  const reused = await reusableRunId(
+    storyId,
+    lens,
+    deps.provider,
+    deps.model,
+    evidenceContentHash(selected),
+  );
   if (reused) return { status: "reused", view: await loadGenerationView(reused) };
 
   const evidenceSet = await freezeEvidence(storyId, selected);
@@ -189,6 +203,7 @@ export async function runGeneration(
     evidenceSetId: evidenceSet.id,
     lens,
     provider: deps.provider,
+    model: deps.model,
     triggeredByUserId,
     startedAt,
     rawResponse: null,
@@ -241,6 +256,26 @@ export async function runGeneration(
   return { status: "produced", view: await loadGenerationView(runId) };
 }
 
+export async function runGeneration(
+  deps: GenerationDeps,
+  request: { storyId: string; lens: GenerationLens; triggeredByUserId: string | null },
+): Promise<GenerationOutcome> {
+  const key = JSON.stringify([request.storyId, request.lens, PROMPT_VERSION, deps.provider, deps.model]);
+  const inFlight = inFlightGenerations.get(key);
+  if (inFlight) {
+    const outcome = await inFlight;
+    return outcome.status === "no_evidence" ? outcome : { status: "reused", view: outcome.view };
+  }
+
+  const generation = generateOnce(deps, request);
+  inFlightGenerations.set(key, generation);
+  try {
+    return await generation;
+  } finally {
+    if (inFlightGenerations.get(key) === generation) inFlightGenerations.delete(key);
+  }
+}
+
 type EvidenceRow = {
   evidenceId: string;
   articleId: string;
@@ -269,15 +304,19 @@ export async function loadGenerationView(runId: string): Promise<GenerationView>
   // comes first without sorting `A10` before `A2` the way a lexical sort would.
   const evidence: EvidenceRow[] = await AppDataSource.query(
     `SELECT esa."evidenceId", esa."articleId", esa."sourceRank", esa."selectionReason",
-            esa."includedExcerptSnapshot", a."title", a."url", a."publishedAt", a."analysisTextMode",
-            p."id" AS "publisherId", p."name" AS "publisherName", p."domain" AS "publisherDomain", p."termsClass"
+            esa."includedExcerptSnapshot", esa."titleSnapshot" AS "title", esa."urlSnapshot" AS "url",
+            esa."publishedAtSnapshot" AS "publishedAt", esa."analysisTextModeSnapshot" AS "analysisTextMode",
+            esa."publisherIdSnapshot" AS "publisherId", esa."publisherNameSnapshot" AS "publisherName",
+            esa."publisherDomainSnapshot" AS "publisherDomain", p."termsClass"
        FROM "evidence_set_articles" esa
-       JOIN "articles" a ON a."id" = esa."articleId"
-       JOIN "publishers" p ON p."id" = a."publisherId"
+       JOIN "publishers" p ON p."id" = esa."publisherIdSnapshot"
       WHERE esa."evidenceSetId" = $1
       ORDER BY esa."sourceRank" ASC`,
     [run.evidenceSetId],
   );
+  if (evidence.length !== run.evidenceSet.articleCount) {
+    throw new Error(`GenerationRun ${run.id} has no frozen provenance snapshot`);
+  }
 
   // Two things at once. The join to the frozen rows is the invariant holding a second
   // time, at the last point before a reader sees anything: a citation that does not

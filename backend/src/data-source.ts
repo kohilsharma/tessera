@@ -17,6 +17,7 @@ import { AddArticleExtractionAttemptedAt1755752000000 } from "./migrations/17557
 import { AddStoryCentroidAndClusteringRuns1755753000000 } from "./migrations/1755753000000-AddStoryCentroidAndClusteringRuns";
 import { AddPendingStoryAssignmentReview1755754000000 } from "./migrations/1755754000000-AddPendingStoryAssignmentReview";
 import { CreateGenerationRuns1755755000000 } from "./migrations/1755755000000-CreateGenerationRuns";
+import { FixGenerationSnapshotsAndReuse1755756000000 } from "./migrations/1755756000000-FixGenerationSnapshotsAndReuse";
 import { User } from "./entities/User";
 import { Publisher } from "./entities/Publisher";
 import { Story } from "./entities/Story";
@@ -85,6 +86,7 @@ export const AppDataSource = new DataSource({
     AddStoryCentroidAndClusteringRuns1755753000000,
     AddPendingStoryAssignmentReview1755754000000,
     CreateGenerationRuns1755755000000,
+    FixGenerationSnapshotsAndReuse1755756000000,
   ],
   synchronize: false,
   logging: false,
