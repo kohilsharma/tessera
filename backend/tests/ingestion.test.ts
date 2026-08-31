@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import bcrypt from "bcryptjs";
 import { strToU8, zipSync } from "fflate";
+import { IsNull } from "typeorm";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app";
@@ -14,7 +15,7 @@ import { GkgAnnotation } from "../src/entities/GkgAnnotation";
 import { IngestionConnector } from "../src/entities/IngestionConnector";
 import { IngestionRun } from "../src/entities/IngestionRun";
 import { IntelligenceBrief } from "../src/entities/IntelligenceBrief";
-import { Publisher } from "../src/entities/Publisher";
+import { Publisher, mayServeText } from "../src/entities/Publisher";
 import { Story } from "../src/entities/Story";
 import { User } from "../src/entities/User";
 import { signToken } from "../src/auth/jwt";
@@ -26,8 +27,11 @@ import { RUN_JOB, TICK_JOB } from "../src/ingestion/queue";
 import { GDELT_RETENTION_DAYS, pruneExpiredGdeltArticles } from "../src/ingestion/retention";
 import {
   DOC_MIN_INTERVAL_MS,
+  EXTRACTION_MIN_DOMAIN_INTERVAL_MS,
+  MAX_EXTRACTION_ATTEMPTS,
   runConnector,
   spaceDocRequest,
+  spaceExtractionRequest,
   type FetchText,
   type RunConnectorDeps,
 } from "../src/ingestion/runConnector";
@@ -1358,6 +1362,302 @@ describe("runConnector over the GDELT DOC API", () => {
       await vi.advanceTimersByTimeAsync(1);
       await second;
       expect(released).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// #47. ADR-0018's fourth surface: the body of a page a feed only teased. Driven
+// against two committed real captures — an NPR article the committed NPR feed
+// links to, and a Cloudflare interstitial, which is what a bot-blocked publisher
+// actually serves — so both outcomes are the ones the open web produces.
+describe("runConnector over Readability extraction", () => {
+  const nprUrl = "https://www.npr.org/2026/08/30/nx-s1-5949254/lake-ontario-america-doug-ford-trump-sign-google";
+  const nprFeed = fixture("npr-world.xml");
+  const page = (name: string) => readFile(join(__dirname, "fixtures", "readability", name), "utf-8");
+  // Extraction reads Articles, not a source — so a fetcher it reaches for at all
+  // is a bug, and each test below proves it by passing one that refuses.
+  const noFeed: FetchText = () => Promise.reject(new Error("extraction must not fetch a feed"));
+
+  beforeEach(async () => {
+    await AppDataSource.query(`TRUNCATE "articles", "publishers", "ingestion_runs" CASCADE`);
+  });
+
+  async function createExtractionConnector(): Promise<IngestionConnector> {
+    nextConnector += 1;
+    return AppDataSource.getRepository(IngestionConnector).save({
+      name: `Test extraction ${nextConnector}`,
+      kind: "readability",
+      endpoint: "internal:readability",
+      enabled: true,
+    });
+  }
+
+  it("replaces a feed teaser with the page's real body, and counts the pages that refuse", async () => {
+    const rss = await createRssConnector("https://feeds.npr.org/1004/rss.xml");
+    expect((await runConnector(rss, { fetchText: nprFeed }))!.inserted).toBe(3);
+    const articles = AppDataSource.getRepository(Article);
+    const before = await articles.findOneByOrFail({ url: nprUrl });
+    expect(before.analysisTextMode).toBe("feed_excerpt");
+
+    const connector = await createExtractionConnector();
+    const run = await runConnector(connector, {
+      fetchText: noFeed,
+      // One real article page; the other two candidates get the interstitial, which
+      // is the majority outcome ADR-0018 predicts.
+      fetchPage: (url) => page(url === nprUrl ? "npr-lake-ontario.html" : "bot-challenge.html"),
+    });
+
+    expect(run!.status).toBe("succeeded");
+    // Every candidate attempted is one discovered item with one outcome, so an
+    // extraction run's ledger reads like any other connector's.
+    expect(run!.discovered).toBe(3);
+    expect(run!.enriched).toBe(1);
+    expect(run!.failed).toBe(2);
+    expect(run!.inserted).toBe(0);
+    expect(countersSumToDiscovered(run!)).toBe(true);
+    // Extraction keeps its place per Article, not as a position in a stream.
+    expect(run!.cursor).toBeNull();
+    expect(run!.errorSummary).toMatch(/no readable body/);
+
+    const after = await articles.findOneByOrFail({ id: before.id });
+    expect(after.analysisTextMode).toBe("api_content");
+    expect(after.analysisText!.length).toBeGreaterThan(10 * before.analysisText!.length);
+    // A sentence that exists only in the page, never in the feed item.
+    expect(after.analysisText).toContain("the rest of the world will always call it Lake Ontario");
+    // The extraction made no second Article and disturbed nothing else about this
+    // one — it is still the Unclustered Article the feed inserted.
+    expect(await articles.count()).toBe(3);
+    expect(after.storyId).toBeNull();
+    expect(after.url).toBe(before.url);
+    expect(after.title).toBe(before.title);
+
+    // A page that refused leaves its Article exactly where it was: a paywall is an
+    // expected outcome, not a lost row and not a downgrade.
+    const refused = await articles.findBy({ analysisTextMode: "feed_excerpt" });
+    expect(refused).toHaveLength(2);
+    expect(refused.every((article) => article.analysisText !== null)).toBe(true);
+  });
+
+  it("stores the extracted body for analysis and serves it to nobody", async () => {
+    const rss = await createRssConnector("https://feeds.npr.org/1004/rss.xml");
+    await runConnector(rss, { fetchText: nprFeed });
+    const connector = await createExtractionConnector();
+    await runConnector(connector, { fetchText: noFeed, fetchPage: () => page("npr-lake-ontario.html") });
+    const extracted = await AppDataSource.getRepository(Article).findOneByOrFail({ url: nprUrl });
+    expect(extracted.analysisTextMode).toBe("api_content");
+
+    // The strongest form of the rule: even hand-classified as `licensed`, a body
+    // Tessera extracted itself is not the publisher's to grant (CONTEXT.md "Terms
+    // Class"), so no Terms Class clears it.
+    await AppDataSource.getRepository(Publisher).update({ id: extracted.publisherId }, { termsClass: "licensed" });
+    expect(mayServeText("licensed", "api_content")).toBe(false);
+
+    // And today it is not reachable at all: ingestion leaves the Article
+    // unclustered, and every public read path joins through Story.
+    const token = await registerAndLogin("extraction-reader@example.com", "student");
+    const res = await request(app())
+      .get(`/api/v1/articles/${extracted.id}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(404);
+  });
+
+  it("caps attempts per run and never re-fetches a page it already tried", async () => {
+    const rss = await createRssConnector("https://example.test/feed.xml");
+    const publisher = await AppDataSource.getRepository(Publisher).save({
+      name: "Example",
+      domain: "example.test",
+    });
+    const backlog = MAX_EXTRACTION_ATTEMPTS + 5;
+    await AppDataSource.getRepository(Article).insert(
+      Array.from({ length: backlog }, (_, index) => ({
+        publisherId: publisher.id,
+        discoveredByConnectorId: rss.id,
+        storyId: null,
+        title: `Teased story ${index}`,
+        url: `https://example.test/story-${index}`,
+        analysisText: "A one-line teaser.",
+        analysisTextMode: "feed_excerpt" as const,
+        publishedAt: new Date(),
+      })),
+    );
+
+    const connector = await createExtractionConnector();
+    const fetched: string[] = [];
+    const deps: RunConnectorDeps = {
+      fetchText: noFeed,
+      fetchPage: (url) => {
+        fetched.push(url);
+        return Promise.reject(new Error("responded 403"));
+      },
+    };
+
+    const first = await runConnector(connector, deps);
+    expect(first!.status).toBe("succeeded");
+    expect(first!.discovered).toBe(MAX_EXTRACTION_ATTEMPTS);
+    expect(first!.failed).toBe(MAX_EXTRACTION_ATTEMPTS);
+    expect(countersSumToDiscovered(first!)).toBe(true);
+    // The reason is on the run, so an operator diagnoses a blocked publisher
+    // without reading server logs.
+    expect(first!.errorSummary).toMatch(/extraction failed for https:\/\/example\.test\/story-\d+: responded 403/);
+    // #46's convention: a run that read its cap's worth has not cleared the
+    // backlog, and `discovered` alone cannot say so.
+    expect(first!.errorSummary).toMatch(new RegExp(`hit the ${MAX_EXTRACTION_ATTEMPTS}-page cap`));
+
+    // The backlog drains rather than being re-walked: a failure leaves the mode
+    // alone, so only the attempt mark stops the next run starting where this one
+    // did.
+    const second = await runConnector(connector, deps);
+    expect(second!.discovered).toBe(backlog - MAX_EXTRACTION_ATTEMPTS);
+    const third = await runConnector(connector, deps);
+    expect(third!.discovered).toBe(0);
+    expect(fetched).toHaveLength(backlog);
+    expect(new Set(fetched).size).toBe(backlog);
+    // Every one of them still holds the excerpt it arrived with.
+    expect(await AppDataSource.getRepository(Article).countBy({ analysisTextMode: "feed_excerpt" })).toBe(backlog);
+  });
+
+  it("never fetches a page for a GKG-discovered Article, even one a feed later enriched", async () => {
+    const gkg = await createGkgConnector();
+    const rss = await createRssConnector("https://wmuk.example/feed.xml");
+    await runConnector(gkg, gkgFixture("20260830190000.gkg.csv"));
+    // The same canonical URL from a feed, which raises that GKG row to
+    // `feed_excerpt` — the one way a firehose row can look like a candidate.
+    await runConnector(rss, { fetchText: fixture("wmuk-npr-news.xml") });
+    expect(
+      await AppDataSource.getRepository(Article).countBy({ analysisTextMode: "feed_excerpt" }),
+    ).toBe(1);
+
+    const connector = await createExtractionConnector();
+    const run = await runConnector(connector, {
+      fetchText: noFeed,
+      // 63k firehose rows a day across 163+ unknown domains is the crawler #47
+      // exists not to be, so a single fetch here is a failure of the ticket.
+      fetchPage: () => Promise.reject(new Error("extraction must not fetch a GKG-discovered page")),
+    });
+
+    expect(run!.status).toBe("succeeded");
+    expect(run!.discovered).toBe(0);
+    expect(run!.failed).toBe(0);
+    expect(countersSumToDiscovered(run!)).toBe(true);
+  });
+
+  it("leaves alone the Articles whose page it has no business reading", async () => {
+    const rss = await createRssConnector("https://example.test/feed.xml");
+    const publishers = AppDataSource.getRepository(Publisher);
+    const [internal, syndicated, open] = await Promise.all([
+      publishers.save({ name: "Internal", domain: "internal.test", termsClass: "internal_only" as const }),
+      publishers.save({ name: "Syndicated", domain: "syndicated.test", termsClass: "syndicated_excerpt" as const }),
+      publishers.save({ name: "Open", domain: "open.test", termsClass: "open_metadata" as const }),
+    ]);
+    const teaser = "A one-line teaser.";
+    await AppDataSource.getRepository(Article).insert([
+      // A feed that supplied the whole article: nothing to fetch, and fetching it
+      // would risk replacing that body with a shorter extraction.
+      {
+        publisherId: internal.id,
+        discoveredByConnectorId: rss.id,
+        title: "Feed carried the body",
+        url: "https://internal.test/full",
+        analysisText: "Real reporting. ".repeat(200),
+        analysisTextMode: "feed_excerpt" as const,
+        publishedAt: new Date(),
+      },
+      // #40 cleared this publisher's excerpt for serving, and no Terms Class clears
+      // an extracted body — so extracting would take text out of the API.
+      {
+        publisherId: syndicated.id,
+        discoveredByConnectorId: rss.id,
+        title: "Excerpt already cleared",
+        url: "https://syndicated.test/teased",
+        analysisText: teaser,
+        analysisTextMode: "feed_excerpt" as const,
+        publishedAt: new Date(),
+      },
+      // An open_metadata publisher's text is not Tessera's to hold at all.
+      {
+        publisherId: open.id,
+        discoveredByConnectorId: rss.id,
+        title: "Metadata only rights",
+        url: "https://open.test/teased",
+        analysisText: teaser,
+        analysisTextMode: "feed_excerpt" as const,
+        publishedAt: new Date(),
+      },
+    ]);
+
+    const connector = await createExtractionConnector();
+    const run = await runConnector(connector, {
+      fetchText: noFeed,
+      fetchPage: (url) => Promise.reject(new Error(`extraction must not fetch ${url}`)),
+    });
+
+    expect(run!.status).toBe("succeeded");
+    expect(run!.discovered).toBe(0);
+    expect(countersSumToDiscovered(run!)).toBe(true);
+    // None of them was even marked as attempted: they are not candidates, as
+    // against candidates that failed.
+    expect(await AppDataSource.getRepository(Article).countBy({ extractionAttemptedAt: IsNull() })).toBe(3);
+  });
+
+  it("declines a body no longer than the excerpt it would replace", async () => {
+    const rss = await createRssConnector("https://example.test/feed.xml");
+    const publisher = await AppDataSource.getRepository(Publisher).save({
+      name: "Example",
+      domain: "example.test",
+    });
+    // A long teaser: still a teaser by the candidate rule, but longer than what the
+    // page below yields.
+    const excerpt = "The feed said this much and no more. ".repeat(30);
+    await AppDataSource.getRepository(Article).insert({
+      publisherId: publisher.id,
+      discoveredByConnectorId: rss.id,
+      title: "Teased at length",
+      url: "https://example.test/teased",
+      analysisText: excerpt,
+      analysisTextMode: "feed_excerpt" as const,
+      publishedAt: new Date(),
+    });
+
+    const connector = await createExtractionConnector();
+    const run = await runConnector(connector, {
+      fetchText: noFeed,
+      // Over the floor a consent wall has to clear, under what the feed already
+      // gave us — a page whose article body is mostly the standfirst.
+      fetchPage: async () => `<html><body><article><p>${"Only this much of it. ".repeat(32)}</p></article></body></html>`,
+    });
+
+    expect(run!.discovered).toBe(1);
+    expect(run!.failed).toBe(1);
+    expect(run!.enriched).toBe(0);
+    expect(countersSumToDiscovered(run!)).toBe(true);
+    expect(run!.errorSummary).toMatch(/body no longer than the excerpt held/);
+    // ADR-0024's ladder is one-way, so declining is the only way not to lose the
+    // longer text permanently.
+    const after = await AppDataSource.getRepository(Article).findOneByOrFail({ url: "https://example.test/teased" });
+    expect(after.analysisTextMode).toBe("feed_excerpt");
+    expect(after.analysisText).toBe(excerpt);
+  });
+
+  it("spaces requests to one publisher without holding up another", async () => {
+    vi.useFakeTimers();
+    try {
+      await vi.advanceTimersByTimeAsync(EXTRACTION_MIN_DOMAIN_INTERVAL_MS);
+      await spaceExtractionRequest("https://a.example/one");
+
+      let sameHost = false;
+      let otherHost = false;
+      const queued = spaceExtractionRequest("https://a.example/two").then(() => void (sameHost = true));
+      await spaceExtractionRequest("https://b.example/one").then(() => void (otherHost = true));
+
+      // A second host is not made to wait for the first one's interval.
+      expect(otherHost).toBe(true);
+      await vi.advanceTimersByTimeAsync(EXTRACTION_MIN_DOMAIN_INTERVAL_MS - 1);
+      expect(sameHost).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await queued;
+      expect(sameHost).toBe(true);
     } finally {
       vi.useRealTimers();
     }

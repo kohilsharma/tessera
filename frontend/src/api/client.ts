@@ -104,7 +104,7 @@ export type StudentDashboardData = {
 export type Sector = { category: StoryCategory; storyCount: number; articleCount: number };
 export type InvestorDashboardData = { role: "investor"; sectors: Sector[] };
 
-export type ConnectorKind = "gdelt_gkg" | "gdelt_doc" | "rss";
+export type ConnectorKind = "gdelt_gkg" | "gdelt_doc" | "rss" | "readability";
 export type ConnectorSummary = {
   id: string;
   name: string;

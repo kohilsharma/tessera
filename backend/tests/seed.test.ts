@@ -86,6 +86,15 @@ describe("npm run seed", () => {
     expect(rss.every((connector) => connector.enabled)).toBe(true);
     expect(rss.every((connector) => /^https:\/\//.test(connector.endpoint))).toBe(true);
     expect(rss.some((connector) => connector.endpoint.includes(".example"))).toBe(false);
+
+    // #47: the fourth surface, enabled, so the worker's tick picks up the backlog
+    // the feeds above leave behind. It fetches nothing at its endpoint — it reads
+    // Articles — so the endpoint is a scheme no fetcher recognises rather than an
+    // address someone might trust.
+    const extraction = connectors.filter((connector) => connector.kind === "readability");
+    expect(extraction).toHaveLength(1);
+    expect(extraction[0].enabled).toBe(true);
+    expect(extraction[0].endpoint).toBe("internal:readability");
   });
 
   it("creates one owned Brief complete on every mandated field, media included", async () => {

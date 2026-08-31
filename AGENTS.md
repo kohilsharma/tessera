@@ -79,8 +79,18 @@ looks like a bot or asks too often (measured: it drops the TLS connection rather
 a full 250-record response is stated as **truncated** on the run rather than reported as
 complete; and artlist carries no body or snippet at all, so DOC rows land on the same
 `metadata_only` rung as GKG's and are pruned by the same retention pass (now
-`pruneExpiredGdeltArticles`, covering both GDELT kinds). Phase 3.5 (graph/timeline) is not built
-yet.
+`pruneExpiredGdeltArticles`, covering both GDELT kinds).
+**Readability extraction** (#47) closes ADR-0018's fourth surface and is a connector kind of
+its own (`readability`, `src/ingestion/readability.ts` over `@mozilla/readability` + `linkedom`):
+it discovers nothing, it re-reads pages Tessera already holds an excerpt for and raises them to
+`api_content` — text `mayServeText` refuses to serve whatever the Terms Class, since no
+publisher handed it to us. Candidates are RSS-discovered Articles still on the excerpt rung
+that arrived without a body and have never been attempted (`articles.extractionAttemptedAt`),
+20 per run, one request per publisher domain every 2 seconds; GKG and DOC rows are excluded by
+kind *and* by rung, and so is any Article whose Publisher already had its excerpt cleared for
+serving. A paywall, a bot block, or a body no longer than the excerpt it would replace is a
+counted failure that leaves the Article where it was, so a run's ledger still sums to
+`discovered`. Phase 3.5 (graph/timeline) is not built yet.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
 `/register`, `/account`), role dashboards (`/dashboard/:role`), browsing the corpus
@@ -246,7 +256,8 @@ npm run migrate   # apply TypeORM migrations
 npm run seed      # demo users for all three roles (only path to an Admin, ADR-0015) + the
                   # Story/Article/Publisher corpus + one owned Brief with a cover image +
                   # 10 curated real RSS connectors + the enabled GKG firehose (#39, #41) +
-                  # the enabled DOC API connector carrying its query (#46);
+                  # the enabled DOC API connector carrying its query (#46) + the enabled
+                  # Readability extraction pass (#47);
                   # embedded with the hosted provider
                   # when GEMINI_API_KEY is set, else the Mock (ADR-0023 — switching providers
                   # needs a fresh volume, see SETUP.md)

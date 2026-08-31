@@ -13,6 +13,7 @@ import { AddPublisherTermsClass1755748000000 } from "./migrations/1755748000000-
 import { AddArticleToneAndDedupeIndex1755749000000 } from "./migrations/1755749000000-AddArticleToneAndDedupeIndex";
 import { CreateGkgAnnotations1755750000000 } from "./migrations/1755750000000-CreateGkgAnnotations";
 import { PreserveGkgAnnotationSurfaceNames1755751000000 } from "./migrations/1755751000000-PreserveGkgAnnotationSurfaceNames";
+import { AddArticleExtractionAttemptedAt1755752000000 } from "./migrations/1755752000000-AddArticleExtractionAttemptedAt";
 import { User } from "./entities/User";
 import { Publisher } from "./entities/Publisher";
 import { Story } from "./entities/Story";
@@ -63,6 +64,7 @@ export const AppDataSource = new DataSource({
     AddArticleToneAndDedupeIndex1755749000000,
     CreateGkgAnnotations1755750000000,
     PreserveGkgAnnotationSurfaceNames1755751000000,
+    AddArticleExtractionAttemptedAt1755752000000,
   ],
   synchronize: false,
   logging: false,

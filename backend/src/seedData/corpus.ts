@@ -1,3 +1,4 @@
+import type { ConnectorKind } from "../entities/IngestionConnector";
 import type { TermsClass } from "../entities/Publisher";
 import { StoryCategory } from "../entities/Story";
 
@@ -24,7 +25,12 @@ export const SEED_PUBLISHERS: SeedPublisher[] = [
 
 // ADR-0018's ingestion surfaces, seeded so the Admin dashboard has real
 // connectors to inspect and, from #39, real feeds to run.
-export type SeedConnector = { name: string; kind: "gdelt_gkg" | "gdelt_doc" | "rss"; endpoint: string; enabled: boolean };
+export type SeedConnector = {
+  name: string;
+  kind: ConnectorKind;
+  endpoint: string;
+  enabled: boolean;
+};
 
 // The curated RSS list. ADR-0018 makes feed curation the cheapest lever on text
 // quality, so the five that emit `content:encoded` (a full article body rather
@@ -84,6 +90,16 @@ export const SEED_CONNECTORS: SeedConnector[] = [
     enabled: true,
   },
   ...SEED_RSS_FEEDS.map(({ name, endpoint }): SeedConnector => ({ name, kind: "rss", endpoint, enabled: true })),
+  {
+    // #47. Readability extraction, which reads Articles the feeds above already
+    // stored rather than an address of its own — so the endpoint names the pass.
+    // Non-null because every connector has one; a scheme no fetcher recognises,
+    // because nothing should ever try to fetch it.
+    name: "Readability full-text extraction",
+    kind: "readability",
+    endpoint: "internal:readability",
+    enabled: true,
+  },
 ];
 
 export type SeedArticle = {

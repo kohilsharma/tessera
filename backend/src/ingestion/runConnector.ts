@@ -3,9 +3,10 @@ import { AppDataSource } from "../data-source";
 import { Article, isStrongerAnalysisTextMode } from "../entities/Article";
 import type { AnalysisTextMode } from "../entities/Article";
 import { IngestionConnector } from "../entities/IngestionConnector";
+import type { ConnectorKind } from "../entities/IngestionConnector";
 import { IngestionRun } from "../entities/IngestionRun";
 import { GkgAnnotation } from "../entities/GkgAnnotation";
-import { Publisher, mayServeText, mayStoreText } from "../entities/Publisher";
+import { Publisher, TERMS_CLASSES, mayServeText, mayStoreText } from "../entities/Publisher";
 import { canonicalizeUrl, normalizeTitle, publisherDomain } from "./canonicalUrl";
 import { DOC_MAX_RECORDS, docRequestUrl, parseDocArtList } from "./doc";
 import {
@@ -19,6 +20,7 @@ import {
   type ParsedAnnotation,
 } from "./gkg";
 import { parseRssFeed } from "./rss";
+import { extractArticleText } from "./readability";
 
 // The one new seam in Phase 2 (#38): a plain async function taking the connector
 // and its dependencies, returning the IngestionRun it persisted. Everything below
@@ -36,8 +38,14 @@ export type FetchBytes = (url: string) => Promise<Uint8Array>;
 // one-key deps object; the GKG path falls back to the real fetcher, and its tests
 // always inject. `fetchDoc` is separate from `fetchText` rather than a flag on it
 // because the DOC API demands a different caller identity and its own pacing (see
-// httpFetchDocText).
-export type RunConnectorDeps = { fetchText: FetchText; fetchBytes?: FetchBytes; fetchDoc?: FetchText };
+// httpFetchDocText), and `fetchPage` is separate again because a publisher's page
+// is paced per domain (#47).
+export type RunConnectorDeps = {
+  fetchText: FetchText;
+  fetchBytes?: FetchBytes;
+  fetchDoc?: FetchText;
+  fetchPage?: FetchText;
+};
 
 const FETCH_TIMEOUT_MS = 15_000;
 // A GKG window is ~3 MB compressed, so it gets a download-shaped timeout rather
@@ -81,18 +89,26 @@ export const DOC_MIN_INTERVAL_MS = 5_000;
 
 // ponytail: the spacing is held in a module variable, so it paces this process
 // only. That holds today — the worker is a single process at concurrency 1
-// (ADR-0015, #42) and nothing else fetches DOC — and the upgrade path if the worker
-// is ever scaled out is a Redis-held timestamp, since Redis is already a
+// (ADR-0015, #42) and nothing else fetches these — and the upgrade path if the
+// worker is ever scaled out is a Redis-held timestamp, since Redis is already a
 // dependency.
-let docReadyAt = 0;
+const readyAt = new Map<string, number>();
 
-export async function spaceDocRequest(): Promise<void> {
+// One key's turn to make a request. Keyed rather than a single timestamp because
+// extraction paces per publisher domain (#47) where DOC paces one endpoint — the
+// same rule at two scopes.
+async function pace(key: string, intervalMs: number): Promise<void> {
   const now = Date.now();
-  const waitMs = Math.max(0, docReadyAt - now);
+  const at = readyAt.get(key) ?? 0;
+  const waitMs = Math.max(0, at - now);
   // The slot is claimed before awaiting, so two callers in the same tick queue
   // behind each other instead of both reading the same free slot.
-  docReadyAt = Math.max(now, docReadyAt) + DOC_MIN_INTERVAL_MS;
+  readyAt.set(key, Math.max(now, at) + intervalMs);
   if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+}
+
+export async function spaceDocRequest(): Promise<void> {
+  await pace("doc", DOC_MIN_INTERVAL_MS);
 }
 
 export async function httpFetchDocText(url: string): Promise<string> {
@@ -103,6 +119,67 @@ export async function httpFetchDocText(url: string): Promise<string> {
     redirect: "follow",
   });
   if (!res.ok) throw new Error(`${url} responded ${res.status}`);
+  return res.text();
+}
+
+// #47. Readability's input: one publisher page, fetched with the courtesy
+// identity the feeds already get — a page we are reading because that publisher's
+// own feed pointed us at it. A domain gets one request per interval, because an
+// extraction run walks a backlog and several of its candidates will share a host.
+export const EXTRACTION_MIN_DOMAIN_INTERVAL_MS = 2_000;
+// Pages fetched per extraction run. The tick is every 15 minutes, so this is a
+// ceiling of ~1900 pages a day against a curated list of 10 feeds — comfortably
+// more than they publish, while a backlog of paywalled failures can never turn
+// into a burst.
+export const MAX_EXTRACTION_ATTEMPTS = 20;
+// The length above which an RSS item's text is a body rather than a teaser, and
+// the Article is therefore not one that "arrived without full text" (#47).
+// Measured against the committed captures: NPR's item text is ~230 characters,
+// while the feeds curated for `content:encoded` run to thousands.
+// ponytail: a single threshold, so a long teaser is never read and a very short
+// syndicated article is re-read for nothing — one wasted request either way, and
+// no data is lost, since a body that fails to beat what is held is declined below.
+// The upgrade path is recording the ratio of item text to extracted body per
+// publisher and letting that decide.
+export const FEED_TEASER_MAX_LENGTH = 1_200;
+
+// A candidate's Publisher must let Tessera store the body at all, and must not
+// already have cleared its excerpt for serving: no Terms Class clears text
+// Tessera extracted itself (CONTEXT.md "Terms Class"), so raising such an Article
+// would take out of the API exactly the text #40 put there. Derived from the two
+// rights functions rather than restated, so a new class is classified once.
+const EXTRACTABLE_TERMS_CLASSES = TERMS_CLASSES.filter(
+  (termsClass) => mayStoreText(termsClass) && !mayServeText(termsClass, "feed_excerpt"),
+);
+// A body large enough to be a download rather than an article. Rejected before
+// reading, so a mis-linked archive costs one HEAD-shaped round trip.
+// ponytail: `Content-Length` only, so a chunked response is bounded by the
+// timeout instead — a streaming reader with a byte budget is the upgrade if a
+// feed ever points at one.
+const MAX_PAGE_BYTES = 4 * 1024 * 1024;
+
+// Exported for the same reason spaceDocRequest is: the pacing is the requirement,
+// so it is assertable without a real fetch.
+export async function spaceExtractionRequest(url: string): Promise<void> {
+  await pace(publisherDomain(url), EXTRACTION_MIN_DOMAIN_INTERVAL_MS);
+}
+
+export async function httpFetchPage(url: string): Promise<string> {
+  await spaceExtractionRequest(url);
+  const res = await fetch(url, {
+    headers: { "User-Agent": USER_AGENT, Accept: "text/html, application/xhtml+xml" },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    redirect: "follow",
+  });
+  if (!res.ok) throw new Error(`${url} responded ${res.status}`);
+  // A PDF or a video is not something Readability can read, and reading it to
+  // find that out is the waste this avoids.
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!/^\s*(text\/html|application\/xhtml\+xml)/i.test(contentType)) {
+    throw new Error(`${url} served ${contentType || "no content type"}, not HTML`);
+  }
+  const declaredBytes = Number(res.headers.get("content-length") ?? 0);
+  if (declaredBytes > MAX_PAGE_BYTES) throw new Error(`${url} declared ${declaredBytes} bytes`);
   return res.text();
 }
 
@@ -365,6 +442,11 @@ type DiscoveredItem = {
   // name it — GKG supplies nothing better, and a Publisher is keyed on domain
   // regardless.
   publisherName: string | null;
+  // Why this item cannot be stored, decided during discovery rather than below —
+  // a Readability extraction that came back empty or would not fetch (#47). Fails
+  // the item with this reason, so a paywall is one counted outcome with a legible
+  // cause rather than a gap in the ledger.
+  failure?: string;
 };
 
 // A run's whole discovery step: the items it found, the nearest thing the source
@@ -514,11 +596,105 @@ async function discoverDoc(connector: IngestionConnector, deps: RunConnectorDeps
   };
 }
 
+// #47. ADR-0018's fourth surface, and the only one that discovers nothing new: it
+// re-reads pages Tessera already holds an excerpt for, to replace that excerpt
+// with the body. Every candidate is one discovered item with one outcome, so the
+// run's ledger reads exactly as any other connector's — enriched where extraction
+// worked, failed where it did not.
+//
+// The candidate rule is the whole restriction ADR-0018 and #47 exist to impose:
+// RSS-discovered, still on the excerpt rung, holding no more than a teaser, never
+// yet attempted, and from a Publisher whose rights leave room for the swap. GKG and
+// DOC rows are excluded twice over — by connector kind and by their `metadata_only`
+// rung — because 63k firehose rows a day across 163+ unknown domains would make
+// this a general-purpose crawler nobody asked for.
+async function discoverExtraction(deps: RunConnectorDeps): Promise<Discovery> {
+  const fetchPage = deps.fetchPage ?? httpFetchPage;
+  const articles = AppDataSource.getRepository(Article);
+  const found = await articles
+    .createQueryBuilder("article")
+    .innerJoin("article.publisher", "publisher")
+    .select(["article.id", "article.title", "article.url", "article.publishedAt", "article.analysisText"])
+    .where(`article."extractionAttemptedAt" IS NULL`)
+    .andWhere(`article."analysisTextMode" = :mode`, { mode: "feed_excerpt" satisfies AnalysisTextMode })
+    // "Arrived without full text" (#47). The rung cannot answer that on its own:
+    // rss.ts reads `content:encoded ?? description` into one field, and a feed that
+    // emits `content:encoded` may put a whole article there or — as NPR's does — a
+    // teaser and an image. So the held text's own length is the question, and a
+    // feed that already supplied a body is left alone rather than re-fetched.
+    .andWhere(`length(article."analysisText") < :teaser`, { teaser: FEED_TEASER_MAX_LENGTH })
+    .andWhere(`publisher."termsClass" IN (:...termsClasses)`, { termsClasses: EXTRACTABLE_TERMS_CLASSES })
+    .andWhere(`article."discoveredByConnectorId" IN (SELECT id FROM ingestion_connectors WHERE kind = :kind)`, {
+      kind: "rss" satisfies ConnectorKind,
+    })
+    // Freshest first: a run is capped, so what it spends its attempts on should be
+    // the reporting most likely to matter. The attempt mark is what stops a
+    // backlog older than the cap from being starved forever.
+    .orderBy(`article."createdAt"`, "DESC")
+    // One past the cap, so "there is more waiting" is a fact this run read rather
+    // than an inference from a full page of results.
+    .limit(MAX_EXTRACTION_ATTEMPTS + 1)
+    .getMany();
+  const candidates = found.slice(0, MAX_EXTRACTION_ATTEMPTS);
+
+  const items: DiscoveredItem[] = [];
+  for (const candidate of candidates) {
+    // Marked before the fetch, not after it: a page that hangs the process or
+    // crashes the run must not be the page every future run starts with.
+    await articles.update({ id: candidate.id }, { extractionAttemptedAt: new Date() });
+    const held = candidate.analysisText?.length ?? 0;
+    let text: string | null = null;
+    let failure: string | undefined;
+    try {
+      const extracted = extractArticleText(await fetchPage(candidate.url));
+      // A consent wall, a paywall stub or a nav skeleton — fetched fine, and worth
+      // distinguishing from a page that never arrived.
+      if (extracted === null) failure = `no readable body at ${candidate.url}`;
+      // The ladder is one-way (ADR-0024), so an extraction that is not clearly
+      // more than the excerpt would replace it permanently and for nothing.
+      else if (extracted.length <= held) failure = `body no longer than the excerpt held for ${candidate.url}`;
+      else text = extracted;
+    } catch (err) {
+      failure = `extraction failed for ${candidate.url}: ${err instanceof Error ? err.message : String(err)}`;
+    }
+    items.push({
+      title: candidate.title,
+      link: candidate.url,
+      publishedAt: candidate.publishedAt,
+      text,
+      // ADR-0024: a body Tessera extracted itself, which mayServeText refuses to
+      // serve whatever the Publisher's Terms Class (#40) — it is text no
+      // publisher handed us.
+      mode: "api_content",
+      // Tone is GKG's alone.
+      tone: null,
+      publisherName: null,
+      failure,
+    });
+  }
+
+  return {
+    items,
+    // No cursor: extraction keeps its place per Article, in
+    // `articles.extractionAttemptedAt`, because its backlog is a set of rows rather
+    // than a position in a stream.
+    cursor: null,
+    // Said for the reason #46 states a truncated DOC result set: a run that read
+    // its cap's worth is not a run that cleared the backlog, and an operator
+    // reading `discovered` alone cannot tell those apart.
+    notes:
+      found.length > MAX_EXTRACTION_ATTEMPTS
+        ? [`hit the ${MAX_EXTRACTION_ATTEMPTS}-page cap: more Articles are waiting for extraction than this run read`]
+        : [],
+  };
+}
+
 async function discover(connector: IngestionConnector, deps: RunConnectorDeps): Promise<Discovery> {
   if (connector.kind === "rss") return discoverRss(connector, deps);
   if (connector.kind === "gdelt_gkg") return discoverGkg(connector, deps);
   if (connector.kind === "gdelt_doc") return discoverDoc(connector, deps);
-  // ADR-0018's three surfaces are all implemented as of #46, so this is reachable
+  if (connector.kind === "readability") return discoverExtraction(deps);
+  // ADR-0018's four surfaces are all implemented as of #47, so this is reachable
   // only if the `kind` column outgrows the union — and then it is a failed run
   // with a legible reason, not a run that quietly discovers nothing.
   throw new Error(`No connector implementation for kind "${connector.kind}"`);
@@ -529,6 +705,8 @@ async function discover(connector: IngestionConnector, deps: RunConnectorDeps): 
 // input, so a missing link, an unparseable date or a row with no title is an
 // expected outcome that fails the item and not the run.
 async function ingestItem(item: DiscoveredItem, connector: IngestionConnector): Promise<ItemOutcome> {
+  // Discovery already knows this one cannot be stored (#47), and says why.
+  if (item.failure) fail(item.failure);
   // Bound to locals, not read off `item` twice: narrowing a parameter's property
   // does not survive into the transaction callback below.
   const title = item.title;

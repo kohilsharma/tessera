@@ -84,6 +84,19 @@ export class Article {
   @Column({ type: "timestamptz" })
   publishedAt!: Date;
 
+  // #47. When Readability last tried this Article's page, success or failure —
+  // the one thing that makes extraction a bounded pass rather than a crawler.
+  // Failure leaves the mode untouched (ADR-0018 expects paywalls), so without a
+  // mark every run would re-fetch the same failures forever and never reach
+  // anything new. Null means never attempted, which is every Article until an
+  // extraction run picks it up.
+  //
+  // ponytail: one attempt per Article, ever — a page that timed out once is never
+  // retried. The upgrade path is an attempt count plus a backoff interval, if a
+  // measurable share of failures turn out to be transient.
+  @Column({ type: "timestamptz", nullable: true })
+  extractionAttemptedAt!: Date | null;
+
   // Which connector found this. Null for seeded fixtures, which nothing
   // discovered (ADR-0007) — so provenance is answerable per Article without
   // pretending the demo corpus arrived over the wire.

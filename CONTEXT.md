@@ -76,6 +76,20 @@ Terms are canonical: use these words in code, docs, and conversation.
   change, but it is not yet an operator-facing one: the seed owns every seeded connector's
   endpoint and converges a stale one, so changing the standing query means changing the seed
   constant. Only `enabled` is the Admin's to set through the API. (#46)
+
+- **Extraction** — Reading a publisher's own page for the body its feed only teased, raising
+  that Article from `feed_excerpt` to `api_content`. It is a connector too (`readability`),
+  because what an operator needs around it — enable/disable, an on-demand Run, one
+  IngestionRun per invocation — is what a connector already has; but it discovers nothing,
+  so its "endpoint" names the pass rather than an address. Restricted to RSS-discovered
+  Articles that arrived without full text and never yet attempted, capped per run and paced
+  per publisher domain: a firehose row's page is deliberately out of reach, because following
+  63k unknown domains a day would make Tessera a general-purpose crawler. An Article whose feed
+  already supplied a body is left alone, as is one whose Publisher has cleared its excerpt for
+  serving — no Terms Class clears an extracted body, so raising it would take text out of the
+  API. Failure — a paywall, a consent wall, a bot block, a body no longer than the excerpt it
+  would replace — is an expected outcome that leaves the Article on the rung it already held
+  and is counted as failed on the run. (ADR-0018, ADR-0024, #47)
 - **IngestionRun** — One invocation of one connector, and the only record of what that
   invocation did: how much it discovered, inserted, enriched, rejected as duplicate, rejected
   on rights, and failed. Persisted in Postgres, never read back from the queue — the Admin

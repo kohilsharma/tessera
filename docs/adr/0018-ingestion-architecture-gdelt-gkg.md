@@ -63,3 +63,11 @@ Ingestion stack, all $0/month:
 - Embeddings are a **documented exception** to the internal-only rule above: bodies are sent
   to the hosted embedding provider (ADR-0023). Synthesis evidence text is not — that goes to
   the paid, contractually no-training provider (ADR-0003).
+- Amended 2026-08-31 by #47, which implemented item 4. Extraction *is* a connector kind
+  (`readability`) rather than a step inside the RSS one: an operator needs enable/disable, an
+  on-demand run and a per-invocation ledger for it, and those exist for connectors and nothing
+  else. Its scope is narrower than "Articles where only a URL/snippet exists" reads: only
+  RSS-discovered Articles that arrived without full text, never the `metadata_only` rows GKG
+  and DOC produce, because following 63k unknown domains a day is the general-purpose crawler
+  this ADR's own failure-mode note warns about. `@mozilla/readability` needs a DOM, supplied by
+  `linkedom` — one dependency, no native build, against jsdom's much larger tree.
