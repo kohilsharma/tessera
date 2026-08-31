@@ -98,8 +98,14 @@ nearest live Story above the similarity threshold, and seeds a new Story from tw
 mutually-matching Articles from two distinct Publishers — never one, and never into or out of
 the Curated Corpus, which `manual_fixture` closes in both directions. Eligibility is
 `feed_excerpt` or above, so the firehose's `metadata_only` rows are never clustered and keep
-aging out. A new Story takes the medoid Article's title and the `world` default until #51's
-model call names it. Enrichment nulls `articles.embedding` when it writes new text, so a null
+aging out. A new Story is **named** by one model call over its members' headlines (#51 —
+`src/clustering/naming.ts` over the shared synthesis provider; headlines only, so no body text
+leaves for it), made once after the seeding transaction commits and never for a Story that
+already exists. A failed call, a 15-second timeout, or a category outside the eight-value
+vocabulary leaves the medoid Article's title and the `world` default in place and the run still
+succeeds; with no key the Mock answers `[mock] <headline>`. Naming is clustering's one
+non-deterministic step: a re-run reproduces membership, not titles.
+Enrichment nulls `articles.embedding` when it writes new text, so a null
 vector means one thing. Operationally it is a second BullMQ queue on the same worker process,
 ticking hourly at :05, with an Admin-only `POST /api/v1/clustering/runs` that answers
 `202 {status:"accepted"}` and a `clustering_runs` history table.

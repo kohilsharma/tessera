@@ -10,6 +10,10 @@ Terms are canonical: use these words in code, docs, and conversation.
   Clustering forms one only from Articles that carry text (`feed_excerpt` or above) and only
   when at least two of them, from two distinct Publishers, agree — a Story of one is not a
   Story. The **Curated Corpus** is closed to clustering in both directions. (ADR-0026)
+  A new Story is **named** by one model call over its members' headlines, once, at creation:
+  the only non-deterministic step in clustering, so a re-run reproduces membership but not
+  titles. An existing Story is never renamed, and an unusable answer leaves the Story named
+  after its medoid Article. (ADR-0026)
 
 - **Article** — One piece of reporting discovered from a connector. Carries the text
   actually available for analysis (see *Analysis Text Mode*), not necessarily full body.

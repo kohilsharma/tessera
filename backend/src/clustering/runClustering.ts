@@ -6,6 +6,7 @@ import type { StoryAssignmentStatus } from "../entities/Article";
 import type { EmbeddingProvider } from "../embeddings/EmbeddingProvider";
 import { toVectorLiteral } from "../embeddings/pgvector";
 import { ACCEPTED_ASSIGNMENT, PENDING_ASSIGNMENT, acceptedCentroid } from "../lib/storyMembership";
+import type { SynthesisProvider } from "../synthesis";
 import {
   CLUSTERABLE_TEXT_MODES,
   DEFAULT_STORY_CATEGORY,
@@ -14,8 +15,9 @@ import {
   REVIEW_THRESHOLD,
   SIMILARITY_THRESHOLD,
 } from "./config";
+import { nameNewStory, storySlug } from "./naming";
 
-export type ClusteringDeps = { embedder: EmbeddingProvider };
+export type ClusteringDeps = { embedder: EmbeddingProvider; namer: SynthesisProvider };
 
 type Candidate = {
   id: string;
@@ -217,17 +219,6 @@ async function assignToStory(
   });
 }
 
-function storySlug(title: string, medoidId: string): string {
-  const stem = title
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60)
-    .replace(/-+$/g, "");
-  return `${stem || "story"}-${medoidId.slice(0, 8)}`;
-}
-
 function medoidOf(group: Candidate[]): Candidate {
   let best = group[0];
   let bestTotal = -Infinity;
@@ -246,7 +237,12 @@ function medoidOf(group: Candidate[]): Candidate {
 
 class GroupNotCorroborated extends Error {}
 
-async function seedStory(group: Candidate[]): Promise<number> {
+// What a committed Story hands back so it can be named (#51) outside the
+// transaction: who to name it after if the model does not answer, and the
+// headlines that are the only thing the model is shown.
+type SeededStory = { id: string; medoidId: string; headlines: string[]; members: number };
+
+async function seedStory(group: Candidate[]): Promise<SeededStory | null> {
   try {
     return await AppDataSource.transaction(async (manager) => {
       // Lock and revalidate the would-be members before deriving the medoid.
@@ -301,15 +297,26 @@ async function seedStory(group: Candidate[]): Promise<number> {
         new Date(Math.min(...times)),
         new Date(Math.max(...times)),
       ]);
-      return attached.length;
+      return {
+        id: story.id,
+        medoidId: medoid.id,
+        // Medoid first: it is the cluster's centre, and a deterministic order keeps
+        // the prompt — and so the Mock's answer — reproducible.
+        headlines: [medoid.title, ...attached.filter((member) => member.id !== medoid.id).map((m) => m.title)],
+        members: attached.length,
+      };
     });
   } catch (err) {
-    if (err instanceof GroupNotCorroborated) return 0;
+    if (err instanceof GroupNotCorroborated) return null;
     throw err;
   }
 }
 
-async function seedStories(candidates: Candidate[], tally: { seeded: number; storiesCreated: number }): Promise<void> {
+async function seedStories(
+  candidates: Candidate[],
+  namer: SynthesisProvider,
+  tally: { seeded: number; storiesCreated: number },
+): Promise<void> {
   const placed = new Set<string>();
 
   // ponytail: greedy maximal cliques are O(n³) in the worst case. Replace this
@@ -335,9 +342,17 @@ async function seedStories(candidates: Candidate[], tally: { seeded: number; sto
     }
 
     const seeded = await seedStory(group);
-    if (seeded === 0) continue;
-    tally.seeded += seeded;
+    if (!seeded) continue;
+    tally.seeded += seeded.members;
     tally.storiesCreated += 1;
+    // Exactly here, and nowhere else: one call for one Story that did not exist a
+    // moment ago. Not per Article, not per run, and never for an existing Story.
+    //
+    // ponytail: serial and uncached — a run's wall clock grows by up to
+    // STORY_NAMING_TIMEOUT_MS per new Story. Batch the names into one call, or add
+    // AGENTS.md's content_hash cache, only once a run seeds enough Stories at once
+    // for that to be measurable.
+    await nameNewStory(namer, seeded);
     for (const member of group) placed.add(member.id);
   }
 }
@@ -395,7 +410,7 @@ export async function runClustering(deps: ClusteringDeps): Promise<ClusteringRun
       }
     }
 
-    await seedStories(unassigned, tally);
+    await seedStories(unassigned, deps.namer, tally);
     if (assigned + tally.seeded > 0) await recomputeStoryCentroids();
 
     await runs.update(

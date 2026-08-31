@@ -1,4 +1,5 @@
 import { createEmbeddingProvider } from "../embeddings";
+import { createSynthesisProvider } from "../synthesis";
 import { CLUSTERING_RUN_JOB, CLUSTERING_TICK_JOB, enqueueClusteringRun } from "./queue";
 import { runClustering } from "./runClustering";
 
@@ -12,10 +13,10 @@ export async function runClusteringJob(job: { name: string }): Promise<void> {
   }
   if (job.name !== CLUSTERING_RUN_JOB) throw new Error(`Unknown clustering job "${job.name}"`);
 
-  // The provider is resolved per run rather than held: a key added to .env takes
+  // Both providers are resolved per run rather than held: a key added to .env takes
   // effect on the next run without restarting the worker, and ADR-0023's Mock
   // fallback keeps an offline clone running the same code path.
-  const run = await runClustering({ embedder: createEmbeddingProvider() });
+  const run = await runClustering({ embedder: createEmbeddingProvider(), namer: createSynthesisProvider() });
   console.log(
     `[worker] clustering run ${run.id} ${run.status}: embedded ${run.embedded}, considered ${run.considered}, ` +
       `assigned ${run.assigned}, held ${run.heldForReview} for review, ` +

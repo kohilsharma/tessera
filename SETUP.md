@@ -105,6 +105,12 @@ text may only go to the paid, contractually no-training provider. Set its
 `SYNTHESIS_ALLOWED_ORIGIN` to that endpoint's exact HTTPS origin. The backend refuses a
 mismatch before sending evidence. With no key, the deterministic Mock is used.
 
+The same provider names each new Story (#51), from its members' headlines only — no article
+text is sent for a naming call. Naming is the one non-deterministic step in clustering: a
+re-run reproduces membership exactly, but a comparable cluster may be titled differently, and
+an existing Story is never renamed. With no key, Stories are named `[mock] <headline>`, which
+is how a demo without a key admits that no model named them.
+
 **Switching embedding providers means re-embedding from scratch.** Search compares a query's
 vector against whatever embedded the corpus, and the two providers' vector spaces
 are unrelated — mixing them silently returns nonsense rather than failing. A plain

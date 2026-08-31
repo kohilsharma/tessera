@@ -12,6 +12,15 @@ export interface SynthesisRequest {
   json?: boolean;
   maxTokens?: number;
   temperature?: number;
+  // A stable label for *what* is being asked. Real providers only log it; the Mock
+  // needs it to answer in the shape the caller expects, since `json` alone says
+  // nothing about which JSON. A closed union, so a typo is a compile error rather
+  // than synthesis-shaped output arriving where a Story name was expected.
+  task?: "synthesis" | "story_name";
+  // Total budget for the call including retries. A hung endpoint would otherwise
+  // hold the worker forever: concurrency is 1, so one stuck request stalls the
+  // whole queue (#42).
+  timeoutMs?: number;
 }
 
 export interface SynthesisProvider {

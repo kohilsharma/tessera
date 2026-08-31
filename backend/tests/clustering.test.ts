@@ -16,6 +16,7 @@ import {
   RECENCY_WINDOW_HOURS,
   REVIEW_THRESHOLD,
   SIMILARITY_THRESHOLD,
+  STORY_NAMING_TIMEOUT_MS,
 } from "../src/clustering/config";
 import { decidePendingAssignment } from "../src/clustering/review";
 import { EMBEDDING_DIMENSIONS, type EmbeddingKind, type EmbeddingProvider } from "../src/embeddings/EmbeddingProvider";
@@ -25,8 +26,9 @@ import { ClusteringRun } from "../src/entities/ClusteringRun";
 import { IngestionConnector } from "../src/entities/IngestionConnector";
 import { Publisher } from "../src/entities/Publisher";
 import { RejectedStoryAssignment } from "../src/entities/RejectedStoryAssignment";
-import { Story } from "../src/entities/Story";
+import { Story, STORY_CATEGORIES } from "../src/entities/Story";
 import { User } from "../src/entities/User";
+import { createSynthesisProvider, type SynthesisProvider, type SynthesisRequest } from "../src/synthesis";
 import { runConnector, type FetchText } from "../src/ingestion/runConnector";
 import { setupTestDb } from "./setupTestDb";
 
@@ -95,6 +97,36 @@ const failingEmbedder: EmbeddingProvider = {
   embed: () => Promise.reject(new Error("429 rate limited")),
   embedBatch: () => Promise.reject(new Error("429 rate limited")),
 };
+
+// The namer as an injected fixture (#51), recording every call so "one call per new
+// Story" can be counted. `answers` is what the provider returns, in order; running
+// out means the test expected fewer calls than were made.
+class StubNamer implements SynthesisProvider {
+  readonly requests: SynthesisRequest[] = [];
+
+  constructor(private readonly answers: string[]) {}
+
+  async complete(request: SynthesisRequest): Promise<string> {
+    this.requests.push(request);
+    const answer = this.answers[this.requests.length - 1];
+    if (answer === undefined) throw new Error(`StubNamer had no answer for call ${this.requests.length}`);
+    return answer;
+  }
+}
+
+const namingAnswer = (title: string, category: string) => JSON.stringify({ title, category });
+
+// The default for every test whose subject is membership rather than naming: a
+// provider that cannot answer, so the Story keeps the medoid title and the default
+// category. Naming failing is not allowed to change any clustering outcome, which
+// is exactly what those tests then assert.
+const unavailableNamer: SynthesisProvider = {
+  complete: () => Promise.reject(new Error("naming provider unavailable")),
+};
+
+function cluster(embedder: EmbeddingProvider, namer: SynthesisProvider = unavailableNamer) {
+  return runClustering({ embedder, namer });
+}
 
 let nextArticle = 0;
 
@@ -225,7 +257,7 @@ describe("runClustering", () => {
       "alpha body": axisVector(1),
       "alpha licensed": axisVector(2),
     });
-    const run = await runClustering({ embedder });
+    const run = await cluster(embedder);
 
     expect(run.status).toBe("succeeded");
     expect(run.embedded).toBe(3);
@@ -241,7 +273,7 @@ describe("runClustering", () => {
     }
     // A second run has nothing left to embed: a vector is written once and only
     // enrichment clears it.
-    const second = await runClustering({ embedder: new StubEmbedder({}) });
+    const second = await cluster(new StubEmbedder({}));
     expect(second.embedded).toBe(0);
   });
 
@@ -261,7 +293,7 @@ describe("runClustering", () => {
       },
     };
 
-    const run = await runClustering({ embedder });
+    const run = await cluster(embedder);
 
     expect(run.status).toBe("succeeded");
     expect(run.embedded).toBe(total);
@@ -296,7 +328,7 @@ describe("runClustering", () => {
       publishedAt,
     });
 
-    const run = await runClustering({ embedder: new StubEmbedder({}) });
+    const run = await cluster(new StubEmbedder({}));
 
     expect(run.considered).toBe(1);
     expect(run.assigned).toBe(1);
@@ -335,7 +367,7 @@ describe("runClustering", () => {
       publishedAt: hoursAgo(1),
     });
 
-    const run = await runClustering({ embedder: new StubEmbedder({}) });
+    const run = await cluster(new StubEmbedder({}));
 
     expect(run.assigned).toBe(2);
     const articles = AppDataSource.getRepository(Article);
@@ -371,7 +403,7 @@ describe("runClustering", () => {
       }
       return result;
     });
-    const run = await runClustering({ embedder: new StubEmbedder({}) });
+    const run = await cluster(new StubEmbedder({}));
     querySpy.mockRestore();
 
     expect(invalidated).toBe(true);
@@ -399,7 +431,7 @@ describe("runClustering", () => {
       vector: axisVector(1, BELOW_REVIEW),
     });
 
-    const run = await runClustering({ embedder: new StubEmbedder({}) });
+    const run = await cluster(new StubEmbedder({}));
 
     expect(run.considered).toBe(2);
     expect(run.assigned).toBe(0);
@@ -415,7 +447,7 @@ describe("runClustering", () => {
     await createArticle({ publisherId: publisher.id, title: "first edition", vector: axisVector(0) });
     await createArticle({ publisherId: publisher.id, title: "second edition", vector: axisVector(0) });
 
-    const run = await runClustering({ embedder: new StubEmbedder({}) });
+    const run = await cluster(new StubEmbedder({}));
 
     expect(run.storiesCreated).toBe(0);
     expect(run.seeded).toBe(0);
@@ -438,7 +470,7 @@ describe("runClustering", () => {
       }
       return result;
     });
-    const run = await runClustering({ embedder: new StubEmbedder({}) });
+    const run = await cluster(new StubEmbedder({}));
     querySpy.mockRestore();
 
     expect(run.seeded).toBe(0);
@@ -469,7 +501,7 @@ describe("runClustering", () => {
       }
       return result;
     });
-    const run = await runClustering({ embedder: new StubEmbedder({}) });
+    const run = await cluster(new StubEmbedder({}));
     querySpy.mockRestore();
 
     expect(run.errorSummary).toBeNull();
@@ -505,7 +537,7 @@ describe("runClustering", () => {
     // A fourth, unrelated Article: it matches nobody and must stay Unclustered.
     const unrelated = await createArticle({ publisherId: first.id, title: "Cup final venue", vector: axisVector(9) });
 
-    const run = await runClustering({ embedder: new StubEmbedder({}) });
+    const run = await cluster(new StubEmbedder({}));
 
     expect(run.storiesCreated).toBe(1);
     expect(run.seeded).toBe(3);
@@ -513,9 +545,9 @@ describe("runClustering", () => {
     expect(run.unclustered).toBe(1);
 
     const story = await AppDataSource.getRepository(Story).findOneByOrFail({});
+    // This run's namer cannot answer, so the medoid name is what the Story keeps.
     expect(story.title).toBe(medoid.title);
     expect(story.slug).toContain("regional-ceasefire-talks-resume");
-    // The documented default until #51's model call names it.
     expect(story.category).toBe(DEFAULT_STORY_CATEGORY);
     // Nothing has synthesised this Story, so it claims no summary.
     expect(story.summary).toBeNull();
@@ -552,7 +584,7 @@ describe("runClustering", () => {
       publishedAt: hoursAgo(3),
     });
 
-    const run = await runClustering({ embedder: new StubEmbedder({}) });
+    const run = await cluster(new StubEmbedder({}));
 
     expect(run.storiesCreated).toBe(1);
     expect(run.seeded).toBe(2);
@@ -573,7 +605,7 @@ describe("runClustering", () => {
     const before = await request(app()).get("/api/v1/search?q=dredging").set("Authorization", `Bearer ${token}`);
     expect(before.body.items).toEqual([]);
 
-    await runClustering({ embedder: new StubEmbedder({}) });
+    await cluster(new StubEmbedder({}));
 
     const stories = await request(app()).get("/api/v1/stories").set("Authorization", `Bearer ${token}`);
     expect(stories.status).toBe(200);
@@ -605,7 +637,7 @@ describe("runClustering", () => {
     });
     const live = await createArticle({ publisherId: livePublisher.id, title: "live report", vector: axisVector(0) });
 
-    const run = await runClustering({ embedder: new StubEmbedder({}) });
+    const run = await cluster(new StubEmbedder({}));
 
     // An exact match on the centroid, and still refused: the Curated Corpus is
     // closed to changes in membership (ADR-0026), which is what keeps a demo Story
@@ -631,7 +663,7 @@ describe("runClustering", () => {
       vector: axisVector(0, 0.05),
     });
 
-    const run = await runClustering({ embedder: new StubEmbedder({}) });
+    const run = await cluster(new StubEmbedder({}));
 
     expect(run.assigned).toBe(1);
     expect((await AppDataSource.getRepository(Article).findOneByOrFail({ id: candidate.id })).storyId).toBe(near.id);
@@ -646,7 +678,7 @@ describe("runClustering", () => {
       storyId: story.id,
       vector: axisVector(0),
     });
-    await runClustering({ embedder: new StubEmbedder({}) });
+    await cluster(new StubEmbedder({}));
     expect(await storyCentroid(story.id)).not.toBeNull();
 
     // What enrichment leaves behind: new text, and no vector describing it.
@@ -660,7 +692,7 @@ describe("runClustering", () => {
     // The member is re-embedded by this run, but only after the centroid pass — so
     // the Story is centroid-less while the candidate is scored, which is the point:
     // a Story must not match text Tessera no longer holds.
-    const run = await runClustering({ embedder: new StubEmbedder({ "member awaiting": axisVector(9) }) });
+    const run = await cluster(new StubEmbedder({ "member awaiting": axisVector(9) }));
 
     expect(run.embedded).toBe(1);
     expect(run.assigned).toBe(0);
@@ -692,7 +724,7 @@ describe("runClustering", () => {
       publishedAt: new Date(),
     });
 
-    const run = await runClustering({ embedder: new StubEmbedder({}) });
+    const run = await cluster(new StubEmbedder({}));
 
     expect(run.considered).toBe(1);
     expect(run.assigned).toBe(0);
@@ -800,7 +832,7 @@ describe("runClustering", () => {
     const candidate = await createArticle({ publisherId: second.id, title: "ambiguous report", vector: axisVector(0) });
 
     const articles = AppDataSource.getRepository(Article);
-    const firstRun = await runClustering({ embedder: new StubEmbedder({}) });
+    const firstRun = await cluster(new StubEmbedder({}));
     expect(firstRun.heldForReview).toBe(1);
     expect((await articles.findOneByOrFail({ id: candidate.id })).storyId).toBe(nearer.id);
 
@@ -808,14 +840,14 @@ describe("runClustering", () => {
 
     // The next run reconsiders the Article — it is Unclustered again — but the
     // refused pairing is off the table, so it proposes the other live Story.
-    const secondRun = await runClustering({ embedder: new StubEmbedder({}) });
+    const secondRun = await cluster(new StubEmbedder({}));
     expect(secondRun.heldForReview).toBe(1);
     expect((await articles.findOneByOrFail({ id: candidate.id })).storyId).toBe(farther.id);
 
     await decidePendingAssignment(candidate.id, "reject", admin.id);
 
     // Both refused, so there is nothing left to propose: Unclustered, and quiet.
-    const thirdRun = await runClustering({ embedder: new StubEmbedder({}) });
+    const thirdRun = await cluster(new StubEmbedder({}));
     expect(thirdRun.heldForReview).toBe(0);
     expect(thirdRun.unclustered).toBe(1);
     expect((await articles.findOneByOrFail({ id: candidate.id })).storyId).toBeNull();
@@ -847,7 +879,7 @@ describe("runClustering", () => {
     // The replacement text is nothing like the Story, so the rescore refuses it
     // outright — which is the point: the run decides on the text it holds now, and
     // the reviewer is never shown a score for a body that has been replaced.
-    const run = await runClustering({ embedder: new StubEmbedder({ "held on its teaser": axisVector(9) }) });
+    const run = await cluster(new StubEmbedder({ "held on its teaser": axisVector(9) }));
 
     expect(run.embedded).toBe(1);
     expect(run.considered).toBe(1);
@@ -863,12 +895,145 @@ describe("runClustering", () => {
     const publisher = await createPublisher("one.example");
     await createArticle({ publisherId: publisher.id, title: "needs a vector" });
 
-    const run = await runClustering({ embedder: failingEmbedder });
+    const run = await cluster(failingEmbedder);
 
     expect(run.status).toBe("failed");
     expect(run.errorSummary).toContain("429 rate limited");
     expect(run.embedded).toBe(0);
     expect(run.completedAt).not.toBeNull();
+  });
+});
+
+// #51: the one non-deterministic step. A model names each *new* Story once; every
+// way that can go wrong lands back on the medoid title and the default category,
+// because a badly-labelled cluster is not a broken one.
+describe("story naming", () => {
+  // Three Articles from three Publishers around one axis: the middle one is the
+  // medoid, so a test can say which title the fallback must produce. `startHours`
+  // orders whole clusters against each other, since candidates are read newest
+  // first — which is the order naming calls are made in.
+  async function seedableTrio(prefix: string, plane: number, startHours = 1): Promise<string> {
+    const titles = [`${prefix} talks reopen`, `${prefix} ceasefire talks resume`, `${prefix} mediators confirm talks`];
+    const offsets = [0.2, 0, -0.2];
+    for (const [index, title] of titles.entries()) {
+      const publisher = await createPublisher(`${prefix}-${index}.example`);
+      await createArticle({
+        publisherId: publisher.id,
+        title,
+        vector: axisVector(plane, offsets[index]),
+        publishedAt: hoursAgo(startHours + index),
+      });
+    }
+    return titles[1];
+  }
+
+  const storyTitles = async () =>
+    (await AppDataSource.getRepository(Story).find({ order: { title: "ASC" } })).map((story) => story.title);
+
+  it("names a new Story with one call, from its members' headlines alone", async () => {
+    const medoidTitle = await seedableTrio("regional", 0);
+    const namer = new StubNamer([namingAnswer("Ceasefire talks resume in the region", "politics")]);
+
+    const run = await cluster(new StubEmbedder({}), namer);
+
+    expect(run.status).toBe("succeeded");
+    expect(run.storiesCreated).toBe(1);
+    // One call for a three-Article Story: per new Story, never per Article.
+    expect(namer.requests).toHaveLength(1);
+    const [request] = namer.requests;
+    expect(request.task).toBe("story_name");
+    expect(request.json).toBe(true);
+    // A hung endpoint must not hold the worker: naming is bounded (#42, concurrency 1).
+    expect(request.timeoutMs).toBe(STORY_NAMING_TIMEOUT_MS);
+    // Headlines only — no Article text leaves for a naming call (ADR-0018).
+    expect(request.prompt).toContain(`- ${medoidTitle}`);
+    expect(request.prompt).toContain("- regional talks reopen");
+    expect(request.prompt).not.toContain("body text");
+
+    const story = await AppDataSource.getRepository(Story).findOneByOrFail({});
+    expect(story.title).toBe("Ceasefire talks resume in the region");
+    expect(story.category).toBe("politics");
+    // The slug follows the name the Story ended up with, not the medoid's.
+    expect(story.slug).toContain("ceasefire-talks-resume-in-the-region");
+  });
+
+  it("makes one call per new Story and none for a Story that already exists", async () => {
+    // An existing Story with a live centroid, and one Article that matches it.
+    const existing = await createStory({ title: "Existing coverage", lastSeenAt: hoursAgo(2) });
+    const member = await createPublisher("member.example");
+    await createArticle({
+      publisherId: member.id,
+      title: "existing member",
+      storyId: existing.id,
+      vector: axisVector(5),
+      publishedAt: hoursAgo(2),
+    });
+    const joiner = await createPublisher("joiner.example");
+    await createArticle({
+      publisherId: joiner.id,
+      title: "joins the existing coverage",
+      vector: axisVector(5, 0.1),
+      publishedAt: hoursAgo(1),
+    });
+    // Two brand new clusters beside it, the older one named second.
+    await seedableTrio("alpha", 0, 2);
+    await seedableTrio("beta", 1, 6);
+    const namer = new StubNamer([namingAnswer("Alpha named", "world"), namingAnswer("Beta named", "business")]);
+
+    const run = await cluster(new StubEmbedder({}), namer);
+
+    expect(run.assigned).toBe(1);
+    expect(run.storiesCreated).toBe(2);
+    // Two new Stories, two calls. The Story that already existed is not renamed,
+    // and gaining a member is not an occasion to rename it either.
+    expect(namer.requests).toHaveLength(2);
+    expect(await storyTitles()).toEqual(["Alpha named", "Beta named", "Existing coverage"]);
+  });
+
+  it("keeps the medoid name when the answer is off-vocabulary", async () => {
+    const medoidTitle = await seedableTrio("regional", 0);
+    const namer = new StubNamer([namingAnswer("A perfectly good title", "geopolitics")]);
+
+    const run = await cluster(new StubEmbedder({}), namer);
+
+    expect(run.status).toBe("succeeded");
+    expect(run.storiesCreated).toBe(1);
+    // Refused whole, not repaired: a Story is never half a model's judgement and
+    // half ours, so the title goes back with the category.
+    const story = await AppDataSource.getRepository(Story).findOneByOrFail({});
+    expect(story.title).toBe(medoidTitle);
+    expect(story.category).toBe(DEFAULT_STORY_CATEGORY);
+    expect(STORY_CATEGORIES).not.toContain("geopolitics");
+  });
+
+  it("keeps the medoid name when the call fails or answers with prose", async () => {
+    const firstMedoid = await seedableTrio("alpha", 0, 1);
+    const secondMedoid = await seedableTrio("beta", 1, 5);
+    const namer = new StubNamer(["Sure! Here are some ideas for a title."]);
+
+    // The first cluster gets prose; the second gets a thrown error, because the
+    // stub has run out of answers.
+    const run = await cluster(new StubEmbedder({}), namer);
+
+    expect(run.status).toBe("succeeded");
+    expect(run.errorSummary).toBeNull();
+    expect(run.storiesCreated).toBe(2);
+    expect(run.seeded).toBe(6);
+    expect(await storyTitles()).toEqual([firstMedoid, secondMedoid].sort());
+  });
+
+  it("is named by the deterministic Mock when no API key is configured", async () => {
+    expect(process.env.SYNTHESIS_API_KEY ?? "").toBe("");
+    const medoidTitle = await seedableTrio("regional", 0);
+
+    const run = await cluster(new StubEmbedder({}), createSynthesisProvider());
+
+    expect(run.status).toBe("succeeded");
+    const story = await AppDataSource.getRepository(Story).findOneByOrFail({});
+    // The Mock answers rather than falling back, and says so in the title: an
+    // offline demo gets named Stories that admit no model named them.
+    expect(story.title).toBe(`[mock] ${medoidTitle}`);
+    expect(STORY_CATEGORIES).toContain(story.category);
   });
 });
 
@@ -899,7 +1064,7 @@ describe("enrichment and the clustering job together", () => {
       Venezuela: axisVector(1),
       "Dolly Parton": axisVector(2),
     });
-    const first = await runClustering({ embedder });
+    const first = await cluster(embedder);
     expect(first.embedded).toBe(3);
     expect(await vectorOf(teaser.id)).not.toBeNull();
 
@@ -938,7 +1103,7 @@ describe("enrichment and the clustering job together", () => {
     expect(untouched).toHaveLength(2);
     for (const article of untouched) expect(await vectorOf(article.id)).not.toBeNull();
 
-    const second = await runClustering({ embedder });
+    const second = await cluster(embedder);
     expect(second.embedded).toBe(1);
     expect(await vectorOf(teaser.id)).not.toBeNull();
   });

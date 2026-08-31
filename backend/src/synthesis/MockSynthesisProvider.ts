@@ -1,11 +1,25 @@
 import { SynthesisProvider, SynthesisRequest } from "./SynthesisProvider";
 
+// Same ceiling naming accepts (clustering/naming.ts), so the Mock can never be
+// the reason a Story falls back to its medoid title.
+const MAX_MOCK_TITLE = 120;
+
 // ADR-0003 requires a deterministic Mock so the whole suite runs with no API
 // key. It answers in the shape the caller asked for — a JSON object when
 // `json` is set — so the validate-and-repair loop can be tested against a
 // provider that never varies and never bills.
 export class MockSynthesisProvider implements SynthesisProvider {
   async complete(request: SynthesisRequest): Promise<string> {
+    // #51: naming a Story asks for a different JSON object than synthesis does, so
+    // the Mock answers by task. The `[mock]` prefix is the point: with no key
+    // configured a demo still gets named Stories, and the name says out loud that
+    // no model chose it. The headline is read back out of the bullet list
+    // clustering/naming.ts writes — the end-to-end Mock naming test in
+    // tests/clustering.test.ts is what fails if that format ever drifts.
+    if (request.task === "story_name") {
+      const firstHeadline = request.prompt.match(/^- (.+)$/m)?.[1] ?? "unnamed cluster";
+      return JSON.stringify({ title: `[mock] ${firstHeadline}`.slice(0, MAX_MOCK_TITLE), category: "world" });
+    }
     if (!request.json) return `[mock synthesis] ${request.prompt.slice(0, 120)}`;
     // Echoing the evidence ids found in the prompt keeps the Mock honest about
     // ADR-0002's invariant: a claim carries citations, or it is not a claim.

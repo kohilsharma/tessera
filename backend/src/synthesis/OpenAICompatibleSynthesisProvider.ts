@@ -35,7 +35,8 @@ export class OpenAICompatibleSynthesisProvider implements SynthesisProvider {
       `${this.apiBase}/chat/completions`,
       this.apiKey,
       body,
-      "synthesis",
+      request.task ?? "synthesis",
+      request.timeoutMs === undefined ? undefined : AbortSignal.timeout(request.timeoutMs),
     )) as { choices?: { message?: { content?: string } }[] };
     const content = parsed.choices?.[0]?.message?.content;
     if (!content) throw new Error(`${this.model} returned no completion content`);

@@ -27,5 +27,10 @@ export const EMBED_BATCH_SIZE = envNumber("CLUSTERING_EMBED_BATCH_SIZE", 32, { m
 
 export const CLUSTERABLE_TEXT_MODES: AnalysisTextMode[] = ["feed_excerpt", "api_content", "licensed_full_text"];
 
-// Honest fallback until #51 names and categorises a Story.
+// What a Story is called when the naming call does not answer usefully (#51): the
+// medoid's own title, and the broadest category in the vocabulary.
 export const DEFAULT_STORY_CATEGORY: StoryCategory = "world";
+
+// One small call per new Story. Bounded rather than tunable: past this the medoid
+// title is the better answer, because the run behind it is holding the queue.
+export const STORY_NAMING_TIMEOUT_MS = 15_000;

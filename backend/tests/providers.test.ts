@@ -3,6 +3,7 @@ import { EMBEDDING_DIMENSIONS } from "../src/embeddings/EmbeddingProvider";
 import { GeminiEmbeddingProvider } from "../src/embeddings/GeminiEmbeddingProvider";
 import { createEmbeddingProvider } from "../src/embeddings";
 import { createSynthesisProvider } from "../src/synthesis";
+import { STORY_CATEGORIES } from "../src/entities/Story";
 
 // ADR-0003: a provider is chosen by env config, never hardcoded. These are the
 // selection rules themselves — the seam that lets NVIDIA, Gemini, DeepSeek or
@@ -102,6 +103,50 @@ describe("provider selection", () => {
     expect((fetchMock.mock.calls[0][1] as RequestInit).redirect).toBe("error");
   });
 
+  // #51: a naming call carries a deadline, and the transport must actually cancel
+  // the request rather than let it keep billing while the run moves on.
+  it("passes a caller's deadline to the request as an abort signal", async () => {
+    process.env.SYNTHESIS_API_KEY = "k";
+    process.env.SYNTHESIS_MODEL = "synthesis-model";
+    process.env.SYNTHESIS_API_BASE = "https://approved.example/v1";
+    process.env.SYNTHESIS_ALLOWED_ORIGIN = "https://approved.example";
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: "{}" } }] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createSynthesisProvider().complete({ prompt: "name this", timeoutMs: 15_000 });
+    expect((fetchMock.mock.calls[0][1] as RequestInit).signal).toBeInstanceOf(AbortSignal);
+
+    // No deadline asked for, none imposed: synthesis calls are long by nature.
+    await createSynthesisProvider().complete({ prompt: "name this" });
+    expect((fetchMock.mock.calls[1][1] as RequestInit).signal).toBeUndefined();
+  });
+
+  // The half of that deadline the signal on `fetch` does not cover: a rate limiter
+  // asking us to wait two minutes must not park a caller with a 15-second budget
+  // (worker concurrency is 1, so that stalls the whole queue).
+  it("stops waiting out a Retry-After once the deadline has passed", async () => {
+    process.env.SYNTHESIS_API_KEY = "k";
+    process.env.SYNTHESIS_MODEL = "synthesis-model";
+    process.env.SYNTHESIS_API_BASE = "https://approved.example/v1";
+    process.env.SYNTHESIS_ALLOWED_ORIGIN = "https://approved.example";
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      headers: { get: (header: string) => (header === "retry-after" ? "120" : null) },
+      text: async () => "slow down",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const startedAt = Date.now();
+    await expect(createSynthesisProvider().complete({ prompt: "name this", timeoutMs: 20 })).rejects.toThrow(/429/);
+
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   // ADR-0002's invariant reaches down even into the Mock: a claim carries
   // citations into the evidence it was given, or it is not a claim.
   it("returns deterministic cited JSON from the Mock synthesis provider", async () => {
@@ -111,6 +156,18 @@ describe("provider selection", () => {
     expect(parsed.claims[0].claim_type).toBe("consensus");
     expect(parsed.claims[0].citations).toEqual(["a1", "a2"]);
     expect(await mock.complete({ prompt: "[a1] first\n[a2] second", json: true })).toBe(out);
+  });
+
+  // The Mock answers by task, because `json` alone does not say which JSON (#51).
+  it("names a Story deterministically and in vocabulary from the Mock", async () => {
+    const mock = createSynthesisProvider();
+    const prompt = "These headlines all report the same event:\n- Talks resume\n- Talks reopen";
+    const out = await mock.complete({ task: "story_name", prompt, json: true });
+    const parsed = JSON.parse(out) as { title: string; category: string };
+
+    expect(parsed.title).toBe("[mock] Talks resume");
+    expect(STORY_CATEGORIES).toContain(parsed.category);
+    expect(await mock.complete({ task: "story_name", prompt, json: true })).toBe(out);
   });
 });
 
