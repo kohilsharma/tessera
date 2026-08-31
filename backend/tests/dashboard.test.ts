@@ -56,6 +56,7 @@ async function createMember(fields: {
   title: string;
   status?: "auto_accepted" | "pending_review";
   embedded?: boolean;
+  vector?: number[];
 }): Promise<Article> {
   nextMember += 1;
   const article = await AppDataSource.getRepository(Article).save({
@@ -70,8 +71,8 @@ async function createMember(fields: {
     publishedAt: new Date("2026-01-05T00:00:00Z"),
   });
   if (fields.embedded !== false) {
-    const vector = new Array<number>(EMBEDDING_DIMENSIONS).fill(0);
-    vector[nextMember % EMBEDDING_DIMENSIONS] = 1;
+    const vector = fields.vector ?? new Array<number>(EMBEDDING_DIMENSIONS).fill(0);
+    if (!fields.vector) vector[nextMember % EMBEDDING_DIMENSIONS] = 1;
     await AppDataSource.query(`UPDATE "articles" SET "embedding" = $1::vector WHERE "id" = $2`, [
       toVectorLiteral(vector),
       article.id,
@@ -196,6 +197,24 @@ describe("dashboard RBAC", () => {
     await createMember({ storyId: unembedded.id, publisherId: one.id, title: "Filed but unembedded", embedded: false });
     await createMember({ storyId: unembedded.id, publisherId: two.id, title: "Also unembedded", embedded: false });
 
+    // Two mastheads carrying one wire report are one newsroom after evidence selection,
+    // so the dashboard must not route to a generation request that will refuse them.
+    const wireOnly = await createStory("compare-wire-copy", "One wire report under two mastheads");
+    const wireVector = new Array<number>(EMBEDDING_DIMENSIONS).fill(0);
+    wireVector[0] = 1;
+    await createMember({
+      storyId: wireOnly.id,
+      publisherId: one.id,
+      title: "Wire filing under the first masthead",
+      vector: wireVector,
+    });
+    await createMember({
+      storyId: wireOnly.id,
+      publisherId: two.id,
+      title: "Wire filing under the second masthead",
+      vector: wireVector,
+    });
+
     const res = await request(app()).get("/api/v1/dashboard/investor").set("Authorization", `Bearer ${token}`);
 
     expect(res.status).toBe(200);
@@ -211,6 +230,7 @@ describe("dashboard RBAC", () => {
     expect(listed).not.toContain(alone.id);
     expect(listed).not.toContain(proposed.id);
     expect(listed).not.toContain(unembedded.id);
+    expect(listed).not.toContain(wireOnly.id);
   });
 
   // requireAuth resolves identity and role from the users row, not the token's

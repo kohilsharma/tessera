@@ -527,7 +527,15 @@ export type EvidenceRow = {
   excerpt: string | null;
 };
 
-export type AnalysisClaim = { id: string; claimType: ClaimType; text: string; citations: string[] };
+export type CitationRelationship = "supports" | "contradicts";
+export type CitationSide = { relationship: CitationRelationship; citations: string[] };
+export type AnalysisClaim = {
+  id: string;
+  claimType: ClaimType;
+  text: string;
+  citations: string[];
+  citationSides: CitationSide[] | null;
+};
 
 // A failed run is a 200 carrying `status: "failed"`, not an HTTP error: it is the
 // honest answer to "what is the analysis of this Story", and the reader is shown a

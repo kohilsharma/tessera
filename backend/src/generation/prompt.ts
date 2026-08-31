@@ -68,15 +68,18 @@ export function buildAnalysisPrompt(
     // No bracketed word anywhere below, for the reason above: the Mock reads the
     // first two bracketed tokens as evidence ids, so `[string]` in a schema sketch
     // would become a citation nothing can resolve on a one-Article set.
-    'Answer with a JSON object {"claims": [...]}, where each claim is ' +
-      '{"text": string, "claim_type": string, "citations": array of evidence ids}.',
+    'Answer with a JSON object {"claims": [...]}. For every claim except a contradiction, use ' +
+      '{"text": string, "claim_type": string, "citations": array of evidence ids}. For a contradiction, use ' +
+      '{"text": string, "claim_type": "contradiction", "sides": {"supports": array of evidence ids, ' +
+      '"contradicts": array of evidence ids}}.',
     `claim_type must be one of: ${claimTypes}.`,
     `consensus: something the reporting agrees on. source_specific: something only one publisher reports. ` +
       `contradiction: a point where the reporting disagrees.`,
     LENS_INSTRUCTION[lens],
     "citations must be evidence ids from the reporting above, written without brackets, for example A1.",
-    "Every claim must cite at least one evidence id, and may cite only ids listed above.",
-    "A contradiction must cite reporting from two different publishers.",
+    "Every non-contradiction claim must cite at least one evidence id, and may cite only ids listed above.",
+    "For a contradiction, write text as one factual proposition. Put reporting affirming it in supports and reporting opposing it in contradicts.",
+    "Each contradiction side must cite at least one listed evidence id, and the two sides must come from different publishers.",
     "State nothing that the cited reporting does not support.",
     // v3 §20.5's first control. The check that enforces it is in validate.ts, under
     // every Lens, because advice in a student's analysis is no more permitted than

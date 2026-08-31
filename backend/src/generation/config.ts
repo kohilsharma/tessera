@@ -46,7 +46,7 @@ export const EXCERPT_CHARS = 1500;
 // ADR-0027: a versioned code constant, recorded on every run, and the third part of
 // the reuse key — so bumping it invalidates every cached analysis by design. Bump
 // it whenever prompt.ts changes what it asks for.
-export const PROMPT_VERSION = "2026-09-02";
+export const PROMPT_VERSION = "2026-09-03";
 
 // The whole request's budget for model calls, repairs included — not per attempt.
 // Generation is synchronous, so this is how long a reader's request can hang before

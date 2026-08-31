@@ -88,7 +88,7 @@ describe.runIf(process.env.SYNTHESIS_LIVE_SMOKE === "1")("synthesis live smoke",
     expect(validated.claims.length).toBeGreaterThanOrEqual(2);
     for (const claim of validated.claims) {
       expect(claim.citations.length).toBeGreaterThan(0);
-      for (const citation of claim.citations) expect(frozen.has(citation)).toBe(true);
+      for (const citation of claim.citations) expect(frozen.has(citation.evidenceId)).toBe(true);
     }
   });
 });

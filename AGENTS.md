@@ -184,12 +184,9 @@ analysis with the emptied row.
 backend half is one query: the Investor dashboard now carries `comparableStories` — the Stories
 evidence selection would accept, newest movement first, capped at 10 — under the same conditions
 generation applies (accepted membership, analysis text, an embedding, ADR-0027's two distinct
-Publishers), so a row an Investor opens is a Story an analysis can be written about. It counts
-mastheads, not newsrooms: the wire-copy collapse is per EvidenceSet and over vectors, so a Story
-that is one wire report twice can still be listed and is refused on opening with the reason
-stated — which is why the register says Publishers and never promises an analysis. It carries no
-article count, deliberately: the members eligible here are a subset of the accepted members
-`/stories` counts, and one word for two numbers would be a defect.
+Publishers after near-duplicate collapse), so a row an Investor opens is a Story an analysis can
+be written about. It carries no article count, deliberately: the members eligible here are a
+subset of the accepted members `/stories` counts, and one word for two numbers would be a defect.
 Phase 3.5 (graph/timeline) is not built yet.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
@@ -217,13 +214,13 @@ by the register both records share (`components/analysisRegister.tsx`), stated a
 shared register reads differently under the two Lenses (#56), off the analysis's own `lens` so a
 saved investor analysis keeps its reading in a Brief: agreement, then disagreement, then the
 implication, with single-source reporting last; each consensus claim states the Publishers it was
-cited to out of the set's own count; a contradiction is rendered as its **sides** — the outlets
-grouped, each carrying the headline it cited and a link to open it — instead of a flat
-citation row; and the disagreement register is kept even when it is empty and says so, since a
-contradiction can be refused for citing one Publisher (#54) and silence would read as agreement. The Investor dashboard gained a second register routing into it (**Comparable
-coverage**), listing the Stories two or more Publishers have citable reporting on — mastheads, not
-newsrooms, since the wire-copy collapse happens when an EvidenceSet is frozen, so a Story that is
-one wire report twice is listed and refused on opening with the reason stated. The Admin console gained a fourth register for **IngestionRun** history and Run /
+cited to out of the set's own count; a contradiction is rendered as its **sides** — one factual
+proposition with supporting and contradicting citations persisted below the prompt, each carrying
+its Publisher, headline and link to open it — instead of a flat citation row; and the disagreement
+register is kept even when it is empty and says so, since a contradiction can be refused for
+missing a side (#54) and silence would read as agreement. The Investor dashboard gained a second
+register routing into it (**Comparable coverage**), listing only Stories whose evidence still
+holds two Publishers after the same near-duplicate collapse generation runs. The Admin console gained a fourth register for **IngestionRun** history and Run /
 Enable-Disable commands on each connector row (#39 — Run states that it queued the run, since
 the worker is what executes it, #42), and each publisher row shows its Terms
 Class beside its article count (#40). A fifth register carries **ClusteringRun** history with a

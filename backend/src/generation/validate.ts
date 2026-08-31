@@ -1,3 +1,4 @@
+import type { ClaimEvidenceRelationship } from "../entities/ClaimEvidence";
 import { claimTypesFor, type ClaimType } from "../entities/AnalysisClaim";
 import type { GenerationFailureCode, GenerationLens, GenerationValidationResult } from "../entities/GenerationRun";
 import { MIN_SURVIVING_CLAIMS } from "./config";
@@ -18,7 +19,8 @@ import { MIN_SURVIVING_CLAIMS } from "./config";
 // Either way, an answer this refuses is re-prompted with the reason before the run is
 // given up on; the repair loop is runGeneration's.
 
-export type ParsedClaim = { claimType: ClaimType; text: string; citations: string[] };
+export type ParsedCitation = { evidenceId: string; relationship: ClaimEvidenceRelationship };
+export type ParsedClaim = { claimType: ClaimType; text: string; citations: ParsedCitation[] };
 
 // The frozen set as validation needs it: which ids exist, and which Publisher each one
 // resolves to. The Publisher is what makes a contradiction checkable — "the reporting
@@ -102,7 +104,7 @@ const ISSUE_GUIDANCE: Record<string, string> = {
   unknown_evidence_id: "cited an evidence id that was not in the reporting provided",
   omission_language: "claimed a publisher omitted something, which an excerpt cannot support",
   prohibited_investor_language: "gave investment advice or named a price target",
-  unsupported_contradiction: "was a contradiction without reporting from two different publishers on it",
+  unsupported_contradiction: "was a contradiction without distinct supporting and contradicting Publishers",
 };
 
 // Cheap models fence their JSON even when asked for an object, and some prepend a
@@ -166,27 +168,64 @@ export function validateAnalysis(
   const unknownEvidenceIds: string[] = [];
 
   for (const [claimIndex, entry] of returned.entries()) {
-    const { text, claim_type: claimType, citations } = (entry ?? {}) as Record<string, unknown>;
+    const { text, claim_type: claimType, citations, sides } = (entry ?? {}) as Record<string, unknown>;
     // A structural failure is not a claim to drop — there is nothing to keep — so it
     // ends the whole answer here rather than joining the issue list (ADR-0027).
     if (typeof text !== "string" || text.trim() === "") return structural("A claim carries no text", claimIndex);
     if (typeof claimType !== "string" || !(permitted as string[]).includes(claimType)) {
       return structural(`Claim type "${String(claimType)}" is outside the contract for lens ${lens}`, claimIndex);
     }
-    if (!Array.isArray(citations) || citations.some((id) => typeof id !== "string")) {
-      return structural("A claim's citations are not a list of evidence ids", claimIndex);
-    }
 
     const drop = (code: string, detail?: string): void => {
       issues.push({ claimIndex, code, ...(detail ? { detail } : {}) });
     };
 
-    const cited = [...new Set((citations as string[]).map(normaliseCitation))].filter((id) => id !== "");
-    if (cited.length === 0) {
+    let parsedCitations: ParsedCitation[];
+    if (claimType === "contradiction") {
+      const sideObject = sides !== null && typeof sides === "object" && !Array.isArray(sides)
+        ? (sides as Record<string, unknown>)
+        : null;
+      const supports = sideObject?.supports;
+      const contradicts = sideObject?.contradicts;
+      if (
+        !Array.isArray(supports) ||
+        supports.some((id) => typeof id !== "string") ||
+        !Array.isArray(contradicts) ||
+        contradicts.some((id) => typeof id !== "string")
+      ) {
+        drop(!fullPermittedText && OMISSION_PHRASES.some((phrase) => phrase.test(text))
+          ? "omission_language"
+          : "unsupported_contradiction");
+        continue;
+      }
+      const supportedIds = [...new Set((supports as string[]).map(normaliseCitation))].filter((id) => id !== "");
+      const contradictedIds = [...new Set((contradicts as string[]).map(normaliseCitation))].filter((id) => id !== "");
+      if (
+        supportedIds.length === 0 ||
+        contradictedIds.length === 0 ||
+        supportedIds.some((id) => contradictedIds.includes(id))
+      ) {
+        drop("unsupported_contradiction");
+        continue;
+      }
+      parsedCitations = [
+        ...supportedIds.map((evidenceId) => ({ evidenceId, relationship: "supports" as const })),
+        ...contradictedIds.map((evidenceId) => ({ evidenceId, relationship: "contradicts" as const })),
+      ];
+    } else {
+      if (!Array.isArray(citations) || citations.some((id) => typeof id !== "string")) {
+        return structural("A claim's citations are not a list of evidence ids", claimIndex);
+      }
+      parsedCitations = [...new Set((citations as string[]).map(normaliseCitation))]
+        .filter((evidenceId) => evidenceId !== "")
+        .map((evidenceId) => ({ evidenceId, relationship: "supports" as const }));
+    }
+
+    if (parsedCitations.length === 0) {
       drop("claim_without_citation");
       continue;
     }
-    const unknown = cited.filter((id) => !evidence.has(id));
+    const unknown = parsedCitations.map((citation) => citation.evidenceId).filter((id) => !evidence.has(id));
     if (unknown.length > 0) {
       unknownEvidenceIds.push(...unknown);
       drop("unknown_evidence_id", unknown.join(", "));
@@ -200,14 +239,25 @@ export function validateAnalysis(
       drop("prohibited_investor_language");
       continue;
     }
-    // v3 §16.5: "a contradiction has no relevant evidence on both sides". Two sides
-    // means two newsrooms — a single publisher's own hedging is not the reporting
-    // disagreeing, and one citation cannot be both sides of anything.
-    if (claimType === "contradiction" && new Set(cited.map((id) => evidence.get(id))).size < 2) {
-      drop("unsupported_contradiction");
-      continue;
+    if (claimType === "contradiction") {
+      const supportingPublishers = new Set(
+        parsedCitations
+          .filter((citation) => citation.relationship === "supports")
+          .map((citation) => evidence.get(citation.evidenceId)!),
+      );
+      const contradictingPublishers = new Set(
+        parsedCitations
+          .filter((citation) => citation.relationship === "contradicts")
+          .map((citation) => evidence.get(citation.evidenceId)!),
+      );
+      // A Publisher cannot be both sides of an inter-Publisher disagreement. Requiring
+      // disjoint non-empty sets also implies the existing two-Publisher minimum.
+      if ([...supportingPublishers].some((publisherId) => contradictingPublishers.has(publisherId))) {
+        drop("unsupported_contradiction");
+        continue;
+      }
     }
-    claims.push({ claimType: claimType as ClaimType, text: text.trim(), citations: cited });
+    claims.push({ claimType: claimType as ClaimType, text: text.trim(), citations: parsedCitations });
   }
 
   const result: GenerationValidationResult = {

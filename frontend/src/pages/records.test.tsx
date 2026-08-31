@@ -128,8 +128,20 @@ const analysis: StoryAnalysis = {
     },
   ],
   claims: [
-    { id: "c1", claimType: "consensus", text: "Both outlets report a 2027 pilot target.", citations: ["A1", "A2"] },
-    { id: "c2", claimType: "student_context", text: "A pilot line proves a process before volume.", citations: ["A1"] },
+    {
+      id: "c1",
+      claimType: "consensus",
+      text: "Both outlets report a 2027 pilot target.",
+      citations: ["A1", "A2"],
+      citationSides: null,
+    },
+    {
+      id: "c2",
+      claimType: "student_context",
+      text: "A pilot line proves a process before volume.",
+      citations: ["A1"],
+      citationSides: null,
+    },
   ],
   completedAt: "2026-01-10T00:00:00Z",
   reused: false,
@@ -265,19 +277,36 @@ const investorAnalysis: StoryAnalysis = {
   ...analysis,
   lens: "investor_implication",
   claims: [
-    { id: "c1", claimType: "consensus", text: "Both outlets report a 2027 pilot target.", citations: ["A1", "A2"] },
-    { id: "c2", claimType: "source_specific", text: "Only one outlet names the subsidy deadline.", citations: ["A2"] },
+    {
+      id: "c1",
+      claimType: "consensus",
+      text: "Both outlets report a 2027 pilot target.",
+      citations: ["A1", "A2"],
+      citationSides: null,
+    },
+    {
+      id: "c2",
+      claimType: "source_specific",
+      text: "Only one outlet names the subsidy deadline.",
+      citations: ["A2"],
+      citationSides: null,
+    },
     {
       id: "c3",
       claimType: "contradiction",
-      text: "The outlets disagree on whether the subsidy is signed.",
+      text: "The subsidy is signed.",
       citations: ["A1", "A2"],
+      citationSides: [
+        { relationship: "supports", citations: ["A1"] },
+        { relationship: "contradicts", citations: ["A2"] },
+      ],
     },
     {
       id: "c4",
       claimType: "investor_implication",
       text: "Unresolved subsidy timing keeps the capital plan provisional.",
       citations: ["A2"],
+      citationSides: null,
     },
   ],
 };
@@ -311,8 +340,10 @@ describe("Story detail — the Investor reading", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Request analysis" }));
     const claim = (await screen.findByText(investorAnalysis.claims[2].text)).closest("li")!;
 
-    // Two newsrooms, named, each carrying the reporting the claim cited for it —
-    // the evidence trail ADR-0021 asks the Investor view to foreground.
+    // The model names the proposition each side supports or contradicts; Publishers
+    // are evidence within those positions, not positions of their own.
+    expect(within(claim).getByText("Supports")).toBeInTheDocument();
+    expect(within(claim).getByText("Contradicts")).toBeInTheDocument();
     expect(within(claim).getByText("Meridian Wire")).toBeInTheDocument();
     expect(within(claim).getByText("Harbour Ledger")).toBeInTheDocument();
     expect(within(claim).getByRole("link", { name: /A1 · Pilot line targets 2027 output/ })).toHaveAttribute(

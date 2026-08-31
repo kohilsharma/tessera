@@ -1288,7 +1288,13 @@ describe("the mixed-rung wording rule", () => {
 
   it("allows a claim of omission over the whole permitted report", async () => {
     const { story } = await twoPublisherStory("licensed_full_text");
-    answering(fixture("omission-language"));
+    answering(
+      claimsAnswer(
+        consensus(["A1", "A2"]),
+        sourceSpecific(["A2"]),
+        sourceSpecific(["A1"], "Northwind Ledger omitted the subsidy deadline."),
+      ),
+    );
 
     const res = await requestAnalysis(story.id, await tokenFor("student"));
 
@@ -1364,13 +1370,40 @@ describe("captured model failures", () => {
     expect(runs[0].validationResult.issues).toEqual([{ claimIndex: 2, code: "unsupported_contradiction" }]);
   });
 
-  it("keeps a contradiction two publishers are behind", async () => {
+  it("drops a contradiction that does not identify its opposing sides", async () => {
+    const { story } = await twoPublisherStory();
+    answering(
+      claimsAnswer(
+        consensus(["A1", "A2"]),
+        sourceSpecific(["A1"]),
+        {
+          text: "One outlet reports the timetable as unchanged; the other reports it as under review.",
+          claim_type: "contradiction",
+          citations: ["A1", "A2"],
+        },
+      ),
+    );
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
+    expect(res.body.status).toBe("completed");
+    expect(res.body.claims.map((claim: { claimType: string }) => claim.claimType)).toEqual([
+      "consensus",
+      "source_specific",
+    ]);
+    const runs: { validationResult: { issues: { code: string }[] } }[] = await AppDataSource.query(
+      `SELECT "validationResult" FROM "generation_runs"`,
+    );
+    expect(runs[0].validationResult.issues).toEqual([{ claimIndex: 2, code: "unsupported_contradiction" }]);
+  });
+
+  it("keeps and persists both sides of a contradiction", async () => {
     const { story } = await twoPublisherStory();
     answering(
       claimsAnswer(consensus(["A1", "A2"]), {
-        text: "One outlet reports the timetable as unchanged; the other reports it as under review.",
+        text: "The timetable remains unchanged.",
         claim_type: "contradiction",
-        citations: ["A1", "A2"],
+        sides: { supports: ["A1"], contradicts: ["A2"] },
       }),
     );
 
@@ -1378,7 +1411,21 @@ describe("captured model failures", () => {
 
     expect(res.body.status).toBe("completed");
     expect(res.body.claims).toHaveLength(2);
-    expect(res.body.claims[1].citations).toEqual(["A1", "A2"]);
+    expect(res.body.claims[1]).toMatchObject({
+      citations: ["A1", "A2"],
+      citationSides: [
+        { relationship: "supports", citations: ["A1"] },
+        { relationship: "contradicts", citations: ["A2"] },
+      ],
+    });
+    const relationships: { evidenceId: string; relationship: string }[] = await AppDataSource.query(
+      `SELECT "evidenceId", "relationship" FROM "claim_evidence" WHERE "claimId" = $1 ORDER BY "evidenceId"`,
+      [res.body.claims[1].id],
+    );
+    expect(relationships).toEqual([
+      { evidenceId: "A1", relationship: "supports" },
+      { evidenceId: "A2", relationship: "contradicts" },
+    ]);
   });
 
   it("drops the claims of a wider set and keeps the rest", async () => {

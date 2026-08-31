@@ -12,6 +12,7 @@ import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
 import { MIN_DISTINCT_PUBLISHERS } from "../generation/config";
+import { distinctPublisherCount, selectEvidence } from "../generation/evidence";
 import { toPublicIngestionRun } from "../lib/ingestionRunView";
 import { acceptedMembership } from "../lib/storyMembership";
 
@@ -28,7 +29,7 @@ const RECENT_CLUSTERING_RUNS = 20;
 
 // #56: how many Stories the Investor surface offers a comparative reading of. A
 // landing page, not an index — /stories is where a reader goes for all of them.
-const COMPARABLE_STORIES = 10;
+const COMPARABLE_STORY_LIMIT = 10;
 
 // ADR-0004: Student and Investor are genuinely distinct endpoints/data, not one
 // shared shape with a role flag — each route below returns its own field set.
@@ -50,50 +51,46 @@ dashboardRouter.get(
 
 // #56: the Investor surface's route into the consensus/contradiction reading — the
 // Stories a comparative analysis can actually be written about, newest movement
-// first. The conditions are evidence selection's own (generation/evidence.ts):
-// accepted membership, analysis text with something in it, an embedding, and
-// ADR-0027's minimum of two distinct Publishers. Stated as one query rather than
-// inferred from the sector rollup, because "covered" and "comparable" are different
-// facts and a row that refuses when opened is worse than no row.
+// first. Candidate discovery is one cheap aggregate; the final gate deliberately
+// calls generation's own evidence selector, so wire-copy collapse and every future
+// eligibility rule have one implementation.
 //
-// It counts mastheads, not newsrooms: the wire-copy collapse happens inside an
-// EvidenceSet, over vectors, and running it here would mean an O(n²) pair scan per
-// Story on a landing page. So a Story that is one wire report under two mastheads can
-// still be listed, and the generation endpoint refuses it on opening with the reason
-// stated — which is why the register says publishers rather than promising an
-// analysis. Undercounting the other way is not possible, which is the direction that
-// would hide reporting.
-//
-// ponytail: the grouping runs over every accepted, text-bearing, embedded Article in
-// the corpus and only then takes ten Stories, so the work grows with the corpus rather
-// than with the page. Fine at a demo corpus and at a week of the firehose, since
-// retention keeps `metadata_only` rows from accumulating; the upgrade is a `lastSeenAt`
-// window in the join before the aggregate.
+// ponytail: this can run evidence selection once per candidate Story. The dashboard
+// is capped at ten and a Story holds tens of members; batch or materialize the result
+// if corpus size makes this measurable.
 async function comparableStories(): Promise<
   { id: string; title: string; category: StoryCategory; publisherCount: number; lastSeenAt: Date }[]
 > {
-  const rows: {
+  const candidates: {
     id: string;
     title: string;
     category: StoryCategory;
-    publisherCount: string;
     lastSeenAt: Date;
   }[] = await AppDataSource.query(
-    `SELECT s."id", s."title", s."category", s."lastSeenAt",
-            COUNT(DISTINCT a."publisherId") AS "publisherCount"
+    `SELECT s."id", s."title", s."category", s."lastSeenAt"
        FROM "stories" s
        JOIN "articles" a ON a."storyId" = s."id" AND ${acceptedMembership("a")}
         AND a."analysisText" ~ '[^[:space:]]' AND a."embedding" IS NOT NULL
       GROUP BY s."id"
      HAVING COUNT(DISTINCT a."publisherId") >= $1
-      ORDER BY s."lastSeenAt" DESC, s."title" ASC
-      LIMIT $2`,
-    [MIN_DISTINCT_PUBLISHERS, COMPARABLE_STORIES],
+      ORDER BY s."lastSeenAt" DESC, s."title" ASC`,
+    [MIN_DISTINCT_PUBLISHERS],
   );
-  // Deliberately not an article count: the eligible members counted here are a subset
-  // of the accepted members `/stories` counts, and one Story reading "5 Articles" on
-  // the dashboard and "7 articles" one click later would be two facts under one word.
-  return rows.map((row) => ({ ...row, publisherCount: Number(row.publisherCount) }));
+
+  const comparable: {
+    id: string;
+    title: string;
+    category: StoryCategory;
+    publisherCount: number;
+    lastSeenAt: Date;
+  }[] = [];
+  for (const story of candidates) {
+    const publisherCount = distinctPublisherCount(await selectEvidence(story.id));
+    if (publisherCount < MIN_DISTINCT_PUBLISHERS) continue;
+    comparable.push({ ...story, publisherCount });
+    if (comparable.length === COMPARABLE_STORY_LIMIT) break;
+  }
+  return comparable;
 }
 
 // The Investor surface is market context over the corpus (CONTEXT.md: Investor

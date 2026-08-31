@@ -20,6 +20,7 @@ import { CreateGenerationRuns1755755000000 } from "./migrations/1755755000000-Cr
 import { FixGenerationSnapshotsAndReuse1755756000000 } from "./migrations/1755756000000-FixGenerationSnapshotsAndReuse";
 import { AddEvidenceDataModeAndClaimFloor1755757000000 } from "./migrations/1755757000000-AddEvidenceDataModeAndClaimFloor";
 import { AddBriefGenerationRun1755758000000 } from "./migrations/1755758000000-AddBriefGenerationRun";
+import { AddClaimEvidenceRelationship1755759000000 } from "./migrations/1755759000000-AddClaimEvidenceRelationship";
 import { User } from "./entities/User";
 import { Publisher } from "./entities/Publisher";
 import { Story } from "./entities/Story";
@@ -91,6 +92,7 @@ export const AppDataSource = new DataSource({
     FixGenerationSnapshotsAndReuse1755756000000,
     AddEvidenceDataModeAndClaimFloor1755757000000,
     AddBriefGenerationRun1755758000000,
+    AddClaimEvidenceRelationship1755759000000,
   ],
   synchronize: false,
   logging: false,

@@ -1,7 +1,7 @@
 import type { EntityManager } from "typeorm";
 import { AppDataSource } from "../data-source";
 import { AnalysisClaim, type ClaimType } from "../entities/AnalysisClaim";
-import { ClaimEvidence } from "../entities/ClaimEvidence";
+import { ClaimEvidence, type ClaimEvidenceRelationship } from "../entities/ClaimEvidence";
 import { carriesFullPermittedText, type AnalysisTextMode } from "../entities/Article";
 import {
   GenerationRun,
@@ -59,7 +59,16 @@ export type EvidenceView = {
   excerpt: string | null;
 };
 
-export type ClaimView = { id: string; claimType: ClaimType; text: string; citations: string[] };
+export type CitationSide = { relationship: ClaimEvidenceRelationship; citations: string[] };
+export type ClaimView = {
+  id: string;
+  claimType: ClaimType;
+  text: string;
+  citations: string[];
+  // Null for non-contradictions and for generations created before polarity was
+  // persisted. New contradiction claims always carry both sides.
+  citationSides: CitationSide[] | null;
+};
 
 export type GenerationView = {
   id: string;
@@ -163,10 +172,11 @@ async function persistClaims(
     await manager.getRepository(ClaimEvidence).insert(
       // Validation has already resolved every id into the frozen set, so the lookup
       // below cannot miss — the non-null assertion is that guarantee, not a hope.
-      claim.citations.map((evidenceId) => ({
+      claim.citations.map(({ evidenceId, relationship }) => ({
         claimId: saved.id,
         evidenceId,
         articleId: articleByEvidenceId.get(evidenceId)!,
+        relationship,
       })),
     );
   }
@@ -387,9 +397,13 @@ export async function loadGenerationView(runId: string): Promise<GenerationView>
   //
   // And the citations come back in evidence-rank order rather than by id, so a set of
   // ten does not read `A1, A10, A2`.
-  const claims: ClaimView[] = await AppDataSource.query(
+  type ClaimRow = Omit<ClaimView, "citationSides"> & {
+    relationships: (ClaimEvidenceRelationship | null)[];
+  };
+  const claimRows: ClaimRow[] = await AppDataSource.query(
     `SELECT c."id", c."claimType", c."text",
-            array_agg(ce."evidenceId" ORDER BY esa."sourceRank") AS citations
+            array_agg(ce."evidenceId" ORDER BY esa."sourceRank") AS citations,
+            array_agg(ce."relationship" ORDER BY esa."sourceRank") AS relationships
        FROM "analysis_claims" c
        JOIN "claim_evidence" ce ON ce."claimId" = c."id"
        JOIN "evidence_set_articles" esa
@@ -399,6 +413,18 @@ export async function loadGenerationView(runId: string): Promise<GenerationView>
       ORDER BY c."displayOrder" ASC`,
     [runId, run.evidenceSetId],
   );
+  const claims: ClaimView[] = claimRows.map(({ relationships, ...claim }) => {
+    if (claim.claimType !== "contradiction" || relationships.some((relationship) => relationship === null)) {
+      return { ...claim, citationSides: null };
+    }
+    const citationSides = (["supports", "contradicts"] as const)
+      .map((relationship) => ({
+        relationship,
+        citations: claim.citations.filter((_citation, index) => relationships[index] === relationship),
+      }))
+      .filter((side) => side.citations.length > 0);
+    return { ...claim, citationSides: citationSides.length === 2 ? citationSides : null };
+  });
 
   return {
     id: run.id,

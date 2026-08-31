@@ -60,8 +60,8 @@ function Citations({ claim, evidence }: { claim: AnalysisClaim; evidence: Map<st
   );
 }
 
-// The rows a claim cited, grouped by the Publisher that filed them. Both the sides of a
-// contradiction and the count behind an agreement are readings of this one grouping.
+// The rows a claim cited, grouped by Publisher for the corroboration count. A
+// contradiction does not use this grouping: its polarity comes from citationSides.
 function citedByPublisher(claim: AnalysisClaim, evidence: Map<string, EvidenceRow>): EvidenceRow[][] {
   const sides = new Map<string, EvidenceRow[]>();
   for (const evidenceId of claim.citations) {
@@ -72,26 +72,35 @@ function citedByPublisher(claim: AnalysisClaim, evidence: Map<string, EvidenceRo
   return [...sides.values()];
 }
 
-// A contradiction with both sides shown (#56): the outlets that disagree, each with the
-// reporting the claim cited for it. The claim text says what the disagreement is; this
-// says who is on each side of it and gives the reader the way to check — which is what
-// separates "sources disagree" from an evidence trail.
-//
-// It replaces the flat citation row rather than joining it: the same links, grouped by
-// Publisher and carrying the headline they resolve to.
+// A contradiction's actual polarity, recorded below the prompt and persisted with
+// each citation. Publisher grouping alone is not a side: two Publishers may support
+// one position against a third.
 function ContradictionSides({ claim, evidence }: { claim: AnalysisClaim; evidence: Map<string, EvidenceRow> }) {
+  if (!claim.citationSides) {
+    return (
+      <>
+        <p className="claim-measure">This earlier analysis did not record which citation was on each side</p>
+        <Citations claim={claim} evidence={evidence} />
+      </>
+    );
+  }
   return (
     <ul className="claim-sides">
-      {citedByPublisher(claim, evidence).map((rows) => (
-        <li key={rows[0].publisher.id}>
-          <p className="side-publisher">{rows[0].publisher.name}</p>
-          {rows.map((row) => (
-            <p key={row.evidenceId} className="side-cite">
-              <Link to={`/articles/${row.articleId}`}>
-                <span>{row.evidenceId}</span> · {row.title}
-              </Link>
-            </p>
-          ))}
+      {claim.citationSides.map((side) => (
+        <li key={side.relationship}>
+          <p className="side-publisher">{side.relationship === "supports" ? "Supports" : "Contradicts"}</p>
+          {side.citations.map((evidenceId) => {
+            const row = evidence.get(evidenceId);
+            if (!row) return null;
+            return (
+              <p key={row.evidenceId} className="side-cite">
+                <span>{row.publisher.name}</span> ·{" "}
+                <Link to={`/articles/${row.articleId}`}>
+                  <span>{row.evidenceId}</span> · {row.title}
+                </Link>
+              </p>
+            );
+          })}
         </li>
       ))}
     </ul>
@@ -103,11 +112,19 @@ function ContradictionSides({ claim, evidence }: { claim: AnalysisClaim; evidenc
 // separate reports rather than one wire story counted several times, because the
 // EvidenceSet collapsed near-identical copy when it was frozen (ADR-0027) — which is
 // what makes the count worth reading at all.
-function Corroboration({ claim, evidence, of }: { claim: AnalysisClaim; evidence: Map<string, EvidenceRow>; of: number }) {
+function Corroboration({
+  claim,
+  evidence,
+  totalPublisherCount,
+}: {
+  claim: AnalysisClaim;
+  evidence: Map<string, EvidenceRow>;
+  totalPublisherCount: number;
+}) {
   const cited = citedByPublisher(claim, evidence).length;
   return (
     <p className="claim-measure">
-      Cited to {cited} of {of} publisher{of === 1 ? "" : "s"} in the evidence
+      Cited to {cited} of {totalPublisherCount} publisher{totalPublisherCount === 1 ? "" : "s"} in the evidence
     </p>
   );
 }
@@ -154,7 +171,11 @@ export function AnalysisRegister({ analysis }: { analysis: Analysis }) {
                         <Citations claim={claim} evidence={evidence} />
                       )}
                       {investor && claim.claimType === "consensus" && (
-                        <Corroboration claim={claim} evidence={evidence} of={analysis.distinctPublisherCount} />
+                        <Corroboration
+                          claim={claim}
+                          evidence={evidence}
+                          totalPublisherCount={analysis.distinctPublisherCount}
+                        />
                       )}
                     </li>
                   ))}
