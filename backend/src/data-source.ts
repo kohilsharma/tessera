@@ -16,6 +16,7 @@ import { PreserveGkgAnnotationSurfaceNames1755751000000 } from "./migrations/175
 import { AddArticleExtractionAttemptedAt1755752000000 } from "./migrations/1755752000000-AddArticleExtractionAttemptedAt";
 import { AddStoryCentroidAndClusteringRuns1755753000000 } from "./migrations/1755753000000-AddStoryCentroidAndClusteringRuns";
 import { AddPendingStoryAssignmentReview1755754000000 } from "./migrations/1755754000000-AddPendingStoryAssignmentReview";
+import { CreateGenerationRuns1755755000000 } from "./migrations/1755755000000-CreateGenerationRuns";
 import { User } from "./entities/User";
 import { Publisher } from "./entities/Publisher";
 import { Story } from "./entities/Story";
@@ -27,6 +28,11 @@ import { IngestionRun } from "./entities/IngestionRun";
 import { GkgAnnotation } from "./entities/GkgAnnotation";
 import { ClusteringRun } from "./entities/ClusteringRun";
 import { RejectedStoryAssignment } from "./entities/RejectedStoryAssignment";
+import { EvidenceSet } from "./entities/EvidenceSet";
+import { EvidenceSetArticle } from "./entities/EvidenceSetArticle";
+import { GenerationRun } from "./entities/GenerationRun";
+import { AnalysisClaim } from "./entities/AnalysisClaim";
+import { ClaimEvidence } from "./entities/ClaimEvidence";
 
 const url = process.env.DATABASE_URL;
 
@@ -56,6 +62,11 @@ export const AppDataSource = new DataSource({
     GkgAnnotation,
     ClusteringRun,
     RejectedStoryAssignment,
+    EvidenceSet,
+    EvidenceSetArticle,
+    GenerationRun,
+    AnalysisClaim,
+    ClaimEvidence,
   ],
   migrations: [
     InitPgvector1755740000000,
@@ -73,6 +84,7 @@ export const AppDataSource = new DataSource({
     AddArticleExtractionAttemptedAt1755752000000,
     AddStoryCentroidAndClusteringRuns1755753000000,
     AddPendingStoryAssignmentReview1755754000000,
+    CreateGenerationRuns1755755000000,
   ],
   synchronize: false,
   logging: false,

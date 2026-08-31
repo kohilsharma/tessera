@@ -1,10 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import StoryDetail from "./StoryDetail";
 import ArticleDetail from "./ArticleDetail";
 import BriefDetail from "./BriefDetail";
 import { jsonResponse, renderWithProviders } from "../test/renderWithProviders";
-import type { ArticleDetail as ArticleRecord, BriefDetail as BriefRecord } from "../api/client";
+import type {
+  ArticleDetail as ArticleRecord,
+  BriefDetail as BriefRecord,
+  StoryAnalysis,
+} from "../api/client";
 
 // The Record archetype is presentation, and jsdom judges no presentation. What
 // it holds is the content contract the archetype exists to carry: the facts the
@@ -82,6 +87,134 @@ describe("Story detail — the record masthead", () => {
       "href",
       "/stories",
     );
+  });
+});
+
+// #53. The flagship's content contract on the page that carries it: an analysis is
+// asked for rather than loaded, every claim it displays carries a citation a reader
+// can open, and one that could not be produced says so instead of showing part of
+// itself.
+const analysis: StoryAnalysis = {
+  id: "g1",
+  storyId: story.id,
+  lens: "student_context",
+  promptVersion: "2026-09-01",
+  status: "completed",
+  failureCode: null,
+  articleCount: 2,
+  distinctPublisherCount: 2,
+  evidence: [
+    {
+      evidenceId: "A1",
+      articleId: "a1",
+      title: article.title,
+      url: article.url,
+      publishedAt: article.publishedAt,
+      publisher,
+      sourceRank: 1,
+      selectionReason: "earliest_reporting",
+      excerpt: "The pilot line is scheduled for 2027.",
+    },
+    {
+      evidenceId: "A2",
+      articleId: "a2",
+      title: "Subsidy timing still unresolved",
+      publishedAt: article.publishedAt,
+      url: "https://ledger.example/subsidy",
+      publisher: { id: "p2", name: "Harbour Ledger", domain: "harbourledger.example" },
+      sourceRank: 2,
+      selectionReason: "latest_reporting",
+      excerpt: null,
+    },
+  ],
+  claims: [
+    { id: "c1", claimType: "consensus", text: "Both outlets report a 2027 pilot target.", citations: ["A1", "A2"] },
+    { id: "c2", claimType: "student_context", text: "A pilot line proves a process before volume.", citations: ["A1"] },
+  ],
+  completedAt: "2026-01-10T00:00:00Z",
+  reused: false,
+};
+
+function renderStoryWithAnalysis(produced: StoryAnalysis) {
+  vi.mocked(fetch).mockImplementation(async (_input, init) =>
+    init?.method === "POST" ? jsonResponse(produced) : jsonResponse(story),
+  );
+  return renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
+}
+
+describe("Story detail — the analysis", () => {
+  it("is asked for, then groups its claims by kind with a citation on each", async () => {
+    renderStoryWithAnalysis(analysis);
+
+    const command = await screen.findByRole("button", { name: "Request analysis" });
+    // Nothing is generated on render: an analysis may cost money, so it happens
+    // when a reader asks (ADR-0027).
+    expect(vi.mocked(fetch).mock.calls.every(([, init]) => init?.method !== "POST")).toBe(true);
+    await userEvent.click(command);
+
+    expect(await screen.findByText(analysis.claims[0].text)).toBeInTheDocument();
+    expect(screen.getByText("Where the reporting agrees")).toBeInTheDocument();
+    // The reader's own Lens, labelled as itself rather than as "the other claim".
+    expect(screen.getByText("Context")).toBeInTheDocument();
+    expect(screen.getByText(analysis.claims[1].text)).toBeInTheDocument();
+    // The invariant, followable: the evidence id resolves to the Article it cites,
+    // on every claim that cites it.
+    for (const link of screen.getAllByRole("link", { name: /A1 · Meridian Wire/ })) {
+      expect(link).toHaveAttribute("href", "/articles/a1");
+    }
+    expect(screen.getByRole("link", { name: /A2 · Harbour Ledger/ })).toHaveAttribute("href", "/articles/a2");
+    // And it states what the analysis was built from, since that is what "frozen
+    // evidence" means to a reader.
+    expect(screen.getByText(/2 Articles across 2 publishers/)).toBeInTheDocument();
+  });
+
+  it("states an analysis that could not be produced instead of showing part of it", async () => {
+    renderStoryWithAnalysis({ ...analysis, status: "failed", failureCode: "invalid_citations", claims: [] });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Request analysis" }));
+
+    const stated = await screen.findByRole("alert");
+    expect(stated).toHaveTextContent(/unavailable/i);
+    expect(stated).toHaveTextContent(/not in this Story's evidence/);
+    expect(screen.queryByText("Where the reporting agrees")).not.toBeInTheDocument();
+    // A failure is recoverable by asking again, so the command stays.
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+  });
+
+  it("asks an Admin which Lens they are reading through, and nobody else", async () => {
+    // An Admin is neither audience, so the API refuses an unnamed Lens from them —
+    // a command that always 422s would be the defect this control prevents.
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (init?.method === "POST") {
+        expect(init.body).toBe(JSON.stringify({ lens: "investor_implication" }));
+        return jsonResponse({ ...analysis, lens: "investor_implication" });
+      }
+      return jsonResponse(String(input).includes("/auth/me") ? { id: "u1", email: "a@b.c", role: "admin" } : story);
+    });
+    renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
+
+    const lens = await screen.findByLabelText("Lens");
+    await userEvent.selectOptions(lens, "investor_implication");
+    await userEvent.click(screen.getByRole("button", { name: "Request analysis" }));
+
+    expect(await screen.findByText(analysis.claims[0].text)).toBeInTheDocument();
+  });
+
+  it("offers a reader no Lens choice at all", async () => {
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (init?.method === "POST") {
+        // A reader's Lens is derived from their role; sending one is refused.
+        expect(init.body).toBe("{}");
+        return jsonResponse(analysis);
+      }
+      return jsonResponse(String(input).includes("/auth/me") ? { id: "u2", email: "s@b.c", role: "student" } : story);
+    });
+    renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Request analysis" }));
+
+    expect(await screen.findByText(analysis.claims[0].text)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Lens")).not.toBeInTheDocument();
   });
 });
 

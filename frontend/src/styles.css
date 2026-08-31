@@ -364,6 +364,16 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .record-note dd { margin: 0; max-width: 68ch; font-size: .9rem; line-height: 1.6; }
 .record-note a { color: var(--bureau-ink); font-weight: 700; text-underline-offset: 3px; overflow-wrap: anywhere; }
 
+/* Claims, grouped by kind in the note register above: the group is the term, the
+   claims are the value (#53). Each claim is a sentence over its citations, and the
+   citations are set in the measurement face — they are provenance, like every
+   other register in the system, not part of the sentence. */
+.claim-list { list-style: none; margin: 0; padding: 0; }
+.claim-list > li + li { margin-top: 15px; padding-top: 15px; border-top: 1px dashed var(--registration-rule); }
+.claim-list p { margin: 0; }
+.claim-list .claim-cites { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 9px 0 0; }
+.claim-cites a { font: 500 .68rem ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+
 /* ---- The owned registration (#34) ----------------------------------------
    A Brief is the reader's own artefact; a Story and an Article are the corpus'.
    So the owned mast is the same sheet on different stock: the bench it is worked

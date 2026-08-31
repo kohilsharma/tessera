@@ -133,6 +133,23 @@ centroid and span from the merged membership, and *deletes* the emptied row rath
 tombstoning it, guarded by a leftover check because `articles."storyId"` cascades on delete. It
 refuses a self-merge, an unknown Story, and either side being in the Curated Corpus, which
 ADR-0026 closes in both directions. A Brief is untouched: evidence pins Articles, not Stories.
+The **generation tracer bullet** (#53) is the flagship, thinly: `POST /api/v1/stories/:id/analysis`
+(`src/generation/`, `runGeneration` is the one new seam) selects evidence deterministically —
+ranked by distance to the Story centroid, ≤10 Articles, ≤2 per Publisher, earliest and latest
+forced in, pending assignments and text-free rows excluded — freezes it as an **EvidenceSet**
+with stable `A1…` ids, ~1500-character excerpts and a SHA-256 over each Article's *full*
+analysis text, then asks a cheap model for claims under the one **Lens** the caller's role
+implies (an Admin names it). Validation sits below the prompt and is non-tunable: an uncited
+claim, or a citation naming an id outside the frozen set, fails the run (`invalid_citations`);
+unparseable or off-contract output fails it structurally; a hash that no longer matches at
+persist fails it too. Every attempt persists — status, prompt version, the provider that
+answered, raw answer and a `validationResult` counting what the model returned, kept and cited
+that does not exist — and a repeat request for the same evidence, Lens, prompt version *and*
+provider returns the existing run instead of paying twice, so a Mock-written analysis is never
+served after a key is configured. It is synchronous, so a failed run is a 200 carrying
+`status:"failed"` and a reader-safe `failureCode`; the provider's own message stays on the row.
+Partial acceptance, the two repair attempts, wire-copy collapse and the mixed-rung wording rule
+are #54's.
 Phase 3.5 (graph/timeline) is not built yet.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
@@ -148,7 +165,12 @@ cover-image control (#35), and the Dashboard archetype across all three roles (#
 The cross-route responsive and accessibility sweep (#37) closed it out: `/account` and
 `/status` became stated pages in the same vocabulary, and every route's screenshots at both
 breakpoints sit in `docs/verification/bureau-rollout/`. `/` redirects to the caller's own
-dashboard. The Admin console gained a fourth register for **IngestionRun** history and Run /
+dashboard. Story detail carries the **analysis surface** (#53): a Request-analysis command (a
+mutation, never a fetch on render, since an analysis may cost money), a Lens select for an Admin
+only — a reader's Lens is their role, and the API refuses one from them — claims grouped by kind
+in the record's note register with each citation an `A1 · Publisher` link to the Article it
+resolves to, and a stated unavailable panel — worded per `failureCode` — for a run that failed
+rather than any part of it. The Admin console gained a fourth register for **IngestionRun** history and Run /
 Enable-Disable commands on each connector row (#39 — Run states that it queued the run, since
 the worker is what executes it, #42), and each publisher row shows its Terms
 Class beside its article count (#40). A fifth register carries **ClusteringRun** history with a

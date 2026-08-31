@@ -475,6 +475,75 @@ export function decidePendingAssignment(
   return sendJson("PATCH", `/api/v1/clustering/pending/${articleId}`, { decision }, "Could not record this decision");
 }
 
+// #53: the flagship. Mirrors backend/src/entities/GenerationRun.ts and
+// AnalysisClaim.ts. CONTEXT.md "Lens" — one role-specific claim type per
+// generation, derived from the caller's role, so a Student and an Investor get
+// different data from the same frozen evidence (ADR-0004).
+export const GENERATION_LENSES = ["student_context", "investor_implication"] as const;
+export type GenerationLens = (typeof GENERATION_LENSES)[number];
+
+export const CORE_CLAIM_TYPES = ["consensus", "source_specific", "contradiction"] as const;
+export type ClaimType = (typeof CORE_CLAIM_TYPES)[number] | GenerationLens;
+
+// A row of the frozen EvidenceSet: the stable id a claim cites and the Article it
+// resolves to. `excerpt` is null where the Publisher's Terms Class does not clear
+// that text for serving (#40) — the analysis still rests on it.
+export type EvidenceRow = {
+  evidenceId: string;
+  articleId: string;
+  title: string;
+  url: string;
+  publishedAt: string;
+  publisher: { id: string; name: string; domain: string };
+  sourceRank: number;
+  selectionReason: "earliest_reporting" | "latest_reporting" | "centroid_rank";
+  excerpt: string | null;
+};
+
+export type AnalysisClaim = { id: string; claimType: ClaimType; text: string; citations: string[] };
+
+// A failed run is a 200 carrying `status: "failed"`, not an HTTP error: it is the
+// honest answer to "what is the analysis of this Story", and the reader is shown a
+// stated unavailable state rather than a partial one (ADR-0010).
+export type GenerationFailureCode =
+  | "provider_error"
+  | "unparseable_output"
+  | "schema_violation"
+  | "invalid_citations"
+  | "content_changed";
+
+export type StoryAnalysis = {
+  id: string;
+  storyId: string;
+  lens: GenerationLens;
+  promptVersion: string;
+  status: "completed" | "failed";
+  failureCode: GenerationFailureCode | null;
+  articleCount: number;
+  distinctPublisherCount: number;
+  evidence: EvidenceRow[];
+  claims: AnalysisClaim[];
+  completedAt: string;
+  // True when this analysis already existed for the same evidence, Lens and prompt
+  // version — the wait and the cost were paid once (ADR-0027).
+  reused: boolean;
+};
+
+// Synchronous: one request selects and freezes the evidence, calls the model,
+// validates the citations and answers with the finished run.
+//
+// `lens` is only for an Admin, who belongs to neither reading audience and so has to
+// name one; the backend refuses a Lens from a Student or an Investor, whose own role
+// decides it (ADR-0027).
+export function requestStoryAnalysis(storyId: string, lens?: GenerationLens): Promise<StoryAnalysis> {
+  return sendJson(
+    "POST",
+    `/api/v1/stories/${storyId}/analysis`,
+    lens ? { lens } : {},
+    "Could not analyse this Story",
+  );
+}
+
 // #52: the merge. Unlike the run trigger this is not an enqueue — the Stories are
 // one Story by the time it answers, so what comes back is what it did.
 export type StoryMerge = { survivorStoryId: string; mergedStoryId: string; movedArticles: number };

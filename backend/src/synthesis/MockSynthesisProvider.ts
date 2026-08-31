@@ -21,6 +21,11 @@ export class MockSynthesisProvider implements SynthesisProvider {
     // Echoing the evidence ids found in the prompt keeps the Mock honest about
     // ADR-0002's invariant: a claim carries citations, or it is not a claim.
     const ids = [...request.prompt.matchAll(/\[([a-z0-9-]{1,64})\]/gi)].map((m) => m[1]);
+    // #53: and one claim of whichever Lens the prompt asked for, so the no-key demo
+    // shows the role split the Lens exists for (ADR-0004) rather than a consensus
+    // claim both roles would see. Read back out of the prompt for the same reason the
+    // ids are — the Mock's only input is what it was asked.
+    const lens = request.prompt.match(/\b(student_context|investor_implication)\b/)?.[1];
     return JSON.stringify({
       claims: [
         {
@@ -28,6 +33,9 @@ export class MockSynthesisProvider implements SynthesisProvider {
           claim_type: "consensus",
           citations: ids.slice(0, 2),
         },
+        ...(lens && ids.length > 0
+          ? [{ text: `[mock synthesis] deterministic ${lens} claim.`, claim_type: lens, citations: [ids[0]] }]
+          : []),
       ],
     });
   }
