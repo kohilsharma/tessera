@@ -3,8 +3,8 @@ import { parseGdeltStamp } from "./gkg";
 // GDELT DOC 2.0 (ADR-0018): on-demand keyword and `theme:` search over roughly
 // the last three months, unauthenticated, `mode=artlist&format=json`. Where GKG
 // is a firehose on a 15-minute clock, DOC answers a *question* — so the question
-// lives in the connector's `endpoint` query string, which is where an Admin can
-// change what Tessera searches for without a migration, a deploy, or a column.
+// lives in the connector's `endpoint` query string. The seed owns and converges
+// that endpoint today; the Admin API only controls whether the connector is enabled.
 //
 // An artlist record carries url, url_mobile, title, seendate, socialimage, domain,
 // language and sourcecountry (verified against a live response, 2026-08-31: 250
@@ -49,10 +49,9 @@ function textOf(value: unknown): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
-// The request the connector actually sends. The operator owns `query` and may set
-// `timespan`, `sort` and the rest; the output shape and the record cap are ours,
-// because the parser below only reads one shape and the truncation check only
-// means something at the maximum.
+// The endpoint carries `query`, `timespan`, `sort` and the rest; the output shape
+// and record cap are connector-owned because the parser below only reads one shape
+// and the truncation check only means something at the maximum.
 export function docRequestUrl(endpoint: string): string {
   const url = new URL(endpoint);
   // A DOC connector with no query is a misconfiguration, not an empty search, and

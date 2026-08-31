@@ -62,8 +62,8 @@ export const SEED_CONNECTORS: SeedConnector[] = [
   },
   {
     // #46: DOC answers a question rather than streaming a window, so the question
-    // is the connector — it lives in the endpoint's query string, where an Admin
-    // can change what Tessera searches for without a migration or a column.
+    // is the connector — it lives in the endpoint's query string. The seed owns
+    // and converges that endpoint; the Admin API only controls `enabled`.
     //
     // `sourcelang:english` because everything downstream (Postgres FTS, the
     // embedding model, synthesis) is English. `sort=datedesc` so the 250-record cap
