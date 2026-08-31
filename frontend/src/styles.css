@@ -374,6 +374,21 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .claim-list .claim-cites { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 9px 0 0; }
 .claim-cites a { font: 500 .68rem ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
 
+/* The Investor reading of the same register (#56). Two additions, both provenance
+   rather than prose, so both sit in the measurement face beside the citations:
+   what an agreement is worth counted in newsrooms, and the sides of a
+   disagreement as a ruled pair. The side rule is what makes "both sides" legible
+   as two things rather than one run of links — vertical, because the pair reads
+   down the column at either breakpoint. */
+.claim-measure { margin: 7px 0 0; color: var(--quiet-ink); font: 500 .66rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.claim-sides { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 10px; }
+.claim-sides > li { padding-left: 12px; border-left: 2px solid var(--bureau-ink); }
+.claim-sides .side-publisher { font-weight: 700; font-size: .82rem; }
+/* The headline is the reporting, so it stays in the text face; only the evidence id
+   it resolves through is set as provenance. */
+.claim-sides .side-cite { margin: 4px 0 0; font-size: .84rem; line-height: 1.5; }
+.claim-sides .side-cite span { font: 500 .68rem ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .04em; }
+
 /* ---- The owned registration (#34) ----------------------------------------
    A Brief is the reader's own artefact; a Story and an Article are the corpus'.
    So the owned mast is the same sheet on different stock: the bench it is worked

@@ -501,6 +501,39 @@ describe("the Lens", () => {
     expect(synth.requests[1].prompt).toContain("investor_implication");
   });
 
+  // #56: ADR-0004's requirement, at the only place it is observable — two readers
+  // asking about one Story get different analyses, not one analysis relabelled.
+  it("gives a Student and an Investor visibly different analyses of one Story", async () => {
+    const { story } = await twoPublisherStory();
+    answering(
+      claimsAnswer(consensus(["A1", "A2"]), {
+        text: "A pilot line proves a process before volume production.",
+        claim_type: "student_context",
+        citations: ["A1"],
+      }),
+      claimsAnswer(consensus(["A1", "A2"]), {
+        text: "Unresolved subsidy timing keeps the capital plan provisional.",
+        claim_type: "investor_implication",
+        citations: ["A2"],
+      }),
+    );
+
+    const student = await requestAnalysis(story.id, await tokenFor("student"));
+    const investor = await requestAnalysis(story.id, await tokenFor("investor"));
+
+    const claimTypes = (res: { body: { claims: { claimType: string }[] } }) =>
+      res.body.claims.map((claim) => claim.claimType);
+    expect(claimTypes(student)).toContain("student_context");
+    expect(claimTypes(student)).not.toContain("investor_implication");
+    expect(claimTypes(investor)).toContain("investor_implication");
+    expect(claimTypes(investor)).not.toContain("student_context");
+    // Both readings rest on the same frozen evidence, which is what makes them
+    // comparable rather than two unrelated answers.
+    expect(investor.body.evidence.map((row: { articleId: string }) => row.articleId)).toEqual(
+      student.body.evidence.map((row: { articleId: string }) => row.articleId),
+    );
+  });
+
   it("cannot be chosen by a reader", async () => {
     const { story } = await twoPublisherStory();
 

@@ -258,6 +258,159 @@ describe("Story detail — the analysis", () => {
   });
 });
 
+// #56: the Investor reading of the same pipeline output. Not the Student view with
+// different wording — the agreement/disagreement axis is what it foregrounds, and a
+// disagreement is shown as two sides a reader can open.
+const investorAnalysis: StoryAnalysis = {
+  ...analysis,
+  lens: "investor_implication",
+  claims: [
+    { id: "c1", claimType: "consensus", text: "Both outlets report a 2027 pilot target.", citations: ["A1", "A2"] },
+    { id: "c2", claimType: "source_specific", text: "Only one outlet names the subsidy deadline.", citations: ["A2"] },
+    {
+      id: "c3",
+      claimType: "contradiction",
+      text: "The outlets disagree on whether the subsidy is signed.",
+      citations: ["A1", "A2"],
+    },
+    {
+      id: "c4",
+      claimType: "investor_implication",
+      text: "Unresolved subsidy timing keeps the capital plan provisional.",
+      citations: ["A2"],
+    },
+  ],
+};
+
+const groupHeadings = () =>
+  screen
+    .getAllByText(
+      /^(Where the reporting agrees|Where it disagrees|Reported by one outlet only|Context|Investor implication)$/,
+    )
+    .map((heading) => heading.textContent);
+
+describe("Story detail — the Investor reading", () => {
+  it("reads the agreement axis first and single-source reporting last", async () => {
+    renderStoryWithAnalysis(investorAnalysis);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Request analysis" }));
+    await screen.findByText(investorAnalysis.claims[0].text);
+
+    // The claims arrive in the order the model wrote them; the reading is ours.
+    expect(groupHeadings()).toEqual([
+      "Where the reporting agrees",
+      "Where it disagrees",
+      "Investor implication",
+      "Reported by one outlet only",
+    ]);
+  });
+
+  it("shows both sides of a disagreement, each with its Publisher and a citation to open", async () => {
+    renderStoryWithAnalysis(investorAnalysis);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Request analysis" }));
+    const claim = (await screen.findByText(investorAnalysis.claims[2].text)).closest("li")!;
+
+    // Two newsrooms, named, each carrying the reporting the claim cited for it —
+    // the evidence trail ADR-0021 asks the Investor view to foreground.
+    expect(within(claim).getByText("Meridian Wire")).toBeInTheDocument();
+    expect(within(claim).getByText("Harbour Ledger")).toBeInTheDocument();
+    expect(within(claim).getByRole("link", { name: /A1 · Pilot line targets 2027 output/ })).toHaveAttribute(
+      "href",
+      "/articles/a1",
+    );
+    expect(within(claim).getByRole("link", { name: /A2 · Subsidy timing still unresolved/ })).toHaveAttribute(
+      "href",
+      "/articles/a2",
+    );
+  });
+
+  it("counts an agreement in newsrooms, and says why the count means that", async () => {
+    renderStoryWithAnalysis(investorAnalysis);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Request analysis" }));
+    const agreed = (await screen.findByText(investorAnalysis.claims[0].text)).closest("li")!;
+
+    expect(within(agreed).getByText("Cited to 2 of 2 publishers in the evidence")).toBeInTheDocument();
+    // #54's collapse, stated: five mastheads running one wire report are one source,
+    // which is the only thing that makes the count above worth reading.
+    expect(screen.getByText(/counted once when this evidence was frozen/)).toBeInTheDocument();
+  });
+
+  it("says a disagreement is absent rather than leaving the axis out", async () => {
+    // A contradiction the model wrote can be refused for citing one Publisher (#54)
+    // and the run still completes, so silence here would read as outlets agreeing.
+    renderStoryWithAnalysis({
+      ...investorAnalysis,
+      claims: investorAnalysis.claims.filter((claim) => claim.claimType !== "contradiction"),
+    });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Request analysis" }));
+
+    expect(await screen.findByText("Where it disagrees")).toBeInTheDocument();
+    expect(screen.getByText(/No disagreement between these outlets is recorded/)).toBeInTheDocument();
+  });
+
+  it("leaves the Student's reading as it was", async () => {
+    renderStoryWithAnalysis(analysis);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Request analysis" }));
+    await screen.findByText(analysis.claims[0].text);
+
+    expect(groupHeadings()).toEqual(["Where the reporting agrees", "Context"]);
+    expect(screen.queryByText(/Cited to/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/counted once when this evidence was frozen/)).not.toBeInTheDocument();
+  });
+
+  // The surface's other two shared states (#30), on the Lens this ticket is about:
+  // the wait while a model is answering, and a completed run holding nothing to show.
+  // The error treatment is the failed-run test above.
+  it("states the wait while the evidence is being read", async () => {
+    let answer: (value: Response) => void = () => {};
+    vi.mocked(fetch).mockImplementation(async (_input, init) =>
+      init?.method === "POST"
+        ? new Promise<Response>((resolve) => {
+            answer = resolve;
+          })
+        : jsonResponse(story),
+    );
+    renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Request analysis" }));
+
+    expect(screen.getByRole("status")).toHaveTextContent(/Selecting evidence and writing claims/);
+    answer(jsonResponse(investorAnalysis));
+    expect(await screen.findByText(investorAnalysis.claims[0].text)).toBeInTheDocument();
+  });
+
+  it("states a completed analysis that holds nothing to show", async () => {
+    renderStoryWithAnalysis({ ...investorAnalysis, claims: [] });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Request analysis" }));
+
+    expect(await screen.findByText(/produced no claims that could be cited/)).toBeInTheDocument();
+  });
+
+  // The refusal an Investor meets most often: a Story that is one wire report under
+  // several mastheads is one source, and the API says so rather than comparing it
+  // with itself (#54).
+  it("states a refusal to compare reporting that is one newsroom's", async () => {
+    vi.mocked(fetch).mockImplementation(async (_input, init) =>
+      init?.method === "POST"
+        ? jsonResponse(
+            { error: "This Story needs independent reporting from at least two publishers to analyse" },
+            422,
+          )
+        : jsonResponse(story),
+    );
+    renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Request analysis" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/at least two publishers/);
+  });
+});
+
 describe("Article detail — the record's own terms", () => {
   it("states its Analysis Text Mode in words, not as the raw mode", async () => {
     renderArticle();
@@ -391,6 +544,20 @@ describe("Brief detail — the owned artefact", () => {
     expect(screen.getByRole("link", { name: /A2 · Harbour Ledger/ })).toHaveAttribute("href", "/articles/a2");
     // And says what makes it worth owning: it stays as it is while the Story moves on.
     expect(screen.getByText(/keeps what it froze/)).toBeInTheDocument();
+  });
+
+  // #56: the reading follows the analysis, not the reader — a saved investor analysis
+  // is read as one here, which is the whole reason the register keys off `lens`.
+  it("keeps the Investor reading of an analysis saved under that Lens", async () => {
+    renderBrief({ generationRunId: investorAnalysis.id, analysis: investorAnalysis });
+
+    const claim = (await screen.findByText(investorAnalysis.claims[2].text)).closest("li")!;
+    expect(within(claim).getByText("Harbour Ledger")).toBeInTheDocument();
+    expect(within(claim).getByRole("link", { name: /A1 · Pilot line targets 2027 output/ })).toHaveAttribute(
+      "href",
+      "/articles/a1",
+    );
+    expect(screen.getByText("Cited to 2 of 2 publishers in the evidence")).toBeInTheDocument();
   });
 
   it("says nothing about an analysis when the Brief was assembled by hand", async () => {

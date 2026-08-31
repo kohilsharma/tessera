@@ -102,7 +102,22 @@ export type StudentDashboardData = {
   studyCollections: { id: string; title: string; category: StoryCategory }[];
 };
 export type Sector = { category: StoryCategory; storyCount: number; articleCount: number };
-export type InvestorDashboardData = { role: "investor"; sectors: Sector[] };
+// #56: a Story an Investor can read comparatively — two or more Publishers' accepted,
+// citable reporting, which is what the analysis endpoint needs before it will write
+// anything. No article count: the members counted for eligibility are a subset of the
+// accepted members `/stories` counts, and one word for two facts would be a defect.
+export type ComparableStory = {
+  id: string;
+  title: string;
+  category: StoryCategory;
+  publisherCount: number;
+  lastSeenAt: string;
+};
+export type InvestorDashboardData = {
+  role: "investor";
+  sectors: Sector[];
+  comparableStories: ComparableStory[];
+};
 
 export type ConnectorKind = "gdelt_gkg" | "gdelt_doc" | "rss" | "readability";
 export type ConnectorSummary = {

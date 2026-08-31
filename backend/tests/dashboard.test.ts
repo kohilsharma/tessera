@@ -10,6 +10,8 @@ import { IngestionConnector } from "../src/entities/IngestionConnector";
 import { Publisher } from "../src/entities/Publisher";
 import { Story } from "../src/entities/Story";
 import { signToken } from "../src/auth/jwt";
+import { EMBEDDING_DIMENSIONS } from "../src/embeddings/EmbeddingProvider";
+import { toVectorLiteral } from "../src/embeddings/pgvector";
 import { setupTestDb } from "./setupTestDb";
 
 setupTestDb();
@@ -27,6 +29,55 @@ async function createAdminToken(email: string): Promise<string> {
   const passwordHash = await bcrypt.hash("correct-horse", 10);
   const user = await AppDataSource.getRepository(User).save({ email, passwordHash, role: "admin" });
   return signToken({ sub: user.id, role: user.role });
+}
+
+function createPublisher(domain: string): Promise<Publisher> {
+  return AppDataSource.getRepository(Publisher).save({ name: domain, domain });
+}
+
+function createStory(slug: string, title: string): Promise<Story> {
+  return AppDataSource.getRepository(Story).save({
+    slug,
+    title,
+    summary: null,
+    category: "technology",
+    firstSeenAt: new Date("2026-01-02T00:00:00Z"),
+    lastSeenAt: new Date("2026-01-09T00:00:00Z"),
+  });
+}
+
+// A member of a Story as the reader-facing surfaces see one: accepted, carrying
+// analysis text, and embedded. Each of those is a condition the Investor register
+// below turns on, so each is a parameter here.
+let nextMember = 0;
+async function createMember(fields: {
+  storyId: string;
+  publisherId: string;
+  title: string;
+  status?: "auto_accepted" | "pending_review";
+  embedded?: boolean;
+}): Promise<Article> {
+  nextMember += 1;
+  const article = await AppDataSource.getRepository(Article).save({
+    storyId: fields.storyId,
+    storyAssignmentStatus: fields.status ?? ("auto_accepted" as const),
+    storyAssignmentScore: 0.9,
+    publisherId: fields.publisherId,
+    title: fields.title,
+    url: `https://member-${nextMember}.example/report`,
+    analysisText: `${fields.title} body text`,
+    analysisTextMode: "manual_fixture",
+    publishedAt: new Date("2026-01-05T00:00:00Z"),
+  });
+  if (fields.embedded !== false) {
+    const vector = new Array<number>(EMBEDDING_DIMENSIONS).fill(0);
+    vector[nextMember % EMBEDDING_DIMENSIONS] = 1;
+    await AppDataSource.query(`UPDATE "articles" SET "embedding" = $1::vector WHERE "id" = $2`, [
+      toVectorLiteral(vector),
+      article.id,
+    ]);
+  }
+  return article;
 }
 
 describe("dashboard RBAC", () => {
@@ -101,6 +152,65 @@ describe("dashboard RBAC", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.sectors).toContainEqual({ category: "technology", storyCount: 1, articleCount: 1 });
+  });
+
+  // #56: the Investor surface's way into the consensus/contradiction reading. The
+  // register promises a Story that *can* be read comparatively, so it applies the
+  // same eligibility the generation endpoint applies — accepted membership, analysis
+  // text, an embedding — and the same minimum of two distinct Publishers.
+  it("registers the Stories an Investor can read comparatively, and only those", async () => {
+    const token = await registerAndLogin("investor-comparable@example.com", "investor");
+    const one = await createPublisher("comparable-one.example");
+    const two = await createPublisher("comparable-two.example");
+
+    const comparable = await createStory("compare-two-outlets", "Interconnector timetable slips");
+    await createMember({ storyId: comparable.id, publisherId: one.id, title: "Timetable slips to 2029" });
+    await createMember({ storyId: comparable.id, publisherId: two.id, title: "Operator confirms new date" });
+
+    // Newest movement first: an Investor reads what moved this morning, and the
+    // register is capped, so the ordering decides what reaches the page at all.
+    const older = await createStory("compare-older", "Earlier comparable Story");
+    await AppDataSource.getRepository(Story).update(older.id, { lastSeenAt: new Date("2026-01-03T00:00:00Z") });
+    await createMember({ storyId: older.id, publisherId: one.id, title: "First filing on the older story" });
+    await createMember({ storyId: older.id, publisherId: two.id, title: "Second filing on the older story" });
+
+    // One newsroom is not a comparison, whatever it filed.
+    const alone = await createStory("compare-one-outlet", "Single outlet on the tariff review");
+    await createMember({ storyId: alone.id, publisherId: one.id, title: "Tariff review opens" });
+    await createMember({ storyId: alone.id, publisherId: one.id, title: "Tariff review continues" });
+
+    // A proposal is a machine's guess (#50): it cannot ground a claim, so it cannot
+    // make a second publisher either.
+    const proposed = await createStory("compare-pending", "Second outlet only proposed");
+    await createMember({ storyId: proposed.id, publisherId: one.id, title: "First word on the audit" });
+    await createMember({
+      storyId: proposed.id,
+      publisherId: two.id,
+      title: "Possibly the same audit",
+      status: "pending_review",
+    });
+
+    // Fails closed exactly where evidence selection does: with no vector Tessera
+    // cannot tell an independent newsroom from the same wire report twice (#54).
+    const unembedded = await createStory("compare-unembedded", "Awaiting the next clustering run");
+    await createMember({ storyId: unembedded.id, publisherId: one.id, title: "Filed but unembedded", embedded: false });
+    await createMember({ storyId: unembedded.id, publisherId: two.id, title: "Also unembedded", embedded: false });
+
+    const res = await request(app()).get("/api/v1/dashboard/investor").set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.comparableStories).toContainEqual({
+      id: comparable.id,
+      title: "Interconnector timetable slips",
+      category: "technology",
+      publisherCount: 2,
+      lastSeenAt: comparable.lastSeenAt.toISOString(),
+    });
+    const listed = res.body.comparableStories.map((story: { id: string }) => story.id);
+    expect(listed.indexOf(comparable.id)).toBeLessThan(listed.indexOf(older.id));
+    expect(listed).not.toContain(alone.id);
+    expect(listed).not.toContain(proposed.id);
+    expect(listed).not.toContain(unembedded.id);
   });
 
   // requireAuth resolves identity and role from the users row, not the token's

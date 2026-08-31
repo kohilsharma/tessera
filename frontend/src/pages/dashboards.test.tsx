@@ -39,16 +39,18 @@ describe("Student dashboard", () => {
 });
 
 describe("Investor dashboard", () => {
+  const investorPayload = (overrides: Record<string, unknown> = {}) => ({
+    role: "investor",
+    sectors: [
+      { category: "business", storyCount: 3, articleCount: 12 },
+      { category: "health", storyCount: 1, articleCount: 2 },
+    ],
+    comparableStories: [],
+    ...overrides,
+  });
+
   it("lists each sector with both of its coverage counts", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      jsonResponse({
-        role: "investor",
-        sectors: [
-          { category: "business", storyCount: 3, articleCount: 12 },
-          { category: "health", storyCount: 1, articleCount: 2 },
-        ],
-      }),
-    );
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(investorPayload()));
 
     renderWithProviders(<InvestorDashboard />);
 
@@ -59,6 +61,45 @@ describe("Investor dashboard", () => {
     );
     expect(within(business).getByText("12")).toBeInTheDocument();
     expect(within(health).getByText("2")).toBeInTheDocument();
+  });
+
+  // #56: the route into the Investor Lens. A row here is a Story the analysis
+  // endpoint will actually write about, so it opens the record that carries the
+  // consensus/contradiction reading.
+  it("routes into the comparable Stories, stating how many Publishers each holds", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse(
+        investorPayload({
+          comparableStories: [
+            {
+              id: "s1",
+              title: "Interconnector timetable slips",
+              category: "business",
+              publisherCount: 3,
+              lastSeenAt: "2026-08-31T08:00:00.000Z",
+            },
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<InvestorDashboard />);
+
+    const row = await screen.findByRole("link", { name: "Interconnector timetable slips" });
+    expect(row).toHaveAttribute("href", "/stories/s1");
+    const entry = row.closest("li")!;
+    expect(within(entry).getByText("3")).toBeInTheDocument();
+    // No article count: the eligible members behind that 3 are a subset of the accepted
+    // members /stories counts, and one word for two facts would be the defect.
+    expect(within(entry).queryByText("Articles")).not.toBeInTheDocument();
+  });
+
+  it("says why there is nothing to compare rather than showing an empty register", async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(investorPayload()));
+
+    renderWithProviders(<InvestorDashboard />);
+
+    expect(await screen.findByText(/nothing to compare/)).toBeInTheDocument();
   });
 });
 
