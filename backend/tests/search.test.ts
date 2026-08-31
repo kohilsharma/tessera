@@ -374,6 +374,66 @@ describe("GET /api/v1/search", () => {
     expect(res.body.totalPages).toBe(3);
   });
 
+  it("keeps Unclustered Articles from exhausting the semantic candidate pool", async () => {
+    const publisher = await AppDataSource.getRepository(Publisher).findOneByOrFail({ domain: "publisher-a.example" });
+    const story = await AppDataSource.getRepository(Story).save({
+      slug: "story-ann-pool",
+      title: "Visible semantic target",
+      summary: null,
+      category: "technology",
+      firstSeenAt: new Date("2026-05-01T00:00:00Z"),
+      lastSeenAt: new Date("2026-05-01T00:00:00Z"),
+    });
+    const target = await AppDataSource.getRepository(Article).save({
+      storyId: story.id,
+      publisherId: publisher.id,
+      title: "Visible target",
+      url: "https://publisher-a.example/visible-pool-target",
+      analysisText: "No lexical overlap with the pool query.",
+      analysisTextMode: "feed_excerpt",
+      publishedAt: new Date("2026-05-01T00:00:00Z"),
+    });
+    const queryVector = new Array<number>(1024).fill(0);
+    queryVector[0] = 1;
+    const targetVector = [...queryVector];
+    targetVector[0] = Math.cos(0.1);
+    targetVector[1] = Math.sin(0.1);
+    await AppDataSource.query(`UPDATE "articles" SET "embedding" = $1::vector WHERE "id" = $2`, [
+      toVectorLiteral(targetVector),
+      target.id,
+    ]);
+    await AppDataSource.query(
+      `INSERT INTO "articles" ("publisherId", "title", "url", "analysisText", "analysisTextMode", "publishedAt", "embedding")
+       SELECT $1, 'pool noise ' || n, 'https://pool-noise-' || n || '.example/article',
+              'unclustered noise', 'feed_excerpt', NOW(), $2::vector
+       FROM generate_series(1, 501) n`,
+      [publisher.id, toVectorLiteral(queryVector)],
+    );
+
+    let result;
+    try {
+      result = await hybridSearchArticleIds(
+        "unique semantic pool query",
+        {
+          page: 1,
+          pageSize: 20,
+          sortBy: "relevance",
+          sortDir: "desc",
+          category: undefined,
+          dateFrom: undefined,
+          dateTo: undefined,
+        },
+        { embed: async () => queryVector, embedBatch: async () => [queryVector] },
+      );
+    } finally {
+      await AppDataSource.query(`DELETE FROM "articles" WHERE "url" LIKE 'https://pool-noise-%'`);
+      await AppDataSource.getRepository(Article).delete(target.id);
+      await AppDataSource.getRepository(Story).delete(story.id);
+    }
+
+    expect(result.hits.map((hit) => hit.id)).toContain(target.id);
+  });
+
   // ADR-0023: the hosted provider is a network dependency, so an outage or a 429
   // has to cost the semantic signal rather than the request.
   it("degrades to lexical-only results when the embedding provider fails", async () => {

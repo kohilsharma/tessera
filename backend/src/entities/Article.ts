@@ -55,6 +55,14 @@ export class Article {
   @Column({ type: "uuid", nullable: true })
   storyId!: string | null;
 
+  // ADR-0026: membership carries the decision and score that produced it.
+  // Unclustered Articles have neither; #50 adds the pending-review writer.
+  @Column({ type: "varchar", nullable: true })
+  storyAssignmentStatus!: "auto_accepted" | "pending_review" | null;
+
+  @Column({ type: "double precision", nullable: true })
+  storyAssignmentScore!: number | null;
+
   @ManyToOne(() => Publisher)
   @JoinColumn({ name: "publisherId" })
   publisher!: Publisher;

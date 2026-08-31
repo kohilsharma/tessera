@@ -101,7 +101,7 @@ export async function hybridSearchArticleIds(
         FROM articles
         -- $2 is NULL when the embedding provider is unreachable: the CTE goes
         -- empty and RRF degrades to lexical-only (see embedQueryOrNull).
-        WHERE embedding IS NOT NULL AND $2::vector IS NOT NULL
+        WHERE embedding IS NOT NULL AND "storyId" IS NOT NULL AND $2::vector IS NOT NULL
         ORDER BY embedding <=> $2::vector
         LIMIT ${SEMANTIC_CANDIDATE_POOL}
       ) nn

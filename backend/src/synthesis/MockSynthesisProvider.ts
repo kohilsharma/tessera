@@ -14,7 +14,7 @@ export class MockSynthesisProvider implements SynthesisProvider {
       claims: [
         {
           text: "[mock synthesis] deterministic claim over the frozen evidence set.",
-          claim_type: "factual",
+          claim_type: "consensus",
           citations: ids.slice(0, 2),
         },
       ],

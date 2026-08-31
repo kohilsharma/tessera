@@ -45,9 +45,9 @@ async function seedUsers(): Promise<void> {
   }
 }
 
-// #19/#23: seeds the browsable corpus, embedded with whichever EmbeddingProvider
-// createEmbeddingProvider() selects (hosted if GEMINI_API_KEY is set, Mock
-// otherwise) so the app is never empty and re-running is reproducible.
+// #19/#23: seeds the browsable corpus with whichever configured
+// EmbeddingProvider createEmbeddingProvider() selects, or the Mock when no
+// hosted key is configured, so the app is never empty and reruns are reproducible.
 async function seedCorpus(): Promise<void> {
   const publishers = AppDataSource.getRepository(Publisher);
   const stories = AppDataSource.getRepository(Story);
@@ -95,6 +95,8 @@ async function seedCorpus(): Promise<void> {
 
       const saved = await articles.save({
         storyId: story.id,
+        storyAssignmentStatus: "auto_accepted" as const,
+        storyAssignmentScore: 1,
         publisherId: publisher.id,
         title: seedArticle.title,
         url: seedArticle.url,

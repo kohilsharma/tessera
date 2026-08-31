@@ -104,6 +104,8 @@ async function createArticle(fields: {
   const article = await AppDataSource.getRepository(Article).save({
     publisherId: fields.publisherId,
     storyId: fields.storyId ?? null,
+    storyAssignmentStatus: fields.storyId ? "auto_accepted" : null,
+    storyAssignmentScore: fields.storyId ? 1 : null,
     title: fields.title,
     url: `https://${nextArticle}.example/story`,
     // `metadata_only` is the one rung that may hold no text (ADR-0024).
@@ -223,6 +225,31 @@ describe("runClustering", () => {
     expect(second.embedded).toBe(0);
   });
 
+  it("drains an embedding backlog larger than the old per-run cap", async () => {
+    const publisher = await createPublisher("backlog.example");
+    const total = 201;
+    for (let index = 0; index < total; index += 1) {
+      await createArticle({ publisherId: publisher.id, title: `backlog ${index}` });
+    }
+    const requests: number[] = [];
+    const embedder: EmbeddingProvider = {
+      embed: async () => axisVector(0),
+      embedBatch: async (texts, kind) => {
+        expect(kind).toBe("passage");
+        requests.push(texts.length);
+        return texts.map(() => axisVector(0));
+      },
+    };
+
+    const run = await runClustering({ embedder });
+
+    expect(run.status).toBe("succeeded");
+    expect(run.embedded).toBe(total);
+    expect(requests.reduce((sum, size) => sum + size, 0)).toBe(total);
+    expect(requests.every((size) => size <= EMBED_BATCH_SIZE)).toBe(true);
+    expect(run.errorSummary).toBeNull();
+  });
+
   it("joins an Article to the nearest live Story above the threshold and widens the Story's span", async () => {
     const publisher = await createPublisher("one.example");
     const other = await createPublisher("two.example");
@@ -255,13 +282,81 @@ describe("runClustering", () => {
     expect(run.assigned).toBe(1);
     expect(run.seeded).toBe(0);
     expect(run.unclustered).toBe(0);
-    expect((await AppDataSource.getRepository(Article).findOneByOrFail({ id: candidate.id })).storyId).toBe(story.id);
+    const membership = await AppDataSource.getRepository(Article).findOneByOrFail({ id: candidate.id });
+    expect(membership.storyId).toBe(story.id);
+    expect(membership.storyAssignmentStatus).toBe("auto_accepted");
+    expect(membership.storyAssignmentScore).toBeCloseTo(1);
     // The Story now spans the reporting it holds — which is both what browse sorts
     // by and what the recency gate reads on the next run.
     const grown = await AppDataSource.getRepository(Story).findOneByOrFail({ id: story.id });
     expect(grown.lastSeenAt.getTime()).toBe(publishedAt.getTime());
     // ADR-0026: every Story carries a centroid recomputed from its members.
     expect(await storyCentroid(story.id)).not.toBeNull();
+  });
+
+  it("refreshes a Story centroid so multiple candidates can join it in one run", async () => {
+    const first = await createPublisher("one.example");
+    const second = await createPublisher("two.example");
+    const third = await createPublisher("three.example");
+    const fourth = await createPublisher("four.example");
+    const story = await createStory({ title: "Growing event", lastSeenAt: hoursAgo(1) });
+    await createArticle({ publisherId: first.id, title: "member one", storyId: story.id, vector: axisVector(0) });
+    await createArticle({ publisherId: second.id, title: "member two", storyId: story.id, vector: axisVector(0) });
+    const positive = await createArticle({
+      publisherId: third.id,
+      title: "positive candidate",
+      vector: axisVector(0, 0.2),
+      publishedAt: hoursAgo(0.5),
+    });
+    const negative = await createArticle({
+      publisherId: fourth.id,
+      title: "negative candidate",
+      vector: axisVector(0, -0.2),
+      publishedAt: hoursAgo(1),
+    });
+
+    const run = await runClustering({ embedder: new StubEmbedder({}) });
+
+    expect(run.assigned).toBe(2);
+    const articles = AppDataSource.getRepository(Article);
+    expect((await articles.findOneByOrFail({ id: positive.id })).storyId).toBe(story.id);
+    expect((await articles.findOneByOrFail({ id: negative.id })).storyId).toBe(story.id);
+  });
+
+  it("does not assign against a Story centroid invalidated by concurrent enrichment", async () => {
+    const first = await createPublisher("one.example");
+    const second = await createPublisher("two.example");
+    const third = await createPublisher("three.example");
+    const story = await createStory({ title: "Concurrent event", lastSeenAt: hoursAgo(1) });
+    await createArticle({ publisherId: first.id, title: "member one", storyId: story.id, vector: axisVector(0) });
+    const enriched = await createArticle({
+      publisherId: second.id,
+      title: "member two",
+      storyId: story.id,
+      vector: axisVector(0, 0.2),
+    });
+    const candidate = await createArticle({
+      publisherId: third.id,
+      title: "candidate",
+      vector: axisVector(0, 0.1),
+    });
+
+    const query = AppDataSource.query.bind(AppDataSource);
+    let invalidated = false;
+    const querySpy = vi.spyOn(AppDataSource, "query").mockImplementation(async (sql: string, parameters?: unknown[]) => {
+      const result = await query(sql, parameters);
+      if (!invalidated && sql.includes(`ORDER BY "embedding" <=>`)) {
+        invalidated = true;
+        await query(`UPDATE "articles" SET "embedding" = NULL WHERE "id" = $1`, [enriched.id]);
+      }
+      return result;
+    });
+    const run = await runClustering({ embedder: new StubEmbedder({}) });
+    querySpy.mockRestore();
+
+    expect(invalidated).toBe(true);
+    expect(run.assigned).toBe(0);
+    expect((await AppDataSource.getRepository(Article).findOneByOrFail({ id: candidate.id })).storyId).toBeNull();
   });
 
   it("refuses a dormant Story at any similarity, and a live one below the threshold", async () => {
@@ -306,6 +401,62 @@ describe("runClustering", () => {
     expect(run.seeded).toBe(0);
     expect(run.unclustered).toBe(2);
     expect(await AppDataSource.getRepository(Story).count()).toBe(0);
+  });
+
+  it("abandons a new Story when Publisher correction removes independent corroboration", async () => {
+    const first = await createPublisher("one.example");
+    const second = await createPublisher("two.example");
+    const firstArticle = await createArticle({ publisherId: first.id, title: "first report", vector: axisVector(0) });
+    const corrected = await createArticle({ publisherId: second.id, title: "second report", vector: axisVector(0) });
+
+    const query = AppDataSource.query.bind(AppDataSource);
+    let lookups = 0;
+    const querySpy = vi.spyOn(AppDataSource, "query").mockImplementation(async (sql: string, parameters?: unknown[]) => {
+      const result = await query(sql, parameters);
+      if (sql.includes(`ORDER BY "embedding" <=>`) && (lookups += 1) === 2) {
+        await query(`UPDATE "articles" SET "publisherId" = $1 WHERE "id" = $2`, [first.id, corrected.id]);
+      }
+      return result;
+    });
+    const run = await runClustering({ embedder: new StubEmbedder({}) });
+    querySpy.mockRestore();
+
+    expect(run.seeded).toBe(0);
+    expect(run.unclustered).toBe(2);
+    expect(await AppDataSource.getRepository(Story).count()).toBe(0);
+    expect((await AppDataSource.getRepository(Article).findOneByOrFail({ id: firstArticle.id })).storyId).toBeNull();
+  });
+
+  it("abandons a new Story when concurrent enrichment invalidates its medoid", async () => {
+    const first = await createPublisher("one.example");
+    const second = await createPublisher("two.example");
+    const third = await createPublisher("three.example");
+    await createArticle({ publisherId: first.id, title: "outer one", vector: axisVector(0, 0.2), publishedAt: hoursAgo(3) });
+    const staleMedoid = await createArticle({
+      publisherId: second.id,
+      title: "stale medoid",
+      vector: axisVector(0),
+      publishedAt: hoursAgo(2),
+    });
+    await createArticle({ publisherId: third.id, title: "outer two", vector: axisVector(0, -0.2), publishedAt: hoursAgo(1) });
+
+    const query = AppDataSource.query.bind(AppDataSource);
+    let lookups = 0;
+    const querySpy = vi.spyOn(AppDataSource, "query").mockImplementation(async (sql: string, parameters?: unknown[]) => {
+      const result = await query(sql, parameters);
+      if (sql.includes(`ORDER BY "embedding" <=>`) && (lookups += 1) === 3) {
+        await query(`UPDATE "articles" SET "embedding" = NULL WHERE "id" = $1`, [staleMedoid.id]);
+      }
+      return result;
+    });
+    const run = await runClustering({ embedder: new StubEmbedder({}) });
+    querySpy.mockRestore();
+
+    expect(run.errorSummary).toBeNull();
+    expect(run.seeded).toBe(0);
+    expect(run.unclustered).toBe(3);
+    expect(await AppDataSource.getRepository(Story).count()).toBe(0);
+    expect((await AppDataSource.getRepository(Article).findOneByOrFail({ id: staleMedoid.id })).storyId).toBeNull();
   });
 
   it("seeds a Story from two corroborating Publishers, named after its medoid", async () => {
@@ -356,6 +507,38 @@ describe("runClustering", () => {
     const articles = AppDataSource.getRepository(Article);
     expect(await articles.countBy({ storyId: story.id })).toBe(3);
     expect((await articles.findOneByOrFail({ id: unrelated.id })).storyId).toBeNull();
+  });
+
+  it("does not put non-mutually-matching Articles in the same new Story", async () => {
+    const first = await createPublisher("one.example");
+    const second = await createPublisher("two.example");
+    const third = await createPublisher("three.example");
+    const center = await createArticle({
+      publisherId: first.id,
+      title: "central report",
+      vector: axisVector(0),
+      publishedAt: hoursAgo(1),
+    });
+    const positive = await createArticle({
+      publisherId: second.id,
+      title: "positive report",
+      vector: axisVector(0, 0.4),
+      publishedAt: hoursAgo(2),
+    });
+    const negative = await createArticle({
+      publisherId: third.id,
+      title: "negative report",
+      vector: axisVector(0, -0.4),
+      publishedAt: hoursAgo(3),
+    });
+
+    const run = await runClustering({ embedder: new StubEmbedder({}) });
+
+    expect(run.storiesCreated).toBe(1);
+    expect(run.seeded).toBe(2);
+    expect(run.unclustered).toBe(1);
+    const memberships = await AppDataSource.getRepository(Article).findByIds([center.id, positive.id, negative.id]);
+    expect(memberships.filter((article) => article.storyId !== null)).toHaveLength(2);
   });
 
   it("makes newly clustered reporting visible in browse and search", async () => {

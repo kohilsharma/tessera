@@ -6,7 +6,7 @@
 ## Quick start
 
 1. Read `CONTEXT.md` for the domain glossary — use these exact terms.
-2. Read `docs/adr/` (24 ADRs) — **these override the spec** where they conflict.
+2. Read `docs/adr/` (27 ADRs) — **these override the spec** where they conflict.
 3. Read `project-docs/Tessera_Master_Build_Specification_v3.md` — the full product spec.
 4. Read `project-docs/project-statement.md` — non-negotiable course requirements.
 5. Read `project-docs/Tessera_Initial_Report.md` — the capstone initial report (submission-ready).
@@ -281,8 +281,8 @@ npm run seed      # demo users for all three roles (only path to an Admin, ADR-0
                   # 10 curated real RSS connectors + the enabled GKG firehose (#39, #41) +
                   # the enabled DOC API connector carrying its query (#46) + the enabled
                   # Readability extraction pass (#47);
-                  # embedded with the hosted provider
-                  # when GEMINI_API_KEY is set, else the Mock (ADR-0023 — switching providers
+                  # embedded with the configured hosted provider when its key +
+                  # model are set, else the Mock (ADR-0025 — switching providers
                   # needs a fresh volume, see SETUP.md)
 npm test          # vitest; spins up an ephemeral Postgres via Testcontainers, needs docker access
                   # No Redis in the test stack: the enqueue is stubbed (#42, #49)

@@ -4,20 +4,24 @@ import { GeminiEmbeddingProvider } from "../src/embeddings/GeminiEmbeddingProvid
 import { MockEmbeddingProvider } from "../src/embeddings/MockEmbeddingProvider";
 
 describe("createEmbeddingProvider", () => {
-  const original = process.env.GEMINI_API_KEY;
+  const originalKey = process.env.GEMINI_API_KEY;
+  const originalModel = process.env.EMBEDDING_MODEL;
 
   afterEach(() => {
-    if (original === undefined) delete process.env.GEMINI_API_KEY;
-    else process.env.GEMINI_API_KEY = original;
+    if (originalKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = originalKey;
+    if (originalModel === undefined) delete process.env.EMBEDDING_MODEL;
+    else process.env.EMBEDDING_MODEL = originalModel;
   });
 
-  it("falls back to MockEmbeddingProvider when no API key is configured (ADR-0003's test/no-key rule)", () => {
+  it("falls back to MockEmbeddingProvider when no API key is configured", () => {
     delete process.env.GEMINI_API_KEY;
     expect(createEmbeddingProvider()).toBeInstanceOf(MockEmbeddingProvider);
   });
 
-  it("uses the hosted GeminiEmbeddingProvider once GEMINI_API_KEY is set (ADR-0023)", () => {
+  it("uses Gemini once its key and model are configured", () => {
     process.env.GEMINI_API_KEY = "test-key";
+    process.env.EMBEDDING_MODEL = "gemini-test-model";
     expect(createEmbeddingProvider()).toBeInstanceOf(GeminiEmbeddingProvider);
   });
 });
