@@ -63,7 +63,15 @@ Terms are canonical: use these words in code, docs, and conversation.
   whether anyone can see it: *auto-accepted* (above the similarity threshold) or *pending
   review* (in the band beneath it, awaiting an Admin). A pending assignment is invisible to
   browse, to search, and to evidence selection — so a borderline guess can never reach a
-  reader or ground a claim. (ADR-0009, ADR-0026)
+  reader or ground a claim. It still carries the Story's id, which is what lets a reviewer see
+  what is being proposed, so "in a Story" is a question about the *state*, never about the
+  presence of a `storyId`. (ADR-0009, ADR-0026)
+
+- **Rejected pairing** — An (Article, Story) pair an Admin refused from the review queue. The
+  Article returns to *Unclustered*, and the refusal is remembered so later runs never propose
+  that pair again — every *other* live Story is still offered, because rejecting one proposal
+  says the event is wrong, not that the reporting is unusable. _Avoid_: "blacklist", which
+  suggests the Article itself is barred. (ADR-0026)
 
 - **Clustering Run** — One invocation of the clustering job, and the record of what it did:
   how many Articles it embedded, assigned, held for review and left unclustered, and how many

@@ -54,6 +54,7 @@ beforeAll(async () => {
   storyAlphaId = storyAlpha.id;
   const articleAlphaOne = await articles.save({
     storyId: storyAlpha.id,
+    storyAssignmentStatus: "auto_accepted" as const,
     publisherId: publisherA.id,
     title: "Alpha, from Publisher A",
     url: "https://publisher-a.example/alpha",
@@ -64,6 +65,7 @@ beforeAll(async () => {
   articleAlphaOneId = articleAlphaOne.id;
   const articleAlphaTwo = await articles.save({
     storyId: storyAlpha.id,
+    storyAssignmentStatus: "auto_accepted" as const,
     publisherId: publisherB.id,
     title: "Alpha, from Publisher B",
     url: "https://publisher-b.example/alpha",
@@ -83,6 +85,7 @@ beforeAll(async () => {
   });
   await articles.save({
     storyId: storyBeta.id,
+    storyAssignmentStatus: "auto_accepted" as const,
     publisherId: publisherA.id,
     title: "Beta, from Publisher A",
     url: "https://publisher-a.example/beta",
@@ -94,6 +97,7 @@ beforeAll(async () => {
   // is the fail-closed default (#40).
   const internalTextArticle = await articles.save({
     storyId: storyBeta.id,
+    storyAssignmentStatus: "auto_accepted" as const,
     publisherId: publisherB.id,
     title: "Beta, from Publisher B",
     url: "https://publisher-b.example/beta",
@@ -106,6 +110,7 @@ beforeAll(async () => {
   // Class decides, not the Analysis Text Mode allowlist it replaced (#40).
   const licensedFullTextArticle = await articles.save({
     storyId: storyBeta.id,
+    storyAssignmentStatus: "auto_accepted" as const,
     publisherId: publisherA.id,
     title: "Beta follow-up, from Publisher A",
     url: "https://publisher-a.example/beta-follow-up",
@@ -118,6 +123,7 @@ beforeAll(async () => {
   // ADR-0018's floor, which no Terms Class lifts.
   const extractedTextArticle = await articles.save({
     storyId: storyBeta.id,
+    storyAssignmentStatus: "auto_accepted" as const,
     publisherId: publisherA.id,
     title: "Beta extraction, from Publisher A",
     url: "https://publisher-a.example/beta-extraction",
@@ -137,6 +143,7 @@ beforeAll(async () => {
   });
   await articles.save({
     storyId: storyGamma.id,
+    storyAssignmentStatus: "auto_accepted" as const,
     publisherId: publisherA.id,
     title: "Gamma, from Publisher A",
     url: "https://publisher-a.example/gamma",
@@ -155,6 +162,7 @@ beforeAll(async () => {
   });
   await articles.save({
     storyId: storyDelta.id,
+    storyAssignmentStatus: "auto_accepted" as const,
     publisherId: publisherA.id,
     title: "Delta, from Publisher A",
     url: "https://publisher-a.example/delta",
@@ -173,6 +181,7 @@ beforeAll(async () => {
   });
   await articles.save({
     storyId: storyEcho.id,
+    storyAssignmentStatus: "auto_accepted" as const,
     publisherId: publisherA.id,
     title: "Echo, from Publisher A",
     url: "https://publisher-a.example/echo",
@@ -199,6 +208,7 @@ beforeAll(async () => {
     });
     await articles.save({
       storyId: tiedStory.id,
+      storyAssignmentStatus: "auto_accepted" as const,
       publisherId: publisherA.id,
       title: `Tied ${suffix}, from Publisher A`,
       url: `https://publisher-a.example/tied-${suffix.toLowerCase()}`,
@@ -220,6 +230,7 @@ beforeAll(async () => {
   });
   await articles.save({
     storyId: storyLateInDay.id,
+    storyAssignmentStatus: "auto_accepted" as const,
     publisherId: publisherA.id,
     title: "Late In Day, from Publisher A",
     url: "https://publisher-a.example/late-in-day",

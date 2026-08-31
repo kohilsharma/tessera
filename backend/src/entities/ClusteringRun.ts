@@ -35,19 +35,24 @@ export class ClusteringRun {
   @Column({ type: "integer", default: 0 })
   embedded!: number;
 
-  // The ledger. Every Article this run considered ends in exactly one of the three
-  // counters below, so `assigned + seeded + unclustered = considered` for every
-  // persisted run — including a failed one, where whatever the run did not reach
-  // is counted as unclustered, because that is where it was left.
-  //
-  // CONTEXT.md's entry also names a held-for-review count. There is no band beneath
-  // the threshold yet — every assignment this job makes is auto-accepted — so that
-  // counter lands with #50, alongside the pending state it counts.
+  // The ledger. Every Article this run considered ends in exactly one of the four
+  // counters below, so `assigned + heldForReview + seeded + unclustered =
+  // considered` for every persisted run — including a failed one, where whatever
+  // the run did not reach is counted as unclustered, because that is where it was
+  // left.
   @Column({ type: "integer", default: 0 })
   considered!: number;
 
   @Column({ type: "integer", default: 0 })
   assigned!: number;
+
+  // ADR-0026's review band (#50): an Article whose nearest live Story scored
+  // between the two thresholds. Its own counter rather than part of `assigned`,
+  // because nobody can see it yet, and not part of `unclustered`, because it is
+  // waiting on an Admin rather than on the next run — an operator watching this
+  // number climb is watching a queue no one is working.
+  @Column({ type: "integer", default: 0 })
+  heldForReview!: number;
 
   // Articles placed into Stories this run created, as against joining one that
   // already existed. Two counters rather than one because they answer different

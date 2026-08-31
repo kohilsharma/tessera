@@ -40,6 +40,18 @@ export function isStrongerAnalysisTextMode(candidate: AnalysisTextMode, held: An
   return ANALYSIS_TEXT_MODE_RANK[candidate] > ANALYSIS_TEXT_MODE_RANK[held];
 }
 
+// CONTEXT.md "Story Assignment": the state that decides whether anyone can see an
+// Article's membership. `auto_accepted` scored above the similarity threshold;
+// `pending_review` fell into the band beneath it and is a proposal awaiting an
+// Admin (ADR-0026, #50). Null is an Unclustered Article — no Story, no decision.
+//
+// Consequence worth stating where the column is: a `pending_review` row carries a
+// `storyId`, so `storyId IS NOT NULL` is *not* what "in a Story" means on a read
+// path. Every reader-facing surface tests the status instead — see
+// lib/storyMembership.ts, which is the one place that predicate is written.
+export const STORY_ASSIGNMENT_STATUSES = ["auto_accepted", "pending_review"] as const;
+export type StoryAssignmentStatus = (typeof STORY_ASSIGNMENT_STATUSES)[number];
+
 @Entity("articles")
 export class Article {
   @PrimaryGeneratedColumn("uuid")
@@ -56,9 +68,9 @@ export class Article {
   storyId!: string | null;
 
   // ADR-0026: membership carries the decision and score that produced it.
-  // Unclustered Articles have neither; #50 adds the pending-review writer.
+  // Unclustered Articles have neither.
   @Column({ type: "varchar", nullable: true })
-  storyAssignmentStatus!: "auto_accepted" | "pending_review" | null;
+  storyAssignmentStatus!: StoryAssignmentStatus | null;
 
   @Column({ type: "double precision", nullable: true })
   storyAssignmentScore!: number | null;

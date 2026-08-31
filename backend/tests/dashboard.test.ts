@@ -88,6 +88,7 @@ describe("dashboard RBAC", () => {
     });
     await AppDataSource.getRepository(Article).save({
       storyId: story.id,
+      storyAssignmentStatus: "auto_accepted" as const,
       publisherId: publisher.id,
       title: "Fab announces new line",
       url: "https://sector-wire.example/fab-line",

@@ -5,7 +5,7 @@ import AdminDashboard from "./AdminDashboard";
 import InvestorDashboard from "./InvestorDashboard";
 import RoleDashboard from "./RoleDashboard";
 import StudentDashboard from "./StudentDashboard";
-import { jsonResponse, renderWithProviders } from "../test/renderWithProviders";
+import { jsonResponse, listEnvelope, renderWithProviders } from "../test/renderWithProviders";
 
 // The dashboards' first test file. jsdom does no layout and no cascade, so what
 // the Bureau rollout (#36) did to these pages is a browser check, not a test —
@@ -83,6 +83,42 @@ describe("Admin dashboard", () => {
     ...overrides,
   });
 
+  const pendingAssignment = (overrides: Record<string, unknown> = {}) => ({
+    id: "a1",
+    title: "Grid operator revises connection timetable",
+    url: "https://ledger.example/timetable",
+    publishedAt: "2026-08-31T08:00:00.000Z",
+    analysisTextMode: "feed_excerpt",
+    publisher: { id: "p1", name: "The Ledger", domain: "ledger.example" },
+    score: 0.81,
+    proposedStory: { id: "s1", slug: "grid-interconnector", title: "Grid interconnector delayed", category: "business" },
+    ...overrides,
+  });
+
+  // Two requests feed this console since #50 — the payload and the review queue —
+  // so the mock answers by URL and method rather than by call order, which is not
+  // something any of these tests mean to assert. `command` is what a mutation gets
+  // back; `pending` is null to leave the queue's own request hanging.
+  function mockConsole({
+    payload = adminPayload(),
+    pending = [] as Record<string, unknown>[] | null,
+    command = jsonResponse({ status: "accepted" }, 202),
+  }: { payload?: unknown; pending?: Record<string, unknown>[] | null; command?: Response } = {}) {
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      const method = (init as RequestInit | undefined)?.method;
+      if (method && method !== "GET") return Promise.resolve(command);
+      if (String(input).startsWith("/api/v1/clustering/pending")) {
+        return pending === null
+          ? new Promise<Response>(() => {})
+          : Promise.resolve(jsonResponse(listEnvelope(pending)));
+      }
+      return Promise.resolve(jsonResponse(payload));
+    });
+  }
+
+  // The fetch call a test is asserting about, found by URL for the same reason.
+  const callTo = (url: string) => vi.mocked(fetch).mock.calls.find(([input]) => input === url);
+
   const ingestionRun = (overrides: Record<string, unknown> = {}) => ({
     id: "r1",
     connectorId: "c1",
@@ -101,7 +137,7 @@ describe("Admin dashboard", () => {
   });
 
   it("shows the operator registers under their own headings", async () => {
-    vi.mocked(fetch).mockResolvedValue(jsonResponse(adminPayload()));
+    mockConsole();
 
     renderWithProviders(<AdminDashboard />);
 
@@ -141,7 +177,7 @@ describe("Admin dashboard", () => {
   });
 
   it("distinguishes 'nothing has run yet' from a broken panel", async () => {
-    vi.mocked(fetch).mockResolvedValue(jsonResponse(adminPayload()));
+    mockConsole();
 
     renderWithProviders(<AdminDashboard />);
 
@@ -150,24 +186,22 @@ describe("Admin dashboard", () => {
   });
 
   it("registers each IngestionRun with its counters, in the order the API returns", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      jsonResponse(
-        adminPayload({
-          ingestionRuns: [
-            ingestionRun(),
-            ingestionRun({
-              id: "r0",
-              status: "failed",
-              discovered: 0,
-              inserted: 0,
-              enriched: 0,
-              duplicate: 0,
-              errorSummary: "getaddrinfo ENOTFOUND feed.invalid",
-            }),
-          ],
-        }),
-      ),
-    );
+    mockConsole({
+      payload: adminPayload({
+        ingestionRuns: [
+          ingestionRun(),
+          ingestionRun({
+            id: "r0",
+            status: "failed",
+            discovered: 0,
+            inserted: 0,
+            enriched: 0,
+            duplicate: 0,
+            errorSummary: "getaddrinfo ENOTFOUND feed.invalid",
+          }),
+        ],
+      }),
+    });
 
     renderWithProviders(<AdminDashboard />);
 
@@ -189,18 +223,14 @@ describe("Admin dashboard", () => {
   });
 
   it("queues a connector run and says so, rather than claiming it ran", async () => {
-    vi.mocked(fetch)
-      .mockResolvedValueOnce(jsonResponse(adminPayload()))
-      // #42: the endpoint acknowledges an enqueue; the run itself is the worker's.
-      .mockResolvedValueOnce(jsonResponse({ connectorId: "c1", status: "accepted" }, 202))
-      .mockResolvedValue(jsonResponse(adminPayload()));
+    // #42: the endpoint acknowledges an enqueue; the run itself is the worker's.
+    mockConsole({ command: jsonResponse({ connectorId: "c1", status: "accepted" }, 202) });
 
     renderWithProviders(<AdminDashboard />);
 
     await userEvent.click(await screen.findByRole("button", { name: "Run" }));
 
-    expect(vi.mocked(fetch).mock.calls[1][0]).toBe("/api/v1/ingestion/connectors/c1/run");
-    expect(vi.mocked(fetch).mock.calls[1][1]).toMatchObject({ method: "POST" });
+    expect(callTo("/api/v1/ingestion/connectors/c1/run")?.[1]).toMatchObject({ method: "POST" });
     // The register states the queued run. Without it, a press against a stopped
     // worker — which is most of the time — is indistinguishable from a button
     // that does nothing.
@@ -218,18 +248,27 @@ describe("Admin dashboard", () => {
       endpoint: "https://paused.example/feed.xml",
       enabled: false,
     };
-    vi.mocked(fetch)
-      .mockResolvedValueOnce(jsonResponse(adminPayload({ connectors: [paused] })))
-      .mockResolvedValueOnce(jsonResponse({ ...paused, enabled: true }))
-      .mockResolvedValue(jsonResponse(adminPayload({ connectors: [{ ...paused, enabled: true }] })));
+    // The one test whose console *changes*: the PATCH is what enables the
+    // connector, so the payload served afterwards has to reflect it.
+    let connectors: Record<string, unknown>[] = [paused];
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      const method = (init as RequestInit | undefined)?.method;
+      if (method === "PATCH") {
+        connectors = [{ ...paused, enabled: true }];
+        return Promise.resolve(jsonResponse({ ...paused, enabled: true }));
+      }
+      if (String(input).startsWith("/api/v1/clustering/pending")) {
+        return Promise.resolve(jsonResponse(listEnvelope([])));
+      }
+      return Promise.resolve(jsonResponse(adminPayload({ connectors })));
+    });
 
     renderWithProviders(<AdminDashboard />);
 
     expect(await screen.findByRole("button", { name: "Run" })).toBeDisabled();
     await userEvent.click(screen.getByRole("button", { name: "Enable" }));
 
-    expect(vi.mocked(fetch).mock.calls[1][0]).toBe("/api/v1/ingestion/connectors/c1");
-    expect(vi.mocked(fetch).mock.calls[1][1]).toMatchObject({
+    expect(callTo("/api/v1/ingestion/connectors/c1")?.[1]).toMatchObject({
       method: "PATCH",
       body: JSON.stringify({ enabled: true }),
     });
@@ -242,7 +281,7 @@ describe("Admin dashboard", () => {
   // until a pass has run, a ledger once one has, and a queued acknowledgement when
   // an operator presses the command.
   it("distinguishes 'clustering has not run yet' from a broken register", async () => {
-    vi.mocked(fetch).mockResolvedValue(jsonResponse(adminPayload()));
+    mockConsole();
 
     renderWithProviders(<AdminDashboard />);
 
@@ -251,63 +290,59 @@ describe("Admin dashboard", () => {
   });
 
   it("registers a ClusteringRun with the counts an operator reads it for", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      jsonResponse(
-        adminPayload({
-          clusteringRuns: [
-            {
-              id: "k1",
-              status: "succeeded",
-              startedAt: "2026-08-31T10:00:00.000Z",
-              completedAt: "2026-08-31T10:00:20.000Z",
-              embedded: 12,
-              considered: 12,
-              assigned: 4,
-              seeded: 6,
-              unclustered: 2,
-              storiesCreated: 3,
-              errorSummary: null,
-            },
-          ],
-        }),
-      ),
-    );
+    mockConsole({
+      payload: adminPayload({
+        clusteringRuns: [
+          {
+            id: "k1",
+            status: "succeeded",
+            startedAt: "2026-08-31T10:00:00.000Z",
+            completedAt: "2026-08-31T10:00:20.000Z",
+            embedded: 12,
+            considered: 12,
+            assigned: 4,
+            heldForReview: 1,
+            seeded: 5,
+            unclustered: 2,
+            storiesCreated: 3,
+            errorSummary: null,
+          },
+        ],
+      }),
+    });
 
     renderWithProviders(<AdminDashboard />);
 
     const runs = await screen.findByRole("region", { name: "Clustering runs" });
     const row = within(runs).getByRole("listitem");
-    // considered 12 = assigned 4 + seeded 6 + unclustered 2, which is the ledger
-    // ADR-0026 makes the run answerable by.
+    // considered 12 = assigned 4 + held 1 + seeded 5 + unclustered 2, which is the
+    // ledger ADR-0026 makes the run answerable by — four outcomes since #50 added
+    // the review band.
     expect(within(row).getByText("Considered").closest("div")).toHaveTextContent("12");
     expect(within(row).getByText("Assigned").closest("div")).toHaveTextContent("4");
-    expect(within(row).getByText("Seeded").closest("div")).toHaveTextContent("6");
+    expect(within(row).getByText("Held").closest("div")).toHaveTextContent("1");
+    expect(within(row).getByText("Seeded").closest("div")).toHaveTextContent("5");
     expect(within(row).getByText("Unclustered").closest("div")).toHaveTextContent("2");
     expect(within(row).getByText("New Stories").closest("div")).toHaveTextContent("3");
     expect(within(row).getByText("Embedded").closest("div")).toHaveTextContent("12");
   });
 
   it("queues the clustering pass and says so, rather than claiming it clustered", async () => {
-    vi.mocked(fetch)
-      .mockResolvedValueOnce(jsonResponse(adminPayload()))
-      .mockResolvedValueOnce(jsonResponse({ status: "accepted" }, 202))
-      .mockResolvedValue(jsonResponse(adminPayload()));
+    mockConsole({ command: jsonResponse({ status: "accepted" }, 202) });
 
     renderWithProviders(<AdminDashboard />);
 
     await userEvent.click(await screen.findByRole("button", { name: "Run clustering" }));
 
-    expect(vi.mocked(fetch).mock.calls[1][0]).toBe("/api/v1/clustering/runs");
-    expect(vi.mocked(fetch).mock.calls[1][1]).toMatchObject({ method: "POST" });
+    expect(callTo("/api/v1/clustering/runs")?.[1]).toMatchObject({ method: "POST" });
     expect(await screen.findByRole("status")).toHaveTextContent("Clustering queued");
     // No run has happened, so the ledger is still empty rather than optimistic.
     const runs = screen.getByRole("region", { name: "Clustering runs" });
     expect(within(runs).getByText(/Clustering has not run yet/)).toBeInTheDocument();
   });
 
-  it("states a refused command in the connector register rather than blanking the console", async () => {    vi.mocked(fetch)
-      .mockResolvedValueOnce(jsonResponse(adminPayload()))
-      .mockResolvedValue(jsonResponse({ error: "Connector is disabled" }, 409));
+  it("states a refused command in the connector register rather than blanking the console", async () => {
+    mockConsole({ command: jsonResponse({ error: "Connector is disabled" }, 409) });
 
     renderWithProviders(<AdminDashboard />);
 
@@ -315,6 +350,98 @@ describe("Admin dashboard", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Connector is disabled");
     // The console is still there: a refused command is not a failed page.
+    expect(screen.getByRole("region", { name: "Publishers" })).toBeInTheDocument();
+  });
+  // #50: the review queue. Its own request, so unlike every other register here it
+  // owns all four of the shared UI states — which is the point: an operator has to
+  // be able to tell "nothing is waiting" from "the queue would not load".
+  it("states that the review queue is loading while the rest of the console is not", async () => {
+    mockConsole({ pending: null });
+
+    renderWithProviders(<AdminDashboard />);
+
+    const review = await screen.findByRole("region", { name: "Clustering review" });
+    expect(within(review).getByRole("status")).toHaveTextContent(/Loading the review queue/);
+    // The console around it loaded fine, which is exactly why this state is the
+    // register's own rather than the page's.
+    expect(screen.getByRole("region", { name: "Publishers" })).toBeInTheDocument();
+  });
+
+  it("offers a retry when the review queue alone cannot be loaded", async () => {
+    vi.mocked(fetch).mockImplementation((input) =>
+      Promise.resolve(
+        String(input).startsWith("/api/v1/clustering/pending")
+          ? jsonResponse({ error: "Review queue unavailable" }, 500)
+          : jsonResponse(adminPayload()),
+      ),
+    );
+
+    renderWithProviders(<AdminDashboard />);
+
+    const review = await screen.findByRole("region", { name: "Clustering review" });
+    expect(within(review).getByRole("alert")).toHaveTextContent("Review queue unavailable");
+    expect(within(review).getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  it("distinguishes an empty review queue from a broken one", async () => {
+    mockConsole();
+
+    renderWithProviders(<AdminDashboard />);
+
+    const review = await screen.findByRole("region", { name: "Clustering review" });
+    expect(within(review).getByText(/Nothing is waiting on a decision/)).toBeInTheDocument();
+  });
+
+  it("registers each proposal with its score and the Story it would join", async () => {
+    mockConsole({ pending: [pendingAssignment()] });
+
+    renderWithProviders(<AdminDashboard />);
+
+    const review = await screen.findByRole("region", { name: "Clustering review" });
+    const row = within(review).getByRole("listitem");
+    expect(within(row).getByText("Grid operator revises connection timetable")).toBeInTheDocument();
+    expect(within(row).getByText("Score").closest("div")).toHaveTextContent("0.81");
+    // The proposed Story opens, so a reviewer can read what the proposal claims this
+    // reporting belongs to. The Article does not: it has no record page while it is
+    // pending, which is the whole reason this queue exists.
+    expect(within(row).getByRole("link", { name: "Grid interconnector delayed" })).toHaveAttribute(
+      "href",
+      "/stories/s1",
+    );
+    expect(within(row).queryByRole("link", { name: /Grid operator revises/ })).toBeNull();
+  });
+
+  it.each([
+    ["Accept", "accept"],
+    ["Reject", "reject"],
+  ])("sends the %s decision for the proposal it sits beside", async (label, decision) => {
+    mockConsole({
+      pending: [pendingAssignment()],
+      command: jsonResponse({ articleId: "a1", storyId: "s1", decision }),
+    });
+
+    renderWithProviders(<AdminDashboard />);
+
+    await userEvent.click(await screen.findByRole("button", { name: label }));
+
+    expect(callTo("/api/v1/clustering/pending/a1")?.[1]).toMatchObject({
+      method: "PATCH",
+      body: JSON.stringify({ decision }),
+    });
+  });
+
+  it("states a refused decision in the review register rather than blanking the console", async () => {
+    mockConsole({
+      pending: [pendingAssignment()],
+      command: jsonResponse({ error: "Pending assignment not found" }, 404),
+    });
+
+    renderWithProviders(<AdminDashboard />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Accept" }));
+
+    const review = await screen.findByRole("region", { name: "Clustering review" });
+    expect(within(review).getByRole("alert")).toHaveTextContent("Pending assignment not found");
     expect(screen.getByRole("region", { name: "Publishers" })).toBeInTheDocument();
   });
 });

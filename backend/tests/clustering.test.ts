@@ -14,14 +14,17 @@ import {
   DEFAULT_STORY_CATEGORY,
   EMBED_BATCH_SIZE,
   RECENCY_WINDOW_HOURS,
+  REVIEW_THRESHOLD,
   SIMILARITY_THRESHOLD,
 } from "../src/clustering/config";
+import { decidePendingAssignment } from "../src/clustering/review";
 import { EMBEDDING_DIMENSIONS, type EmbeddingKind, type EmbeddingProvider } from "../src/embeddings/EmbeddingProvider";
 import { toVectorLiteral } from "../src/embeddings/pgvector";
-import { Article, type AnalysisTextMode } from "../src/entities/Article";
+import { Article, type AnalysisTextMode, type StoryAssignmentStatus } from "../src/entities/Article";
 import { ClusteringRun } from "../src/entities/ClusteringRun";
 import { IngestionConnector } from "../src/entities/IngestionConnector";
 import { Publisher } from "../src/entities/Publisher";
+import { RejectedStoryAssignment } from "../src/entities/RejectedStoryAssignment";
 import { Story } from "../src/entities/Story";
 import { User } from "../src/entities/User";
 import { runConnector, type FetchText } from "../src/ingestion/runConnector";
@@ -54,9 +57,17 @@ function axisVector(plane: number, offAxis = 0): number[] {
   return vector;
 }
 
-// An angle whose cosine is comfortably under the auto-accept threshold: related
-// reporting that is not the same event.
-const BELOW_THRESHOLD = Math.acos(SIMILARITY_THRESHOLD - 0.1);
+// An angle whose cosine sits comfortably under *both* thresholds: related
+// reporting that is neither the same event nor a proposal worth an Admin's time.
+const BELOW_REVIEW = Math.acos(REVIEW_THRESHOLD - 0.1);
+
+// An angle placing a pair inside the review band (#50), `fraction` of the way from
+// the review floor to the auto-accept ceiling — so a test can say "this is a
+// proposal, and this one is the stronger proposal" without either landing on an
+// edge, and without being retuned when the thresholds are.
+function inReviewBand(fraction: number): number {
+  return Math.acos(REVIEW_THRESHOLD + fraction * (SIMILARITY_THRESHOLD - REVIEW_THRESHOLD));
+}
 
 // The embedder as an injected fixture: it answers from a token in the text, and
 // refuses anything it was not told about — so an unexpected embedding request is a
@@ -96,6 +107,10 @@ async function createArticle(fields: {
   title: string;
   mode?: AnalysisTextMode;
   storyId?: string;
+  // #50: a membership fixture states its decision, because that is what read paths
+  // test. Accepted unless a test is setting up a proposal for the review queue.
+  assignmentStatus?: StoryAssignmentStatus;
+  assignmentScore?: number;
   publishedAt?: Date;
   vector?: number[];
 }): Promise<Article> {
@@ -104,8 +119,8 @@ async function createArticle(fields: {
   const article = await AppDataSource.getRepository(Article).save({
     publisherId: fields.publisherId,
     storyId: fields.storyId ?? null,
-    storyAssignmentStatus: fields.storyId ? "auto_accepted" : null,
-    storyAssignmentScore: fields.storyId ? 1 : null,
+    storyAssignmentStatus: fields.storyId ? (fields.assignmentStatus ?? "auto_accepted") : null,
+    storyAssignmentScore: fields.storyId ? (fields.assignmentScore ?? 1) : null,
     title: fields.title,
     url: `https://${nextArticle}.example/story`,
     // `metadata_only` is the one rung that may hold no text (ADR-0024).
@@ -151,9 +166,13 @@ async function storyCentroid(storyId: string): Promise<number[] | null> {
   return rows[0].vector === null ? null : (JSON.parse(rows[0].vector) as number[]);
 }
 
-async function createAdminToken(email: string): Promise<string> {
+async function createAdmin(email: string): Promise<User> {
   const passwordHash = await bcrypt.hash("correct-horse", 10);
-  const user = await AppDataSource.getRepository(User).save({ email, passwordHash, role: "admin" });
+  return AppDataSource.getRepository(User).save({ email, passwordHash, role: "admin" });
+}
+
+async function createAdminToken(email: string): Promise<string> {
+  const user = await createAdmin(email);
   return signToken({ sub: user.id, role: user.role });
 }
 
@@ -166,19 +185,20 @@ const hoursAgo = (hours: number) => new Date(Date.now() - hours * 60 * 60 * 1000
 
 beforeEach(async () => {
   await AppDataSource.query(
-    `TRUNCATE "articles", "publishers", "stories", "clustering_runs", "ingestion_runs", "ingestion_connectors" CASCADE`,
+    `TRUNCATE "articles", "publishers", "stories", "clustering_runs", "ingestion_runs", "ingestion_connectors",
+              "rejected_story_assignments" CASCADE`,
   );
   enqueued.length = 0;
 });
 
-// Every Article a run considered ends in exactly one of the three outcomes, or an
+// Every Article a run considered ends in exactly one of the four outcomes, or an
 // operator reading a run is reading a number that means nothing. Asserted for every
 // run the suite persists, not only the ones a test thought to check.
 afterEach(async () => {
   const offenders = await AppDataSource.query(
-    `SELECT id, status, considered, assigned, seeded, unclustered
+    `SELECT id, status, considered, assigned, "heldForReview", seeded, unclustered
        FROM clustering_runs
-      WHERE assigned + seeded + unclustered <> considered`,
+      WHERE assigned + "heldForReview" + seeded + unclustered <> considered`,
   );
   expect(offenders).toEqual([]);
 });
@@ -376,7 +396,7 @@ describe("runClustering", () => {
     const liveButWeak = await createArticle({
       publisherId: publisher.id,
       title: "related but different",
-      vector: axisVector(1, BELOW_THRESHOLD),
+      vector: axisVector(1, BELOW_REVIEW),
     });
 
     const run = await runClustering({ embedder: new StubEmbedder({}) });
@@ -650,6 +670,195 @@ describe("runClustering", () => {
     expect(await storyCentroid(story.id)).not.toBeNull();
   });
 
+  // ADR-0026's review band (#50). The band's whole purpose is that a borderline
+  // score becomes a decision rather than either a silent membership or a discard.
+  it("holds a borderline assignment for review, and lets it change nothing about the Story", async () => {
+    const first = await createPublisher("one.example");
+    const second = await createPublisher("two.example");
+    const seenAt = hoursAgo(3);
+    const story = await createStory({ title: "Borderline event", lastSeenAt: seenAt });
+    await createArticle({
+      publisherId: first.id,
+      title: "the one report there is",
+      storyId: story.id,
+      vector: axisVector(0),
+      publishedAt: seenAt,
+    });
+    const offAxis = inReviewBand(0.5);
+    const candidate = await createArticle({
+      publisherId: second.id,
+      title: "possibly the same event",
+      vector: axisVector(0, offAxis),
+      publishedAt: new Date(),
+    });
+
+    const run = await runClustering({ embedder: new StubEmbedder({}) });
+
+    expect(run.considered).toBe(1);
+    expect(run.assigned).toBe(0);
+    expect(run.heldForReview).toBe(1);
+    // Not unclustered either: it is waiting on an Admin, not on the next run.
+    expect(run.unclustered).toBe(0);
+    expect(run.storiesCreated).toBe(0);
+
+    const held = await AppDataSource.getRepository(Article).findOneByOrFail({ id: candidate.id });
+    // The proposal is attached to the Story it proposes — the only way a reviewer
+    // can be shown what is being proposed — and says so in its status.
+    expect(held.storyId).toBe(story.id);
+    expect(held.storyAssignmentStatus).toBe("pending_review");
+    expect(held.storyAssignmentScore).toBeCloseTo(Math.cos(offAxis), 4);
+
+    // And the Story is exactly as it was. Its span is what the recency gate reads,
+    // so a guess must not be able to keep a Story alive; its centroid is what scores
+    // every later candidate, so a guess must not be able to move the target.
+    const unmoved = await AppDataSource.getRepository(Story).findOneByOrFail({ id: story.id });
+    expect(unmoved.lastSeenAt.getTime()).toBe(seenAt.getTime());
+    expect(await storyCentroid(story.id)).toEqual(axisVector(0));
+  });
+
+  it("keeps a held assignment out of browse, out of search, and out of Brief evidence", async () => {
+    const first = await createPublisher("one.example");
+    const second = await createPublisher("two.example");
+    const story = await createStory({ title: "Ferry terminal fire", lastSeenAt: hoursAgo(2) });
+    await createArticle({
+      publisherId: first.id,
+      title: "Ferry terminal fire contained",
+      storyId: story.id,
+      vector: axisVector(0),
+    });
+    await createArticle({
+      publisherId: second.id,
+      title: "Ferry terminal blaze under control",
+      storyId: story.id,
+      vector: axisVector(0),
+    });
+    const held = await createArticle({
+      publisherId: second.id,
+      title: "Ferry services resume after weekend disruption",
+      storyId: story.id,
+      assignmentStatus: "pending_review",
+      assignmentScore: 0.8,
+      vector: axisVector(0, inReviewBand(0.5)),
+    });
+
+    const token = await registerAndLogin("clustering-review-reader@example.com", "student");
+    const auth = { Authorization: `Bearer ${token}` };
+
+    // Browse counts two members, not three: a count that included the proposal
+    // would advertise coverage a reader cannot open.
+    const list = await request(app()).get("/api/v1/stories").set(auth);
+    expect(list.body.items[0].articleCount).toBe(2);
+
+    const detail = await request(app()).get(`/api/v1/stories/${story.id}`).set(auth);
+    expect(detail.body.articleCount).toBe(2);
+    expect(detail.body.articles.map((article: { id: string }) => article.id)).not.toContain(held.id);
+
+    // Not a partial record either: the same 404 an Unclustered Article gets, since
+    // "we may have put this somewhere" is not a public state.
+    const record = await request(app()).get(`/api/v1/articles/${held.id}`).set(auth);
+    expect(record.status).toBe(404);
+
+    const search = await request(app()).get("/api/v1/search?q=ferry").set(auth);
+    expect(search.body.items.length).toBeGreaterThan(0);
+    expect(search.body.items.map((item: { id: string }) => item.id)).not.toContain(held.id);
+
+    // Evidence selection's boundary as it exists today: a Brief's Articles are
+    // cited evidence, so a proposal cannot be attached to one.
+    const brief = await request(app())
+      .post("/api/v1/briefs")
+      .set(auth)
+      .send({ title: "Ferry disruption", category: "world" });
+    expect(brief.status).toBe(201);
+    const attached = await request(app())
+      .post(`/api/v1/briefs/${brief.body.id}/articles`)
+      .set(auth)
+      .send({ articleId: held.id });
+    expect(attached.status).toBe(422);
+    expect(attached.body.error).toMatch(/clustered into a Story/);
+  });
+
+  it("stops proposing a pairing an Admin rejected, and offers the next-best Story instead", async () => {
+    const first = await createPublisher("one.example");
+    const second = await createPublisher("two.example");
+    const admin = await createAdmin("clustering-rejector@example.com");
+    // Two live Stories, both inside the band against the candidate below, one
+    // nearer than the other.
+    const nearer = await createStory({ title: "Nearer reading", lastSeenAt: hoursAgo(2) });
+    await createArticle({
+      publisherId: first.id,
+      title: "nearer member",
+      storyId: nearer.id,
+      vector: axisVector(0, inReviewBand(0.9)),
+    });
+    const farther = await createStory({ title: "Farther reading", lastSeenAt: hoursAgo(2) });
+    await createArticle({
+      publisherId: first.id,
+      title: "farther member",
+      storyId: farther.id,
+      vector: axisVector(0, inReviewBand(0.1)),
+    });
+    const candidate = await createArticle({ publisherId: second.id, title: "ambiguous report", vector: axisVector(0) });
+
+    const articles = AppDataSource.getRepository(Article);
+    const firstRun = await runClustering({ embedder: new StubEmbedder({}) });
+    expect(firstRun.heldForReview).toBe(1);
+    expect((await articles.findOneByOrFail({ id: candidate.id })).storyId).toBe(nearer.id);
+
+    await decidePendingAssignment(candidate.id, "reject", admin.id);
+
+    // The next run reconsiders the Article — it is Unclustered again — but the
+    // refused pairing is off the table, so it proposes the other live Story.
+    const secondRun = await runClustering({ embedder: new StubEmbedder({}) });
+    expect(secondRun.heldForReview).toBe(1);
+    expect((await articles.findOneByOrFail({ id: candidate.id })).storyId).toBe(farther.id);
+
+    await decidePendingAssignment(candidate.id, "reject", admin.id);
+
+    // Both refused, so there is nothing left to propose: Unclustered, and quiet.
+    const thirdRun = await runClustering({ embedder: new StubEmbedder({}) });
+    expect(thirdRun.heldForReview).toBe(0);
+    expect(thirdRun.unclustered).toBe(1);
+    expect((await articles.findOneByOrFail({ id: candidate.id })).storyId).toBeNull();
+  });
+
+  it("voids a proposal whose text enrichment has replaced, and rescores it from what is held now", async () => {
+    const first = await createPublisher("one.example");
+    const second = await createPublisher("two.example");
+    const story = await createStory({ title: "Revised event", lastSeenAt: hoursAgo(2) });
+    await createArticle({
+      publisherId: first.id,
+      title: "the accepted member",
+      storyId: story.id,
+      vector: axisVector(0),
+      publishedAt: hoursAgo(2),
+    });
+    const held = await createArticle({
+      publisherId: second.id,
+      title: "held on its teaser",
+      storyId: story.id,
+      assignmentStatus: "pending_review",
+      assignmentScore: 0.8,
+      vector: axisVector(0, inReviewBand(0.5)),
+    });
+
+    // What enrichment leaves behind: new text, and no vector describing it.
+    await AppDataSource.query(`UPDATE "articles" SET "embedding" = NULL WHERE "id" = $1`, [held.id]);
+
+    // The replacement text is nothing like the Story, so the rescore refuses it
+    // outright — which is the point: the run decides on the text it holds now, and
+    // the reviewer is never shown a score for a body that has been replaced.
+    const run = await runClustering({ embedder: new StubEmbedder({ "held on its teaser": axisVector(9) }) });
+
+    expect(run.embedded).toBe(1);
+    expect(run.considered).toBe(1);
+    expect(run.heldForReview).toBe(0);
+    expect(run.unclustered).toBe(1);
+    const rescored = await AppDataSource.getRepository(Article).findOneByOrFail({ id: held.id });
+    expect(rescored.storyId).toBeNull();
+    expect(rescored.storyAssignmentStatus).toBeNull();
+    expect(rescored.storyAssignmentScore).toBeNull();
+  });
+
   it("records a run that could not embed as failed, with the reason on the row", async () => {
     const publisher = await createPublisher("one.example");
     await createArticle({ publisherId: publisher.id, title: "needs a vector" });
@@ -786,6 +995,197 @@ describe("POST /api/v1/clustering/runs", () => {
       storiesCreated: 3,
       errorSummary: null,
     });
+  });
+});
+
+// The Admin review queue's own seam: what is HTTP-visible about working the band —
+// who may read it, what a row states, and what each decision does to the corpus.
+describe("the Admin review queue", () => {
+  async function seedProposal(score = 0.8): Promise<{ story: Story; article: Article; member: Article }> {
+    const first = await createPublisher("one.example");
+    const second = await createPublisher("two.example");
+    const story = await createStory({ title: "Grid interconnector delayed", lastSeenAt: hoursAgo(4) });
+    const member = await createArticle({
+      publisherId: first.id,
+      title: "Interconnector slips to 2029",
+      storyId: story.id,
+      vector: axisVector(0),
+      publishedAt: hoursAgo(4),
+    });
+    const article = await createArticle({
+      publisherId: second.id,
+      title: "Grid operator revises connection timetable",
+      storyId: story.id,
+      assignmentStatus: "pending_review",
+      assignmentScore: score,
+      vector: axisVector(0, inReviewBand(0.5)),
+      publishedAt: hoursAgo(1),
+    });
+    return { story, article, member };
+  }
+
+  it("is Admin-only, on both the queue and the decision", async () => {
+    const { article } = await seedProposal();
+    const decide = (token?: string) => {
+      const req = request(app()).patch(`/api/v1/clustering/pending/${article.id}`).send({ decision: "accept" });
+      return token ? req.set("Authorization", `Bearer ${token}`) : req;
+    };
+
+    expect((await request(app()).get("/api/v1/clustering/pending")).status).toBe(401);
+    expect((await decide()).status).toBe(401);
+
+    for (const role of ["student", "investor"] as const) {
+      const token = await registerAndLogin(`review-${role}@example.com`, role);
+      const queue = await request(app()).get("/api/v1/clustering/pending").set("Authorization", `Bearer ${token}`);
+      expect(queue.status).toBe(403);
+      expect((await decide(token)).status).toBe(403);
+    }
+
+    // Refused all four times, so the proposal is exactly where it was.
+    expect((await AppDataSource.getRepository(Article).findOneByOrFail({ id: article.id })).storyAssignmentStatus).toBe(
+      "pending_review",
+    );
+  });
+
+  it("lists each proposal with the Article, the Story proposed, and the score behind it", async () => {
+    const { story, article } = await seedProposal(0.81);
+    const token = await createAdminToken("review-lister@example.com");
+
+    const res = await request(app()).get("/api/v1/clustering/pending").set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(1);
+    const [proposal] = res.body.items;
+    expect(proposal.id).toBe(article.id);
+    expect(proposal.title).toBe(article.title);
+    expect(proposal.publisher.domain).toBe("two.example");
+    expect(proposal.score).toBeCloseTo(0.81);
+    expect(proposal.proposedStory).toMatchObject({ id: story.id, slug: story.slug, title: story.title });
+    // The accepted member is not a proposal and is not in the queue.
+    expect(res.body.items).toHaveLength(1);
+  });
+
+  it("answers an empty queue as an empty page rather than a refusal", async () => {
+    const token = await createAdminToken("review-empty@example.com");
+
+    const res = await request(app()).get("/api/v1/clustering/pending").set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ items: [], total: 0, totalPages: 1 });
+  });
+
+  it("makes an accepted proposal a full member, and moves the Story with it", async () => {
+    const { story, article } = await seedProposal();
+    const token = await createAdminToken("review-accepter@example.com");
+    expect(await storyCentroid(story.id)).toBeNull();
+
+    const res = await request(app())
+      .patch(`/api/v1/clustering/pending/${article.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ decision: "accept" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ articleId: article.id, storyId: story.id, decision: "accept" });
+
+    const accepted = await AppDataSource.getRepository(Article).findOneByOrFail({ id: article.id });
+    expect(accepted.storyId).toBe(story.id);
+    expect(accepted.storyAssignmentStatus).toBe("auto_accepted");
+    // The score records what proposed the membership; a human accepting 0.8 has not
+    // made it a 1.
+    expect(accepted.storyAssignmentScore).toBeCloseTo(0.8);
+
+    // ADR-0026: the centroid is the mean of the Story's members, so accepting one
+    // has to move it — the next run scores candidates against this.
+    const centroid = await storyCentroid(story.id);
+    expect(centroid).not.toBeNull();
+    expect(centroid![0]).toBeCloseTo((1 + Math.cos(inReviewBand(0.5))) / 2, 4);
+    const grown = await AppDataSource.getRepository(Story).findOneByOrFail({ id: story.id });
+    expect(grown.lastSeenAt.getTime()).toBe(accepted.publishedAt.getTime());
+
+    // And the Article is a public record now, where it was a 404 a moment ago.
+    const reader = await registerAndLogin("review-after-accept@example.com", "student");
+    const record = await request(app())
+      .get(`/api/v1/articles/${article.id}`)
+      .set("Authorization", `Bearer ${reader}`);
+    expect(record.status).toBe(200);
+    expect(record.body.story.id).toBe(story.id);
+  });
+
+  it("leaves a rejected proposal Unclustered, and remembers the refusal", async () => {
+    const { story, article, member } = await seedProposal();
+    const token = await createAdminToken("review-rejecter@example.com");
+
+    const res = await request(app())
+      .patch(`/api/v1/clustering/pending/${article.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ decision: "reject" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ articleId: article.id, storyId: story.id, decision: "reject" });
+
+    const rejected = await AppDataSource.getRepository(Article).findOneByOrFail({ id: article.id });
+    expect(rejected.storyId).toBeNull();
+    // Unclustered carries no decision and no score (ADR-0026) — a leftover score
+    // would read as a membership that had been scored rather than one refused.
+    expect(rejected.storyAssignmentStatus).toBeNull();
+    expect(rejected.storyAssignmentScore).toBeNull();
+
+    const remembered = await AppDataSource.getRepository(RejectedStoryAssignment).find();
+    expect(remembered).toHaveLength(1);
+    expect(remembered[0]).toMatchObject({ articleId: article.id, storyId: story.id });
+    expect(remembered[0].rejectedByUserId).not.toBeNull();
+
+    // The Story is untouched: the proposal never counted, so removing it changes
+    // nothing about the member it does have.
+    const untouched = await AppDataSource.getRepository(Article).findOneByOrFail({ id: member.id });
+    expect(untouched.storyId).toBe(story.id);
+  });
+
+  it("refuses a decision it cannot act on rather than inventing one", async () => {
+    const { article } = await seedProposal();
+    const token = await createAdminToken("review-refuser@example.com");
+    const auth = { Authorization: `Bearer ${token}` };
+
+    const unknown = await request(app())
+      .patch(`/api/v1/clustering/pending/${article.id}`)
+      .set(auth)
+      .send({ decision: "merge" });
+    expect(unknown.status).toBe(422);
+    expect(unknown.body.error).toMatch(/accept, reject/);
+
+    const notAnId = await request(app()).patch("/api/v1/clustering/pending/not-a-uuid").set(auth).send({
+      decision: "accept",
+    });
+    expect(notAnId.status).toBe(404);
+
+    // Deciding the same proposal twice: the second decision has nothing pending to
+    // act on, which is the same answer a second operator racing the first gets.
+    expect(
+      (await request(app()).patch(`/api/v1/clustering/pending/${article.id}`).set(auth).send({ decision: "accept" }))
+        .status,
+    ).toBe(200);
+    const again = await request(app())
+      .patch(`/api/v1/clustering/pending/${article.id}`)
+      .set(auth)
+      .send({ decision: "reject" });
+    expect(again.status).toBe(404);
+    expect(await AppDataSource.getRepository(RejectedStoryAssignment).count()).toBe(0);
+  });
+});
+
+// The band is two numbers that have to be read together, so the pair itself is
+// checkable: a floor above the ceiling is not a tighter configuration, it is a
+// configuration neither number can be honoured in.
+describe("the review band's configuration", () => {
+  it("refuses a review floor above the auto-accept threshold", async () => {
+    vi.stubEnv("CLUSTERING_REVIEW_THRESHOLD", "0.95");
+    vi.stubEnv("CLUSTERING_SIMILARITY_THRESHOLD", "0.85");
+    vi.resetModules();
+
+    await expect(import("../src/clustering/config")).rejects.toThrow(/review band/);
+
+    vi.unstubAllEnvs();
+    vi.resetModules();
   });
 });
 

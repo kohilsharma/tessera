@@ -12,6 +12,7 @@ import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
 import { toPublicIngestionRun } from "../lib/ingestionRunView";
+import { acceptedMembership } from "../lib/storyMembership";
 
 export const dashboardRouter = Router();
 
@@ -57,7 +58,9 @@ dashboardRouter.get(
       .select("story.category", "category")
       .addSelect("COUNT(DISTINCT story.id)", "storyCount")
       .addSelect("COUNT(article.id)", "articleCount")
-      .leftJoin("story.articles", "article")
+      // Accepted members only (#50), as on browse: a rollup counting proposals
+      // would state coverage no Investor can reach.
+      .leftJoin("story.articles", "article", acceptedMembership("article"))
       .groupBy("story.category")
       .orderBy("story.category", "ASC")
       .getRawMany<{ category: StoryCategory; storyCount: string; articleCount: string }>();

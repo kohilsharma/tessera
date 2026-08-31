@@ -1931,7 +1931,8 @@ describe("GDELT retention", () => {
       firstSeenAt: expired(),
       lastSeenAt: expired(),
     });
-    await AppDataSource.getRepository(Article).update({ id: clustered.id }, { storyId: story.id });
+    await AppDataSource.getRepository(Article)
+      .update({ id: clustered.id }, { storyId: story.id, storyAssignmentStatus: "auto_accepted" });
     const owner = await AppDataSource.getRepository(User).save({
       email: `retention-owner-${randomUUID()}@example.com`,
       passwordHash: await bcrypt.hash("correct-horse", 10),
@@ -1982,6 +1983,7 @@ describe("a completed run does not disturb the curated corpus", () => {
     });
     await AppDataSource.getRepository(Article).save({
       storyId: story.id,
+      storyAssignmentStatus: "auto_accepted" as const,
       publisherId: publisher.id,
       title: "Fab announces new packaging line",
       url: "https://curated-press.example/packaging-line",

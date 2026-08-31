@@ -102,9 +102,21 @@ aging out. A new Story takes the medoid Article's title and the `world` default 
 model call names it. Enrichment nulls `articles.embedding` when it writes new text, so a null
 vector means one thing. Operationally it is a second BullMQ queue on the same worker process,
 ticking hourly at :05, with an Admin-only `POST /api/v1/clustering/runs` that answers
-`202 {status:"accepted"}` and a `clustering_runs` history table whose ledger sums
-`assigned + seeded + unclustered = considered`. Pending review and Story merge are #50 and #52;
-Phase 3.5 (graph/timeline) is not built yet.
+`202 {status:"accepted"}` and a `clustering_runs` history table.
+**Pending review** (#50) opens the band beneath the threshold: a score between
+`CLUSTERING_REVIEW_THRESHOLD` and the auto-accept threshold is held as a *proposal* —
+`articles.storyAssignmentStatus = 'pending_review'`, carrying the Story's id so a reviewer can
+see what is proposed, but changing neither the Story's centroid nor its span. So `storyId IS NOT
+NULL` no longer means membership: `lib/storyMembership.ts` holds the one predicate every reader
+surface now tests (browse, Story detail, Article detail, search, Brief evidence, the Investor
+rollup), a DB CHECK makes a storyId without a decision impossible, and the run ledger sums
+`assigned + heldForReview + seeded + unclustered = considered`. `GET /api/v1/clustering/pending`
+and `PATCH /api/v1/clustering/pending/:articleId {decision}` are the Admin-only queue and
+decision; accepting makes the Article a member and recomputes the Story, rejecting returns it to
+Unclustered and remembers the pairing in `rejected_story_assignments` so no later run proposes
+it again. A run also voids any proposal whose vector enrichment has cleared, since a score
+describing replaced text is not a judgement anyone should be shown, and rescores the Article in
+the same pass. Story merge is #52; Phase 3.5 (graph/timeline) is not built yet.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
 `/register`, `/account`), role dashboards (`/dashboard/:role`), browsing the corpus
@@ -124,7 +136,8 @@ Enable-Disable commands on each connector row (#39 — Run states that it queued
 the worker is what executes it, #42), and each publisher row shows its Terms
 Class beside its article count (#40). A fifth register carries **ClusteringRun** history with a
 Run-clustering command on the register itself (#49 — one pass over the whole corpus, so there is
-no row to hang it on). The
+no row to hang it on), and a sixth is the **clustering review queue** (#50) — the one register
+with its own request, so it owns all four UI states, with Accept/Reject on each proposal row. The
 **design prototype** for the Phase-3 flagship (`src/versions/BureauPrototype.tsx` +
 `bureau.tsx` over hardcoded `src/data.ts`, styled by `src/styles.css`) sits at
 `/design-prototype`, out of the Phase-1 path.

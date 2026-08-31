@@ -5,6 +5,7 @@ import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
 import { mayServeText } from "../entities/Publisher";
 import { toPublicArticle } from "../lib/articleView";
+import { ACCEPTED_ASSIGNMENT } from "../lib/storyMembership";
 import { isUuid } from "../lib/uuid";
 
 export const articlesRouter = Router();
@@ -28,7 +29,10 @@ articlesRouter.get(
     // than a partial record — a 200 with a null Story would make "not clustered
     // yet" look like a public state, and dereferencing the absent Story below
     // would be a 500.
-    if (!article || !article.story) {
+    // A pending Story Assignment (#50) is the same non-record for the same
+    // reason: it has a Story, but nobody has decided it is the right one, so
+    // serving it would put a machine's borderline guess in front of a reader.
+    if (!article || !article.story || article.storyAssignmentStatus !== ACCEPTED_ASSIGNMENT) {
       res.status(404).json({ error: "Article not found" });
       return;
     }

@@ -5,6 +5,7 @@ import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
 import { toPublicArticle } from "../lib/articleView";
 import { paginate, parseListQuery, toEnvelope } from "../lib/listQuery";
+import { ACCEPTED_ASSIGNMENT, acceptedMembership } from "../lib/storyMembership";
 import { isUuid } from "../lib/uuid";
 
 export const storiesRouter = Router();
@@ -43,7 +44,11 @@ storiesRouter.get(
 
     const qb = storyRepo()
       .createQueryBuilder("story")
-      .loadRelationCountAndMap("story.articleCount", "story.articles")
+      // Accepted members only (#50): a pending assignment is invisible to browse,
+      // so counting it here would advertise coverage a reader cannot open.
+      .loadRelationCountAndMap("story.articleCount", "story.articles", "member", (count) =>
+        count.andWhere(acceptedMembership("member")),
+      )
       .orderBy(`story.${sortBy}`, sortDir === "asc" ? "ASC" : "DESC");
 
     if (category) qb.andWhere("story.category = :category", { category });
@@ -83,9 +88,13 @@ storiesRouter.get(
       return;
     }
 
+    // CONTEXT.md "Story Assignment": a proposal held for review carries this
+    // Story's id but is not part of it until an Admin says so, so it is filtered
+    // out of both the list and the count a reader sees.
+    const members = story.articles.filter((article) => article.storyAssignmentStatus === ACCEPTED_ASSIGNMENT);
     res.json({
-      ...toPublicStory(story, story.articles.length),
-      articles: [...story.articles]
+      ...toPublicStory(story, members.length),
+      articles: members
         .sort((a, b) => a.publishedAt.getTime() - b.publishedAt.getTime())
         .map(toPublicArticle),
     });

@@ -18,7 +18,8 @@ export async function runClusteringJob(job: { name: string }): Promise<void> {
   const run = await runClustering({ embedder: createEmbeddingProvider() });
   console.log(
     `[worker] clustering run ${run.id} ${run.status}: embedded ${run.embedded}, considered ${run.considered}, ` +
-      `assigned ${run.assigned}, seeded ${run.seeded} into ${run.storiesCreated} new Story(s), ` +
+      `assigned ${run.assigned}, held ${run.heldForReview} for review, ` +
+      `seeded ${run.seeded} into ${run.storiesCreated} new Story(s), ` +
       `${run.unclustered} left unclustered`,
   );
 }

@@ -11,6 +11,7 @@ import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
 import { toPublicArticle } from "../lib/articleView";
+import { ACCEPTED_ASSIGNMENT } from "../lib/storyMembership";
 import { IMAGE_MIME_TYPES, sniffImageType } from "../lib/imageValidation";
 import { paginate, parseListQuery, toEnvelope } from "../lib/listQuery";
 import { isPgError, PG_CHECK_VIOLATION } from "../lib/pgError";
@@ -393,8 +394,12 @@ briefsRouter.post(
       res.status(422).json({ error: "articleId must reference an existing Article" });
       return;
     }
-    if (article.storyId === null) {
-      res.status(422).json({ error: "Unclustered Articles cannot be attached to Briefs" });
+    // One guard for two states that are the same fact here: an Unclustered Article
+    // (no Story at all) and one whose assignment is still a proposal (#50). A
+    // Brief's Articles are cited evidence, and a borderline guess must not ground a
+    // claim — so `storyId !== null` is no longer enough to mean "in a Story".
+    if (article.storyAssignmentStatus !== ACCEPTED_ASSIGNMENT) {
+      res.status(422).json({ error: "Only Articles clustered into a Story can be attached to Briefs" });
       return;
     }
 

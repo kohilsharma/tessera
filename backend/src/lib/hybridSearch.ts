@@ -2,6 +2,7 @@ import { AppDataSource } from "../data-source";
 import { toVectorLiteral } from "../embeddings/pgvector";
 import type { EmbeddingProvider } from "../embeddings/EmbeddingProvider";
 import type { ParsedListQuery } from "./listQuery";
+import { acceptedMembership } from "./storyMembership";
 
 // ADR-0014: standard RRF constant (also Elasticsearch's default) — large enough
 // that a single signal's rank-1 doesn't dominate the sum, small enough that
@@ -88,7 +89,10 @@ export async function hybridSearchArticleIds(
       ) AS rank
       FROM articles a
       JOIN stories st ON st.id = a."storyId", plainto_tsquery('english', $1) AS query
-      WHERE a."searchVector" @@ query OR st."searchVector" @@ query
+      WHERE (a."searchVector" @@ query OR st."searchVector" @@ query)
+        -- #50: a pending Story Assignment joins a Story but is invisible to
+        -- search, so membership is tested by the decision, not by the join.
+        AND ${acceptedMembership("a")}
     ),
     semantic AS (
       -- The ANN scan is the inner query and nothing but ORDER BY ... LIMIT, so
@@ -101,7 +105,7 @@ export async function hybridSearchArticleIds(
         FROM articles
         -- $2 is NULL when the embedding provider is unreachable: the CTE goes
         -- empty and RRF degrades to lexical-only (see embedQueryOrNull).
-        WHERE embedding IS NOT NULL AND "storyId" IS NOT NULL AND $2::vector IS NOT NULL
+        WHERE embedding IS NOT NULL AND ${acceptedMembership("articles")} AND $2::vector IS NOT NULL
         ORDER BY embedding <=> $2::vector
         LIMIT ${SEMANTIC_CANDIDATE_POOL}
       ) nn

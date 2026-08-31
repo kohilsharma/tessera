@@ -57,6 +57,7 @@ beforeAll(async () => {
   });
   const quantumArticle = await articles.save({
     storyId: storyTech.id,
+    storyAssignmentStatus: "auto_accepted" as const,
     publisherId: publisher.id,
     title: "Quantum computers reach a new milestone",
     url: "https://publisher-a.example/quantum",
@@ -73,6 +74,7 @@ beforeAll(async () => {
 
   const internalTextArticle = await articles.save({
     storyId: storyTech.id,
+    storyAssignmentStatus: "auto_accepted" as const,
     publisherId: publisher.id,
     title: "Quantum computing licensed deep-dive",
     url: "https://publisher-a.example/quantum-licensed",
@@ -93,6 +95,7 @@ beforeAll(async () => {
   });
   const marketsArticle = await articles.save({
     storyId: storyBiz.id,
+    storyAssignmentStatus: "auto_accepted" as const,
     publisherId: publisher.id,
     title: "Markets rally on earnings",
     url: "https://publisher-a.example/markets",
@@ -115,6 +118,7 @@ beforeAll(async () => {
   });
   const nebulaArticle = await articles.save({
     storyId: storyNebula.id,
+    storyAssignmentStatus: "auto_accepted" as const,
     publisherId: publisher.id,
     title: "Space telescope captures new deep-field photo",
     url: "https://publisher-a.example/deep-field",
@@ -138,6 +142,7 @@ beforeAll(async () => {
   });
   const semanticOnlyArticle = await articles.save({
     storyId: storyTrade.id,
+    storyAssignmentStatus: "auto_accepted" as const,
     publisherId: publisher.id,
     title: "Supply chains adjust to new tariffs",
     url: "https://publisher-a.example/tariffs",
@@ -386,6 +391,7 @@ describe("GET /api/v1/search", () => {
     });
     const target = await AppDataSource.getRepository(Article).save({
       storyId: story.id,
+      storyAssignmentStatus: "auto_accepted" as const,
       publisherId: publisher.id,
       title: "Visible target",
       url: "https://publisher-a.example/visible-pool-target",

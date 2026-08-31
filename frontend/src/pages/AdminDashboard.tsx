@@ -1,10 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import {
+  decidePendingAssignment,
   getAdminDashboard,
+  getPendingAssignments,
   runClustering,
   runIngestionConnector,
   setConnectorEnabled,
   USER_ROLES,
+  type AssignmentDecision,
   type ClusteringRunSummary,
   type IngestionRunSummary,
   type TermsClass,
@@ -17,7 +21,7 @@ import {
   DashboardRegister,
   RegisterRow,
 } from "../components/dashboardArchetype";
-import { EmptyState, EntryList, ErrorState, PendingState } from "../components/uiStates";
+import { EmptyState, EntryList, ErrorState, PendingState, RetryableError } from "../components/uiStates";
 
 // A run's own timing, in the note line rather than the ledger: a timestamp and a
 // duration are one fact about when, and two more ledger cells beside seven
@@ -44,12 +48,18 @@ const TERMS_CLASS_LABEL: Record<TermsClass, string> = {
   licensed: "Licensed",
 };
 
-// The Admin surface (#36, #39, #49): five operator registers, in three shapes, so
-// they are told apart before they are read — standing totals as plates, the
-// connector fleet as a status register an operator can act on, ingestion and
-// clustering history as ledgers of runs, publishers as a coverage register.
+// The Admin surface (#36, #39, #49, #50): six operator registers, in three shapes,
+// so they are told apart before they are read — standing totals as plates, the
+// connector fleet and the clustering review queue as registers an operator acts on,
+// ingestion and clustering history as ledgers of runs, publishers as a coverage
+// register.
 export default function AdminDashboard() {
   const query = useQuery({ queryKey: ["dashboard", "admin"], queryFn: getAdminDashboard });
+  // The review queue is its own request, unlike every other register here: it is a
+  // page of a queue that grows with the corpus rather than a fixed panel of the
+  // console, and it is refetched on its own after each decision. So it carries its
+  // own four UI states inside the register, where the rest share the page's.
+  const review = useQuery({ queryKey: ["clustering", "pending"], queryFn: getPendingAssignments });
   const queryClient = useQueryClient();
 
   // Both mutations change what this same payload says, so both refetch it — the
@@ -64,6 +74,16 @@ export default function AdminDashboard() {
   // Clustering is the same enqueue-and-wait shape as a connector run, and it too
   // changes Stories, Articles and the run history this payload carries.
   const cluster = useMutation({ mutationFn: runClustering, onSuccess: invalidate });
+  // A decision changes the queue *and* the console: accepting adds a member to a
+  // Story, which moves the publisher and Story counts the other registers state.
+  const decide = useMutation({
+    mutationFn: ({ articleId, decision }: { articleId: string; decision: AssignmentDecision }) =>
+      decidePendingAssignment(articleId, decision),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["clustering", "pending"] });
+      invalidate();
+    },
+  });
   const commandError = run.error?.message ?? toggle.error?.message ?? null;
 
   // Firing any command clears the others' refusals first: a mutation keeps its
@@ -74,6 +94,7 @@ export default function AdminDashboard() {
     run.reset();
     toggle.reset();
     cluster.reset();
+    decide.reset();
     fire();
   }
 
@@ -241,6 +262,7 @@ export default function AdminDashboard() {
                         { term: "Embedded", value: clusteringRun.embedded },
                         { term: "Considered", value: clusteringRun.considered },
                         { term: "Assigned", value: clusteringRun.assigned },
+                        { term: "Held", value: clusteringRun.heldForReview },
                         { term: "Seeded", value: clusteringRun.seeded },
                         { term: "New Stories", value: clusteringRun.storiesCreated },
                         { term: "Unclustered", value: clusteringRun.unclustered },
@@ -249,6 +271,85 @@ export default function AdminDashboard() {
                   ))}
                 </EntryList>
               )}
+            </DashboardRegister>
+
+            {/* #50: the band beneath the auto-accept threshold, as a queue rather
+                than a ledger — every row is a decision only a person can make, and
+                until they make it the Article is invisible to every reader. Its own
+                request, so it states its own loading, refusal, empty and populated
+                treatments inside the register. */}
+            <DashboardRegister
+              heading="Clustering review"
+              folio={review.data ? `${review.data.total} awaiting a decision` : "Pending Story Assignments"}
+            >
+              {review.isPending && <PendingState>Loading the review queue…</PendingState>}
+              {review.isError && (
+                <RetryableError
+                  message={review.error.message}
+                  onRetry={() => void review.refetch()}
+                  retrying={review.isFetching}
+                />
+              )}
+              {decide.error && <ErrorState>{decide.error.message}</ErrorState>}
+              {review.data &&
+                (review.data.items.length === 0 ? (
+                  <EmptyState>
+                    <p>
+                      Nothing is waiting on a decision. Clustering holds an Article here when its best Story is a close
+                      call rather than a clear match.
+                    </p>
+                  </EmptyState>
+                ) : (
+                  <EntryList>
+                    {review.data.items.map((proposal) => {
+                      const deciding = decide.isPending && decide.variables?.articleId === proposal.id;
+                      return (
+                        <RegisterRow
+                          key={proposal.id}
+                          // Not a link, unlike a Story row: a pending Article has no
+                          // record page — the API refuses it for the same reason this
+                          // queue exists. Its publisher and date are the row's own
+                          // address instead.
+                          name={proposal.title}
+                          note={`${proposal.publisher.name} · ${new Date(proposal.publishedAt).toLocaleString()}`}
+                          meta={[
+                            { term: "Score", value: proposal.score?.toFixed(2) ?? "unscored" },
+                            {
+                              term: "Proposed Story",
+                              // The Story *is* readable — it has accepted members —
+                              // so a reviewer can open what the proposal claims this
+                              // reporting belongs to before deciding.
+                              value: <Link to={`/stories/${proposal.proposedStory.id}`}>{proposal.proposedStory.title}</Link>,
+                            },
+                            { term: "Category", value: proposal.proposedStory.category },
+                          ]}
+                          action={
+                            <>
+                              <button
+                                type="button"
+                                disabled={deciding}
+                                onClick={() =>
+                                  command(() => decide.mutate({ articleId: proposal.id, decision: "accept" }))
+                                }
+                              >
+                                Accept
+                              </button>
+                              <button
+                                type="button"
+                                disabled={deciding}
+                                onClick={() =>
+                                  command(() => decide.mutate({ articleId: proposal.id, decision: "reject" }))
+                                }
+                              >
+                                Reject
+                              </button>
+                            </>
+                          }
+                        />
+                      );
+                    })}
+                  </EntryList>
+                ))}
             </DashboardRegister>
 
             <DashboardRegister heading="Publishers" folio={`${data.publishers.length} registered`}>

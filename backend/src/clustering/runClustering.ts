@@ -2,13 +2,16 @@ import { AppDataSource } from "../data-source";
 import { Article } from "../entities/Article";
 import { ClusteringRun } from "../entities/ClusteringRun";
 import { Story } from "../entities/Story";
+import type { StoryAssignmentStatus } from "../entities/Article";
 import type { EmbeddingProvider } from "../embeddings/EmbeddingProvider";
 import { toVectorLiteral } from "../embeddings/pgvector";
+import { ACCEPTED_ASSIGNMENT, PENDING_ASSIGNMENT, acceptedCentroid } from "../lib/storyMembership";
 import {
   CLUSTERABLE_TEXT_MODES,
   DEFAULT_STORY_CATEGORY,
   EMBED_BATCH_SIZE,
   RECENCY_WINDOW_HOURS,
+  REVIEW_THRESHOLD,
   SIMILARITY_THRESHOLD,
 } from "./config";
 
@@ -37,6 +40,22 @@ function cosineSimilarity(a: number[], b: number[]): number {
 
 function parseVector(literal: string): number[] {
   return JSON.parse(literal) as number[];
+}
+
+// #50: a proposal is a judgement about the text that scored it. Enrichment nulls the
+// vector when it writes new text (ADR-0026), so a pending assignment on a
+// null-vector Article describes text Tessera no longer holds — void it, and this
+// same run rescores the Article from what it holds now.
+//
+// Not only cosmetic: candidates are Articles with no storyId, so without this a
+// re-enriched proposal would never be reconsidered at all. It would sit in the
+// review queue forever, showing a reviewer a score for a body that has been replaced.
+async function voidProposalsAwaitingReEmbedding(): Promise<void> {
+  await AppDataSource.query(
+    `UPDATE "articles" SET "storyId" = NULL, "storyAssignmentStatus" = NULL, "storyAssignmentScore" = NULL
+     WHERE "storyAssignmentStatus" = $1 AND "embedding" IS NULL`,
+    [PENDING_ASSIGNMENT],
+  );
 }
 
 // ADR-0026: a null vector means needs embedding. Drain the whole eligible
@@ -71,13 +90,13 @@ async function embedEligibleArticles(embedder: EmbeddingProvider): Promise<numbe
 
 // Recompute every Story, including curated Stories. A Story whose members all
 // lost their vectors must also lose its stale centroid.
+//
+// Accepted members only (#50): a pending assignment carries this Story's id, but it
+// is a proposal about the Story, not part of what the Story is. Letting one into
+// the mean would let a borderline guess move the centroid that scores the next
+// candidate — a guess quietly deciding the run's later decisions.
 async function recomputeStoryCentroids(): Promise<void> {
-  await AppDataSource.query(`
-    UPDATE "stories" s
-    SET "embedding" = (
-      SELECT avg(a."embedding") FROM "articles" a WHERE a."storyId" = s."id" AND a."embedding" IS NOT NULL
-    )
-  `);
+  await AppDataSource.query(`UPDATE "stories" s SET "embedding" = ${acceptedCentroid("s")}`);
 }
 
 async function loadCandidates(): Promise<Candidate[]> {
@@ -99,11 +118,36 @@ async function curatedStoryIds(): Promise<string[]> {
   return rows.map((row) => row.storyId);
 }
 
+// #50: a pairing an Admin has rejected is not a candidate again. Read once for the
+// whole run rather than per Article — the table holds one row per human decision,
+// so it is the smallest thing this job loads.
+async function rejectedStoriesByArticle(): Promise<Map<string, string[]>> {
+  const rows: { articleId: string; storyId: string }[] = await AppDataSource.query(
+    `SELECT "articleId", "storyId" FROM "rejected_story_assignments"`,
+  );
+  const byArticle = new Map<string, string[]>();
+  for (const row of rows) {
+    byArticle.set(row.articleId, [...(byArticle.get(row.articleId) ?? []), row.storyId]);
+  }
+  return byArticle;
+}
+
+// ADR-0026's band, read top down: above the threshold membership is a fact, in the
+// band beneath it a proposal for an Admin, below both nothing at all — the Article
+// stays Unclustered and is reconsidered next run.
+function outcomeFor(similarity: number): StoryAssignmentStatus | null {
+  if (similarity >= SIMILARITY_THRESHOLD) return ACCEPTED_ASSIGNMENT;
+  if (similarity >= REVIEW_THRESHOLD) return PENDING_ASSIGNMENT;
+  return null;
+}
+
+type NearestStory = { id: string; similarity: number; vector: number[] };
+
 async function nearestStory(
   vector: number[],
   seenSince: Date,
   excludedStoryIds: string[],
-): Promise<{ id: string; similarity: number; vector: number[] } | null> {
+): Promise<NearestStory | null> {
   const rows: { id: string; similarity: string; vector: string }[] = await AppDataSource.query(
     `SELECT "id", 1 - ("embedding" <=> $1::vector) AS similarity, "embedding"::text AS vector
      FROM "stories"
@@ -117,12 +161,17 @@ async function nearestStory(
     : { id: rows[0].id, similarity: Number(rows[0].similarity), vector: parseVector(rows[0].vector) };
 }
 
+// The one writer of a Story Assignment onto an existing Story, for both outcomes the
+// band produces: an accepted assignment, which grows the Story, and a proposal held for
+// review, which does not touch it at all (#50). One function because the expensive
+// half — revalidating that the vectors scored are still the vectors stored — is
+// identical, and a second copy of it is a second chance to get the locking wrong.
 async function assignToStory(
   candidate: Candidate,
-  storyId: string,
-  storyVector: number[],
-  score: number,
+  story: NearestStory,
+  status: StoryAssignmentStatus,
 ): Promise<boolean> {
+  const { id: storyId, similarity: score, vector: storyVector } = story;
   return AppDataSource.transaction(async (manager) => {
     // Lock and revalidate the exact vectors used for scoring. Enrichment may run
     // beside clustering and NULL a vector after candidates/centroids were read;
@@ -142,10 +191,7 @@ async function assignToStory(
       `SELECT s."id" FROM "stories" s
        WHERE s."id" = $1
          AND s."embedding" = $2::vector
-         AND s."embedding" = (
-           SELECT avg(a."embedding") FROM "articles" a
-           WHERE a."storyId" = s."id" AND a."embedding" IS NOT NULL
-         )
+         AND s."embedding" = ${acceptedCentroid("s")}
        FOR UPDATE`,
       [storyId, toVectorLiteral(storyVector)],
     );
@@ -153,16 +199,17 @@ async function assignToStory(
 
     await manager.getRepository(Article).update(
       { id: candidate.id },
-      { storyId, storyAssignmentStatus: "auto_accepted", storyAssignmentScore: score },
+      { storyId, storyAssignmentStatus: status, storyAssignmentScore: score },
     );
+    // A proposal changes nothing about the Story: not its centroid, and not its
+    // span — which is what the recency gate reads, so a borderline guess must not
+    // be able to keep a dormant Story alive for the next run.
+    if (status !== ACCEPTED_ASSIGNMENT) return true;
     await manager.query(
       `UPDATE "stories" s
        SET "firstSeenAt" = LEAST(s."firstSeenAt", $2),
            "lastSeenAt" = GREATEST(s."lastSeenAt", $2),
-           "embedding" = (
-             SELECT avg(a."embedding") FROM "articles" a
-             WHERE a."storyId" = s."id" AND a."embedding" IS NOT NULL
-           )
+           "embedding" = ${acceptedCentroid("s")}
        WHERE s."id" = $1`,
       [storyId, candidate.publishedAt],
     );
@@ -301,29 +348,49 @@ export async function runClustering(deps: ClusteringDeps): Promise<ClusteringRun
   let embedded = 0;
   let considered = 0;
   let assigned = 0;
+  let heldForReview = 0;
   const tally = { seeded: 0, storiesCreated: 0 };
+  const ledger = () => ({
+    embedded,
+    considered,
+    assigned,
+    heldForReview,
+    seeded: tally.seeded,
+    unclustered: considered - assigned - heldForReview - tally.seeded,
+    storiesCreated: tally.storiesCreated,
+  });
 
   try {
+    await voidProposalsAwaitingReEmbedding();
     embedded = await embedEligibleArticles(deps.embedder);
     await recomputeStoryCentroids();
 
     const candidates = await loadCandidates();
     considered = candidates.length;
     const excludedStoryIds = await curatedStoryIds();
+    const rejected = await rejectedStoriesByArticle();
     const seenSince = new Date(Date.now() - RECENCY_WINDOW_HOURS * 60 * 60 * 1000);
     const unassigned: Candidate[] = [];
 
     // ponytail: two round trips per candidate. Move scoring into one set query if
     // an hourly pass becomes slow; correctness does not need that complexity now.
     for (const candidate of candidates) {
-      const nearest = await nearestStory(candidate.vector, seenSince, excludedStoryIds);
+      const nearest = await nearestStory(candidate.vector, seenSince, [
+        ...excludedStoryIds,
+        ...(rejected.get(candidate.id) ?? []),
+      ]);
+      const outcome = nearest && outcomeFor(nearest.similarity);
       if (
         nearest &&
-        nearest.similarity >= SIMILARITY_THRESHOLD &&
-        (await assignToStory(candidate, nearest.id, nearest.vector, nearest.similarity))
+        outcome &&
+        (await assignToStory(candidate, nearest, outcome))
       ) {
-        assigned += 1;
+        if (outcome === ACCEPTED_ASSIGNMENT) assigned += 1;
+        else heldForReview += 1;
       } else {
+        // Only Articles that matched nothing at all go on to seed: an Article held
+        // for review is already claimed by a proposal, and seeding it into a second
+        // Story would put it in two at once.
         unassigned.push(candidate);
       }
     }
@@ -333,17 +400,7 @@ export async function runClustering(deps: ClusteringDeps): Promise<ClusteringRun
 
     await runs.update(
       { id: run.id },
-      {
-        status: "succeeded",
-        completedAt: new Date(),
-        embedded,
-        considered,
-        assigned,
-        seeded: tally.seeded,
-        unclustered: considered - assigned - tally.seeded,
-        storiesCreated: tally.storiesCreated,
-        errorSummary: null,
-      },
+      { status: "succeeded", completedAt: new Date(), ...ledger(), errorSummary: null },
     );
   } catch (err) {
     await runs.update(
@@ -351,12 +408,7 @@ export async function runClustering(deps: ClusteringDeps): Promise<ClusteringRun
       {
         status: "failed",
         completedAt: new Date(),
-        embedded,
-        considered,
-        assigned,
-        seeded: tally.seeded,
-        unclustered: considered - assigned - tally.seeded,
-        storiesCreated: tally.storiesCreated,
+        ...ledger(),
         errorSummary: err instanceof Error ? err.message : String(err),
       },
     );

@@ -157,6 +157,9 @@ export type ClusteringRunSummary = {
   embedded: number;
   considered: number;
   assigned: number;
+  // #50: ADR-0026's review band. Its own counter beside assigned and unclustered,
+  // because a proposal is neither — it is waiting on an Admin.
+  heldForReview: number;
   seeded: number;
   unclustered: number;
   storiesCreated: number;
@@ -444,4 +447,30 @@ export type ClusteringRunAccepted = { status: "accepted" };
 
 export function runClustering(): Promise<ClusteringRunAccepted> {
   return sendJson("POST", "/api/v1/clustering/runs", undefined, "Could not run clustering");
+}
+
+// #50: the review queue. CONTEXT.md "Story Assignment" — a proposal in the band
+// beneath the auto-accept threshold, invisible to every reader until an Admin
+// decides it. A row is the Article, the Story proposed for it, and the score behind
+// the proposal, which is the whole of what a decision rests on.
+export type PendingAssignment = ArticleSummary & {
+  // Nullable because the column is: nothing in the schema ties a score to the
+  // decision beside it, so the console states an absent one rather than crashing on
+  // it (backend/src/entities/Article.ts).
+  score: number | null;
+  proposedStory: { id: string; slug: string; title: string; category: StoryCategory };
+};
+
+export type AssignmentDecision = "accept" | "reject";
+export type DecidedAssignment = { articleId: string; storyId: string; decision: AssignmentDecision };
+
+export function getPendingAssignments(): Promise<ListEnvelope<PendingAssignment>> {
+  return getJson("/api/v1/clustering/pending", "Could not load the review queue");
+}
+
+export function decidePendingAssignment(
+  articleId: string,
+  decision: AssignmentDecision,
+): Promise<DecidedAssignment> {
+  return sendJson("PATCH", `/api/v1/clustering/pending/${articleId}`, { decision }, "Could not record this decision");
 }

@@ -49,6 +49,7 @@ beforeAll(async () => {
   const articles = AppDataSource.getRepository(Article);
   const articleOne = await articles.save({
     storyId: story.id,
+    storyAssignmentStatus: "auto_accepted" as const,
     publisherId: publisher.id,
     title: "Briefs Article One",
     url: "https://briefs-publisher.example/one",
@@ -59,6 +60,7 @@ beforeAll(async () => {
   articleOneId = articleOne.id;
   const articleTwo = await articles.save({
     storyId: story.id,
+    storyAssignmentStatus: "auto_accepted" as const,
     publisherId: publisher.id,
     title: "Briefs Article Two",
     url: "https://briefs-publisher.example/two",
@@ -70,6 +72,7 @@ beforeAll(async () => {
   for (let index = 0; index < 8; index += 1) {
     const article = await articles.save({
       storyId: story.id,
+      storyAssignmentStatus: "auto_accepted" as const,
       publisherId: publisher.id,
       title: `Concurrent Briefs Article ${index}`,
       url: `https://briefs-publisher.example/concurrent-${index}`,
@@ -297,24 +300,34 @@ describe("Brief article attachment and capacity", () => {
     expect(detail.body.articles.map((a: { id: string }) => a.id)).toEqual([articleOneId]);
   });
 
-  it("keeps Unclustered Articles out of Briefs", async () => {
+  // Both states a Brief refuses as evidence: no Story at all, and a Story Assignment
+  // still held for review (#50) — a borderline guess must not ground a cited claim.
+  it.each([
+    ["Unclustered", { storyId: null, storyAssignmentStatus: null, storyAssignmentScore: null }],
+    [
+      "held for review",
+      { storyAssignmentStatus: "pending_review" as const, storyAssignmentScore: 0.8 },
+    ],
+  ])("keeps a %s Article out of Briefs", async (state, membership) => {
     const publisher = await AppDataSource.getRepository(Publisher).findOneByOrFail({
       domain: "briefs-publisher.example",
     });
+    const story = await AppDataSource.getRepository(Story).findOneByOrFail({ slug: "briefs-story" });
     const article = await AppDataSource.getRepository(Article).save({
-      storyId: null,
+      storyId: story.id,
       publisherId: publisher.id,
-      title: "Unclustered Briefs Article",
-      url: "https://briefs-publisher.example/unclustered",
+      title: `${state} Briefs Article`,
+      url: `https://briefs-publisher.example/${state.replace(/\s+/g, "-")}`,
       analysisText: "Not public yet.",
       analysisTextMode: "feed_excerpt",
       publishedAt: new Date("2026-01-03T00:00:00Z"),
+      ...membership,
     });
-    const token = await registerAndLogin("brief-unclustered@example.com");
+    const token = await registerAndLogin(`brief-${state.replace(/\s+/g, "-")}@example.com`);
     const created = await request(app())
       .post("/api/v1/briefs")
       .set("Authorization", `Bearer ${token}`)
-      .send({ title: "No Unclustered Articles", category: "technology" });
+      .send({ title: "No unreviewed Articles", category: "technology" });
 
     const res = await request(app())
       .post(`/api/v1/briefs/${created.body.id}/articles`)
@@ -322,7 +335,7 @@ describe("Brief article attachment and capacity", () => {
       .send({ articleId: article.id });
 
     expect(res.status).toBe(422);
-    expect(res.body.error).toMatch(/Unclustered Article/);
+    expect(res.body.error).toMatch(/clustered into a Story/);
   });
 
   it("rejects attaching past articleCapacityLimit with 422", async () => {
