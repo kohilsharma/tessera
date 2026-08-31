@@ -393,6 +393,10 @@ briefsRouter.post(
       res.status(422).json({ error: "articleId must reference an existing Article" });
       return;
     }
+    if (article.storyId === null) {
+      res.status(422).json({ error: "Unclustered Articles cannot be attached to Briefs" });
+      return;
+    }
 
     const failure = await AppDataSource.transaction<BriefWriteFailure | null>(async (manager) => {
       const lockedBrief = await manager.getRepository(IntelligenceBrief).findOne({

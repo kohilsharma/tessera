@@ -628,6 +628,22 @@ describe("runConnector over a GKG window", () => {
     expect(run!.errorSummary).toMatch(/no link/);
   });
 
+  it("retries a GKG window after an unexpected persistence failure", async () => {
+    const connector = await createGkgConnector();
+    const transaction = vi
+      .spyOn(AppDataSource, "transaction")
+      .mockRejectedValueOnce(new Error("database unavailable"));
+
+    const failed = await runConnector(connector, gkgFixture("20260830190000.gkg.csv"));
+    transaction.mockRestore();
+    const retry = await runConnector(connector, gkgFixture("20260830190000.gkg.csv"));
+
+    expect(failed!.status).toBe("failed");
+    expect(failed!.errorSummary).toContain("database unavailable");
+    expect(retry!.discovered).toBe(4);
+    expect(retry!.inserted).toBe(4);
+  });
+
   it("fails missing and non-domain GKG source values row by row", async () => {
     const connector = await createGkgConnector();
     const lines = (await readFile(join(__dirname, "fixtures", "gkg", "20260830190000.gkg.csv"), "utf-8")).split("\n");

@@ -998,13 +998,11 @@ export async function runConnector(
       try {
         counters[await ingestItem(item, connector)] += 1;
       } catch (err) {
+        if (!(err instanceof ItemFailure)) throw err;
         counters.failed += 1;
         if (itemFailures.size < MAX_REPORTED_ITEM_FAILURES) {
-          itemFailures.add(err instanceof Error ? err.message : String(err));
+          itemFailures.add(err.message);
         }
-        // An unexpected error (not an ItemFailure) is a bug rather than bad
-        // input, so it is worth a log line as well as a counter.
-        if (!(err instanceof ItemFailure)) console.error(`[ingestion] item failed unexpectedly`, err);
       }
     }
 

@@ -297,6 +297,34 @@ describe("Brief article attachment and capacity", () => {
     expect(detail.body.articles.map((a: { id: string }) => a.id)).toEqual([articleOneId]);
   });
 
+  it("keeps Unclustered Articles out of Briefs", async () => {
+    const publisher = await AppDataSource.getRepository(Publisher).findOneByOrFail({
+      domain: "briefs-publisher.example",
+    });
+    const article = await AppDataSource.getRepository(Article).save({
+      storyId: null,
+      publisherId: publisher.id,
+      title: "Unclustered Briefs Article",
+      url: "https://briefs-publisher.example/unclustered",
+      analysisText: "Not public yet.",
+      analysisTextMode: "feed_excerpt",
+      publishedAt: new Date("2026-01-03T00:00:00Z"),
+    });
+    const token = await registerAndLogin("brief-unclustered@example.com");
+    const created = await request(app())
+      .post("/api/v1/briefs")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ title: "No Unclustered Articles", category: "technology" });
+
+    const res = await request(app())
+      .post(`/api/v1/briefs/${created.body.id}/articles`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ articleId: article.id });
+
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatch(/Unclustered Article/);
+  });
+
   it("rejects attaching past articleCapacityLimit with 422", async () => {
     const token = await registerAndLogin("brief-capacity@example.com");
     const created = await request(app())
