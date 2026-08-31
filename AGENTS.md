@@ -202,12 +202,20 @@ tuned text is flattened to one bracket-free line so it cannot pose as further in
 is deliberately no field for the citation check. The shipped version is inserted by the
 migration, not the seed (the flagship reads it on every request), and carries exactly the prompt
 this pipeline asked for before it was tunable, so applying #57 changed no output.
+**Student flashcards** (#58) reuse the validated analysis rather than creating a second generation
+contract: a `Flashcard` is a Student-owned question pointing at one `AnalysisClaim`, so its answer
+and citations are the claim's own and still resolve through that run's frozen EvidenceSet. One
+model call writes only the questions; unusable output falls back to deterministic questions over
+the same cited answers. `POST /api/v1/flashcards {generationRunId}` makes or re-reads a deck from
+either a Story analysis or a saved Brief analysis without resetting prior reviews, `GET
+/api/v1/flashcards` serves the due session, and `POST /api/v1/flashcards/:id/reviews {grade}`
+advances the card with canonical SM-2. Every route is Student-only and every query is owner-scoped.
 Phase 3.5 (graph/timeline) is not built yet.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
 `/register`, `/account`), role dashboards (`/dashboard/:role`), browsing the corpus
 (`/stories`, `/stories/:id`, `/articles/:id`), IntelligenceBriefs (`/briefs`, `/briefs/:id`),
-and search (`/search`). The **Bureau rollout** (#28) is mid-flight: root design tokens and the
+search (`/search`), and the Student study session (`/study`). The **Bureau rollout** (#28) is mid-flight: root design tokens and the
 application shell (#29), the four shared UI-state treatments and restyled list controls (#30),
 and the Index archetype across all three of its consumers — `/stories` (#31), `/briefs` and
 `/search` (#32) — are done, as is the Record archetype across all three of its consumers:
@@ -233,7 +241,11 @@ cited to out of the set's own count; a contradiction is rendered as its **sides*
 proposition with supporting and contradicting citations persisted below the prompt, each carrying
 its Publisher, headline and link to open it — instead of a flat citation row; and the disagreement
 register is kept even when it is empty and says so, since a contradiction can be refused for
-missing a side (#54) and silence would read as agreement. The Investor dashboard gained a second
+missing a side (#54) and silence would read as agreement. For a Student the shared register also
+carries **Make flashcards** (#58), whether the analysis is fresh on a Story or frozen in a Brief;
+it lands on `/study`, which presents one due card at a time, hides the cited answer until recall,
+then records Again/Hard/Good/Easy as SM-2 grades. The surface uses all four shared UI states and
+states the difference between no cards and nothing due. The Investor dashboard gained a second
 register routing into it (**Comparable coverage**), listing only Stories whose evidence still
 holds two Publishers after the same near-duplicate collapse generation runs. The Admin console gained a fourth register for **IngestionRun** history and Run /
 Enable-Disable commands on each connector row (#39 — Run states that it queued the run, since

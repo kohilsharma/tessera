@@ -10,6 +10,7 @@ import { ingestionRouter } from "./routes/ingestion";
 import { clusteringRouter } from "./routes/clustering";
 import { generationRouter } from "./routes/generation";
 import { promptsRouter } from "./routes/prompts";
+import { flashcardsRouter } from "./routes/flashcards";
 
 // Last resort for anything an async handler rejects with (a DB fault, a bug):
 // one 500 with nothing internal leaked, instead of an unhandled rejection.
@@ -32,6 +33,7 @@ export function createApp() {
   app.use("/api/v1", clusteringRouter);
   app.use("/api/v1", generationRouter);
   app.use("/api/v1", promptsRouter);
+  app.use("/api/v1", flashcardsRouter);
   app.use(errorHandler);
   return app;
 }

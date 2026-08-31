@@ -649,3 +649,76 @@ export function makePromptTemplateCurrent(id: string): Promise<PromptTemplateSum
     "Could not make this prompt version current",
   );
 }
+
+
+
+// #58: the Student's flashcards (ADR-0021). A card is a question in front of an
+// AnalysisClaim, so its answer and citations are the claim's own — the same cited
+// claims the analysis register renders, read back through the frozen EvidenceSet
+// (backend/src/flashcards/deck.ts). Nothing here can carry an uncited answer.
+export type FlashcardCitation = {
+  evidenceId: string;
+  articleId: string;
+  title: string;
+  publisherName: string;
+};
+
+export type Flashcard = {
+  id: string;
+  question: string;
+  answer: string;
+  claimType: ClaimType;
+  citations: FlashcardCitation[];
+  storyId: string;
+  storyTitle: string;
+  generationRunId: string;
+  // SM-2's state, as the backend advances it. Shown rather than hidden: a reader
+  // deciding how hard a card was is entitled to know it comes back in six days.
+  repetitions: number;
+  easeFactor: number;
+  intervalDays: number;
+  dueAt: string;
+  lastReviewedAt: string | null;
+};
+
+// The study session: what is due now, and both counts — a Student with no cards has a
+// deck to make, and a Student with nothing due is finished for today. `nextDueAt` is
+// what lets the second of those say when.
+export type StudyDeck = {
+  items: Flashcard[];
+  dueCount: number;
+  totalCount: number;
+  nextDueAt: string | null;
+};
+
+export type FlashcardDeck = {
+  generationRunId: string;
+  storyId: string;
+  storyTitle: string;
+  cards: Flashcard[];
+};
+
+// SM-2 grades 0–5; these are the four a person can tell apart. The numbers are the
+// algorithm's (backend/src/flashcards/sm2.ts) — 3 is the pass mark, so "Again" is the
+// only one that lapses the card.
+export const REVIEW_GRADES = [
+  { grade: 0, label: "Again" },
+  { grade: 3, label: "Hard" },
+  { grade: 4, label: "Good" },
+  { grade: 5, label: "Easy" },
+] as const;
+
+// Making a deck is a mutation for the same reason requesting an analysis is: it may
+// cost money (one model call writes the questions) and it creates rows a Student owns.
+// Asking twice is safe — cards already made keep their schedule.
+export function makeFlashcards(generationRunId: string): Promise<FlashcardDeck> {
+  return sendJson("POST", "/api/v1/flashcards", { generationRunId }, "Could not make flashcards");
+}
+
+export function getStudyDeck(): Promise<StudyDeck> {
+  return getJson("/api/v1/flashcards", "Could not load your flashcards");
+}
+
+export function reviewFlashcard(id: string, grade: number): Promise<Flashcard> {
+  return sendJson("POST", `/api/v1/flashcards/${id}/reviews`, { grade }, "Could not record this review");
+}

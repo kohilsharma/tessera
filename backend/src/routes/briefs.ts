@@ -9,8 +9,8 @@ import { BRIEF_CATEGORIES, DEFAULT_ARTICLE_CAPACITY_LIMIT, IntelligenceBrief } f
 import { GenerationRun } from "../entities/GenerationRun";
 import type { Story, StoryCategory } from "../entities/Story";
 import type { UserRole } from "../entities/User";
-import { lensForRole } from "../generation/config";
 import { loadGenerationView } from "../generation/runGeneration";
+import { loadReaderRun } from "../generation/readerRun";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
@@ -176,28 +176,12 @@ async function loadSavedAnalysis(
   generationRunId: unknown,
   role: UserRole,
 ): Promise<{ ok: true; value: SavedAnalysis } | { ok: false; error: string }> {
-  if (typeof generationRunId !== "string" || !isUuid(generationRunId)) {
-    return { ok: false, error: "generationRunId must be a valid analysis id" };
-  }
-  const run = await AppDataSource.getRepository(GenerationRun).findOne({
-    where: { id: generationRunId },
-    relations: { story: true },
-  });
-  if (!run) return { ok: false, error: "generationRunId must reference an existing analysis" };
-  // A failed run has no claims to keep, and ADR-0010's stated unavailable state is
-  // where a failure belongs — not inside an owned artefact whose point is the
-  // analysis it holds.
-  if (run.status !== "completed") {
-    return { ok: false, error: "Only a completed analysis can be saved to a Brief" };
-  }
-  // The same rule the generation endpoint applies, at the second door into the same
-  // claims: a Lens is the reader's role (ADR-0027), so a Student saving an
-  // investor_implication run would be reading as somebody else — which is exactly
-  // what asking for that Lens is refused for. An Admin reaches neither door: they own
-  // no Brief.
-  if (run.lens !== lensForRole(role)) {
-    return { ok: false, error: "This analysis was written for a different Lens than your own" };
-  }
+  // The completed-and-under-your-own-Lens rule, shared with the other doors into a
+  // past analysis (generation/readerRun.ts): saving is the second one, flashcards
+  // (#58) are the third, and the rule is the same at each.
+  const reader = await loadReaderRun(generationRunId, role);
+  if (!reader.ok) return reader;
+  const { run } = reader;
   // The EvidenceSet's Articles, in evidence-id order, which is the order A1…An reads
   // in. Taken from the frozen rows rather than from the Story's membership now: the
   // Articles a Brief pins are the ones its analysis cites.

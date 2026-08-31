@@ -1,5 +1,13 @@
-import { Link } from "react-router-dom";
-import type { Analysis, AnalysisClaim, ClaimType, EvidenceRow } from "../api/client";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link, useNavigate } from "react-router-dom";
+import {
+  getMe,
+  makeFlashcards,
+  type Analysis,
+  type AnalysisClaim,
+  type ClaimType,
+  type EvidenceRow,
+} from "../api/client";
 
 // One rendering of a cited analysis, for the two records that carry one: the Story it
 // was written about (#53) and the Brief a reader saved it into (#55). Shared because a
@@ -129,6 +137,35 @@ function Corroboration({
   );
 }
 
+function FlashcardCommand({ generationRunId }: { generationRunId: string }) {
+  const me = useQuery({ queryKey: ["me"], queryFn: getMe });
+  const navigate = useNavigate();
+  const make = useMutation({
+    mutationFn: () => makeFlashcards(generationRunId),
+    onSuccess: () => navigate("/study"),
+  });
+
+  // Flashcards are the Student's distinct role feature (ADR-0004, ADR-0021). An
+  // Investor or Admin is not merely hidden by this check — the API refuses them too —
+  // but a command that can only answer 403 has no place on their analysis.
+  if (me.data?.role !== "student") return null;
+  return (
+    <>
+      <div className="record-actions">
+        <button
+          type="button"
+          className="record-command"
+          onClick={() => make.mutate()}
+          disabled={make.isPending}
+        >
+          {make.isPending ? "Making flashcards…" : "Make flashcards"}
+        </button>
+      </div>
+      {make.isError && <p className="state-error">Could not make flashcards: {make.error.message}</p>}
+    </>
+  );
+}
+
 export function AnalysisRegister({ analysis }: { analysis: Analysis }) {
   const evidence = new Map(analysis.evidence.map((row) => [row.evidenceId, row]));
   const investor = analysis.lens === "investor_implication";
@@ -185,6 +222,7 @@ export function AnalysisRegister({ analysis }: { analysis: Analysis }) {
           </div>
         ))}
       </dl>
+      <FlashcardCommand generationRunId={analysis.id} />
     </>
   );
 }

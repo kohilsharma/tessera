@@ -863,3 +863,24 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
   *, *::before, *::after { transition-duration: .01ms !important; animation: none !important; }
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
 }
+
+
+
+/* ============================================================
+   STUDY — one due Flashcard at a time (#58). A card is a sheet on
+   the bench, not a third record archetype: it has one question,
+   the cited answer it reveals, and the four SM-2 outcomes.
+   ============================================================ */
+.study-card { margin-top: 30px; border: 1px solid var(--bureau-ink); background: var(--stock-paper); padding: clamp(24px, 5vw, 44px); box-shadow: 7px 7px 0 var(--bench-stock); }
+.study-folio { display: flex; justify-content: space-between; gap: 12px 24px; margin: 0 0 28px; padding-bottom: 12px; border-bottom: 1px solid var(--registration-rule); color: var(--quiet-ink); font: 500 .66rem/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .06em; }
+.study-question { margin: 0; max-width: 28ch; font-size: clamp(1.5rem, 4vw, 2.5rem); font-weight: 750; line-height: 1.12; letter-spacing: -.025em; text-wrap: balance; }
+.study-answer { margin: 30px 0 0; padding: 22px 0 0; border-top: 3px solid var(--proof-blue); font-size: 1.05rem; line-height: 1.65; }
+.study-card .claim-cites { display: flex; flex-wrap: wrap; gap: 7px 16px; margin: 18px 0 0; }
+.study-card .claim-cites a, .study-card .claim-measure { color: var(--bureau-ink); font: 500 .68rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; text-underline-offset: 3px; }
+.study-card .claim-measure { margin-top: 12px; color: var(--quiet-ink); }
+.study-card .record-actions { padding-top: 4px; }
+
+@media (max-width: 560px) {
+  .study-folio { display: grid; }
+  .study-card { box-shadow: 4px 4px 0 var(--bench-stock); }
+}

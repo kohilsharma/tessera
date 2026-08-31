@@ -16,6 +16,7 @@ import Search from "./pages/Search";
 import Briefs from "./pages/Briefs";
 import BriefForm from "./pages/BriefForm";
 import BriefDetail from "./pages/BriefDetail";
+import Study from "./pages/Study";
 
 // The route table, and nothing else. Chrome comes from AppShell (authenticated
 // routes) and Masthead (sign-in/register/status), applied once here per
@@ -51,6 +52,7 @@ function App() {
         <Route path="/briefs/new" element={<BriefForm />} />
         <Route path="/briefs/:id" element={<BriefDetail />} />
         <Route path="/briefs/:id/edit" element={<BriefForm />} />
+        <Route path="/study" element={<Study />} />
       </Route>
     </Routes>
   );

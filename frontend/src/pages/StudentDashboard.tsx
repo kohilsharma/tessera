@@ -57,6 +57,7 @@ export default function StudentDashboard() {
               { to: "/stories", label: "Browse Stories" },
               { to: "/search", label: "Search the corpus" },
               { to: "/briefs", label: "My Briefs" },
+              { to: "/study", label: "Study flashcards" },
             ]}
           />
         </DashboardPage>

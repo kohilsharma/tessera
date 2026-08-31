@@ -17,6 +17,17 @@ export class MockSynthesisProvider implements SynthesisProvider {
       const firstHeadline = request.prompt.match(/^- (.+)$/m)?.[1] ?? "unnamed cluster";
       return JSON.stringify({ title: `[mock] ${firstHeadline}`.slice(0, STORY_NAME_MAX_LENGTH), category: "world" });
     }
+    // #58: a deck asks for one question per numbered claim. The numbers are read back
+    // out of the list flashcards/questions.ts writes, for the same reason the headline
+    // above is — the Mock's only input is what it was asked — and the `[mock]` prefix
+    // says out loud that no model wrote the question. The answers are the claims
+    // themselves, so a no-key demo still gets a deck whose every answer is cited.
+    if (request.task === "flashcard_questions") {
+      const numbers = [...request.prompt.matchAll(/^(\d+)\. /gm)].map((match) => Number(match[1]));
+      return JSON.stringify({
+        questions: numbers.map((number) => ({ number, question: `[mock] what does claim ${number} state?` })),
+      });
+    }
     if (!request.json) return `[mock synthesis] ${request.prompt.slice(0, 120)}`;
     // Echoing the evidence ids found in the prompt keeps the Mock honest about
     // ADR-0002's invariant: a claim carries citations, or it is not a claim.

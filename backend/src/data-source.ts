@@ -22,6 +22,7 @@ import { AddEvidenceDataModeAndClaimFloor1755757000000 } from "./migrations/1755
 import { AddBriefGenerationRun1755758000000 } from "./migrations/1755758000000-AddBriefGenerationRun";
 import { AddClaimEvidenceRelationship1755759000000 } from "./migrations/1755759000000-AddClaimEvidenceRelationship";
 import { CreatePromptTemplates1755760000000 } from "./migrations/1755760000000-CreatePromptTemplates";
+import { CreateFlashcards1755761000000 } from "./migrations/1755761000000-CreateFlashcards";
 import { User } from "./entities/User";
 import { Publisher } from "./entities/Publisher";
 import { Story } from "./entities/Story";
@@ -39,6 +40,7 @@ import { GenerationRun } from "./entities/GenerationRun";
 import { AnalysisClaim } from "./entities/AnalysisClaim";
 import { ClaimEvidence } from "./entities/ClaimEvidence";
 import { PromptTemplate } from "./entities/PromptTemplate";
+import { Flashcard } from "./entities/Flashcard";
 
 const url = process.env.DATABASE_URL;
 
@@ -74,6 +76,7 @@ export const AppDataSource = new DataSource({
     AnalysisClaim,
     ClaimEvidence,
     PromptTemplate,
+    Flashcard,
   ],
   migrations: [
     InitPgvector1755740000000,
@@ -97,6 +100,7 @@ export const AppDataSource = new DataSource({
     AddBriefGenerationRun1755758000000,
     AddClaimEvidenceRelationship1755759000000,
     CreatePromptTemplates1755760000000,
+    CreateFlashcards1755761000000,
   ],
   synchronize: false,
   logging: false,
