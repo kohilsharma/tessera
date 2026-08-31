@@ -326,13 +326,18 @@ export type BriefSummary = {
   articleCapacityLimit: number;
   coverImageKey: string | null;
   coverImageUrl: string | null;
+  // #55: the GenerationRun this Brief froze, or null for one assembled by hand. The
+  // claims themselves come with the record, not with a summary.
+  generationRunId: string | null;
   ownerId: string;
   articleCount: number;
   createdAt: string;
   updatedAt: string;
 };
 
-export type BriefDetail = BriefSummary & { articles: ArticleSummary[] };
+// The saved analysis arrives whole with the Brief: the same frozen claims, evidence
+// and citations Story detail renders, read back from the run the Brief pins (#55).
+export type BriefDetail = BriefSummary & { articles: ArticleSummary[]; analysis: Analysis | null };
 
 export type BriefSortField = "createdAt" | "updatedAt" | "title";
 
@@ -378,6 +383,13 @@ export function getBrief(id: string): Promise<BriefDetail> {
 
 export function createBrief(input: BriefInput): Promise<BriefSummary> {
   return sendJson("POST", "/api/v1/briefs", input, "Could not create this Brief");
+}
+
+// #55: the same endpoint, one field. What comes back is a Brief the caller owns, its
+// title and category pre-filled from the Story and the analysis' own evidence pinned
+// — so saving an analysis is creating a Brief, which is why an Admin cannot do it.
+export function saveAnalysisToBrief(generationRunId: string): Promise<BriefSummary> {
+  return sendJson("POST", "/api/v1/briefs", { generationRunId }, "Could not save this analysis");
 }
 
 export function updateBrief(id: string, input: Partial<BriefInput>): Promise<BriefSummary> {
@@ -513,7 +525,7 @@ export type GenerationFailureCode =
   | "below_claim_floor"
   | "content_changed";
 
-export type StoryAnalysis = {
+export type Analysis = {
   id: string;
   storyId: string;
   lens: GenerationLens;
@@ -525,6 +537,12 @@ export type StoryAnalysis = {
   evidence: EvidenceRow[];
   claims: AnalysisClaim[];
   completedAt: string;
+};
+
+// What the Story endpoint answers: the analysis, plus whether this request paid for
+// it. A Brief serves the same analysis without that flag — a saved analysis was
+// always paid for once, by whoever asked first.
+export type StoryAnalysis = Analysis & {
   // True when this analysis already existed for the same evidence, Lens and prompt
   // version — the wait and the cost were paid once (ADR-0027).
   reused: boolean;

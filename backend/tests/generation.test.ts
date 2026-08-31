@@ -1565,3 +1565,164 @@ describe("the phrase checks", () => {
     expect(runs[0].failureMessage).toMatch(/omitted something/i);
   });
 });
+
+// #55: the ownership loop. A reader saves an analysis and gets an IntelligenceBrief
+// that holds the analysis itself — which is only meaningful if it keeps holding it
+// after the Story has moved on. Driven from the same HTTP seam as everything above,
+// because the interesting part is that the run a Brief points at is immutable.
+describe("saving an analysis into a Brief", () => {
+  function saveAnalysis(token: string, body: Record<string, unknown>) {
+    return request(app()).post("/api/v1/briefs").set("Authorization", `Bearer ${token}`).send(body);
+  }
+
+  function readBrief(briefId: string, token: string) {
+    return request(app()).get(`/api/v1/briefs/${briefId}`).set("Authorization", `Bearer ${token}`);
+  }
+
+  it("creates a Brief pre-filled from the Story that pins the run and its evidence", async () => {
+    const { story, first, second } = await twoPublisherStory();
+    const token = await tokenFor("student");
+    const run = await requestAnalysis(story.id, token);
+    expect(run.body.status).toBe("completed");
+
+    const created = await saveAnalysis(token, { generationRunId: run.body.id });
+
+    expect(created.status).toBe(201);
+    expect(created.body.generationRunId).toBe(run.body.id);
+    expect(created.body.title).toBe(story.title);
+    expect(created.body.category).toBe(story.category);
+    expect(created.body.articleCount).toBe(2);
+
+    // A title of the reader's own still wins: the Story's is a pre-fill, not the only
+    // name a saved analysis may carry.
+    const renamed = await saveAnalysis(token, { generationRunId: run.body.id, title: "My own reading" });
+    expect(renamed.body.title).toBe("My own reading");
+    expect(renamed.body.generationRunId).toBe(run.body.id);
+
+    // Owner-only endpoint, so a 200 here is the ownership assertion; the analysis it
+    // carries is the run's own claims, read by the same loader Story detail uses.
+    const record = await readBrief(created.body.id, token);
+    expect(record.status).toBe(200);
+    expect(record.body.analysis.id).toBe(run.body.id);
+    expect(record.body.analysis.claims).toEqual(run.body.claims);
+    expect(record.body.articles.map((article: { id: string }) => article.id).sort()).toEqual(
+      [first.id, second.id].sort(),
+    );
+  });
+
+  it("keeps its claims after the Story is analysed again", async () => {
+    const { story, first } = await twoPublisherStory();
+    const token = await tokenFor("student");
+    const saved = await requestAnalysis(story.id, token);
+    const brief = await saveAnalysis(token, { generationRunId: saved.body.id });
+
+    // Enrichment replacing an Article's text is what makes the next request a second
+    // run rather than a reuse: the evidence hash changes, so the model is asked again.
+    await AppDataSource.getRepository(Article).update({ id: first.id }, { analysisText: "Rewritten body text." });
+    const regenerated = await requestAnalysis(story.id, token);
+    expect(regenerated.body.id).not.toBe(saved.body.id);
+
+    const record = await readBrief(brief.body.id, token);
+    expect(record.body.analysis.id).toBe(saved.body.id);
+    // Claim ids and all: the Brief holds the analysis it froze, not the Story's
+    // current one.
+    expect(record.body.analysis.claims).toEqual(saved.body.claims);
+  });
+
+  it("keeps its claims when the Story it analysed is merged away", async () => {
+    // `feed_excerpt` rather than the default fixture rung, because a merge refuses a
+    // Curated Corpus Story on either side (ADR-0026).
+    const folded = await twoPublisherStory("feed_excerpt");
+    const survivor = await twoPublisherStory("feed_excerpt");
+    const token = await tokenFor("student");
+    const saved = await requestAnalysis(folded.story.id, token);
+    const brief = await saveAnalysis(token, { generationRunId: saved.body.id });
+
+    const merge = await request(app())
+      .post("/api/v1/clustering/merges")
+      .set("Authorization", `Bearer ${await tokenFor("admin")}`)
+      .send({ survivorStoryId: survivor.story.id, mergedStoryId: folded.story.id });
+    expect(merge.status).toBe(200);
+
+    // generation_runs."storyId" cascades, so without repointing the merge would have
+    // deleted this reader's saved analysis along with the emptied Story row.
+    const record = await readBrief(brief.body.id, token);
+    expect(record.body.analysis.claims).toEqual(saved.body.claims);
+    expect(record.body.analysis.storyId).toBe(survivor.story.id);
+  });
+
+  it("enforces the Brief's article capacity on this path too", async () => {
+    const { story } = await twoPublisherStory();
+    const token = await tokenFor("student");
+    const run = await requestAnalysis(story.id, token);
+
+    const refused = await saveAnalysis(token, { generationRunId: run.body.id, articleCapacityLimit: 1 });
+
+    expect(refused.status).toBe(422);
+    expect(refused.body.error).toMatch(/cannot be below the 2 Article/);
+  });
+
+  it("refuses a failed analysis and an analysis that does not exist", async () => {
+    const { story } = await twoPublisherStory();
+    const token = await tokenFor("student");
+    insisting("not json at all");
+    const failed = await requestAnalysis(story.id, token);
+    expect(failed.body.status).toBe("failed");
+
+    const refused = await saveAnalysis(token, { generationRunId: failed.body.id });
+    expect(refused.status).toBe(422);
+    expect(refused.body.error).toMatch(/completed analysis/);
+
+    const unknown = await saveAnalysis(token, { generationRunId: "00000000-0000-0000-0000-000000000000" });
+    expect(unknown.status).toBe(422);
+    expect(unknown.body.error).toMatch(/existing analysis/);
+  });
+
+  it("refuses an analysis written for a Lens that is not the caller's", async () => {
+    const { story } = await twoPublisherStory();
+    // The Investor's own analysis of the same Story, produced through their own role.
+    const run = await requestAnalysis(story.id, await tokenFor("investor"));
+    expect(run.body.lens).toBe("investor_implication");
+
+    // A Student holding that run id would otherwise read as somebody else — which is
+    // the same thing POST /stories/:id/analysis refuses when they name a Lens
+    // (ADR-0027), refused at the second door into the same claims.
+    const refused = await saveAnalysis(await tokenFor("student"), { generationRunId: run.body.id });
+
+    expect(refused.status).toBe(422);
+    expect(refused.body.error).toMatch(/different Lens/);
+  });
+
+  it("refuses an analysis frozen before provenance snapshots existed", async () => {
+    const { story } = await twoPublisherStory();
+    const token = await tokenFor("student");
+    const run = await requestAnalysis(story.id, token);
+    // What migration 1755756000000 left behind on a database that had already run
+    // generations: a frozen row with no snapshot at all (its CHECK is all-or-none).
+    // loadGenerationView refuses to render one, and a Brief cannot unpin a run — so
+    // this is refused rather than saved into a record that would fail for good.
+    await AppDataSource.query(
+      `UPDATE "evidence_set_articles"
+          SET "titleSnapshot" = NULL, "urlSnapshot" = NULL, "publishedAtSnapshot" = NULL,
+              "analysisTextModeSnapshot" = NULL, "publisherIdSnapshot" = NULL,
+              "publisherNameSnapshot" = NULL, "publisherDomainSnapshot" = NULL`,
+    );
+
+    const refused = await saveAnalysis(token, { generationRunId: run.body.id });
+
+    expect(refused.status).toBe(422);
+    expect(refused.body.error).toMatch(/frozen provenance/);
+  });
+
+  it("refuses an Admin a Brief on this path as on every other", async () => {
+    const { story } = await twoPublisherStory();
+    const admin = await tokenFor("admin");
+    const run = await requestAnalysis(story.id, admin, { lens: "student_context" });
+    expect(run.body.status).toBe("completed");
+
+    // ADR-0004: an Admin operates the platform and owns none of its artefacts. Saving
+    // an analysis is creating a Brief, so it is the same 403.
+    const refused = await saveAnalysis(admin, { generationRunId: run.body.id });
+    expect(refused.status).toBe(403);
+  });
+});

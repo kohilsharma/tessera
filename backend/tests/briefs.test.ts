@@ -217,6 +217,9 @@ describe("Brief ownership and lifecycle", () => {
     const read = await request(app()).get(`/api/v1/briefs/${briefId}`).set("Authorization", `Bearer ${token}`);
     expect(read.status).toBe(200);
     expect(read.body).toMatchObject({ title: "CRUD Brief", note: "initial note", articles: [] });
+    // #55 added the frozen generation a Brief may hold. A Brief assembled by hand
+    // holds none, and says so rather than omitting the field.
+    expect(read.body).toMatchObject({ generationRunId: null, analysis: null });
 
     const updated = await request(app())
       .patch(`/api/v1/briefs/${briefId}`)

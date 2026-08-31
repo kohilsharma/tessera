@@ -96,6 +96,22 @@ export async function mergeStories(survivorStoryId: string, mergedStoryId: strin
       [survivorStoryId, PENDING_ASSIGNMENT],
     );
 
+    // #55: a Brief pins a GenerationRun, and both `generation_runs."storyId"` and
+    // `evidence_sets."storyId"` are ON DELETE CASCADE — so deleting the emptied row
+    // below would take a reader's saved analysis with it, claims and frozen evidence
+    // and all. Repointed instead: a merge is the judgement that these two Stories are
+    // one event, so an analysis of the folded-in Story is an analysis of the survivor.
+    // Reuse is unaffected — it matches on the evidence hash, and the survivor's
+    // membership now produces a different set.
+    await manager.query(`UPDATE "evidence_sets" SET "storyId" = $1 WHERE "storyId" = $2`, [
+      survivorStoryId,
+      mergedStoryId,
+    ]);
+    await manager.query(`UPDATE "generation_runs" SET "storyId" = $1 WHERE "storyId" = $2`, [
+      survivorStoryId,
+      mergedStoryId,
+    ]);
+
     // Deleted rather than marked (#52): a tombstoned Story is a row every reader
     // surface would have to learn to skip. Checked first because articles."storyId"
     // is ON DELETE CASCADE — anything still pointing here would be deleted with it,

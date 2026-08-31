@@ -1,40 +1,18 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   getMe,
   getStory,
   requestStoryAnalysis,
-  type AnalysisClaim,
-  type ClaimType,
-  type EvidenceRow,
+  saveAnalysisToBrief,
   type GenerationFailureCode,
   type GenerationLens,
-  type StoryAnalysis,
 } from "../api/client";
+import { AnalysisRegister } from "../components/analysisRegister";
 import { ArticleEntry } from "../components/indexArchetype";
 import { RecordMasthead, RecordSection } from "../components/recordArchetype";
 import { EmptyState, EntryList, ErrorState, PendingState, RetryableError } from "../components/uiStates";
-
-// The reading order of an analysis: what the reporting agrees on, then where it
-// disagrees, then what only one outlet says, then the reader's own Lens. Agreement
-// first because it is the strongest thing the evidence supports; the Lens last
-// because it is the interpretation, not the reporting.
-const CLAIM_ORDER: ClaimType[] = [
-  "consensus",
-  "contradiction",
-  "source_specific",
-  "student_context",
-  "investor_implication",
-];
-
-const CLAIM_LABELS: Record<ClaimType, string> = {
-  consensus: "Where the reporting agrees",
-  contradiction: "Where it disagrees",
-  source_specific: "Reported by one outlet only",
-  student_context: "Context",
-  investor_implication: "Investor implication",
-};
 
 // A failed run says so plainly (ADR-0010: never silently serve invalid
 // intelligence). The wording is per failure code, because "the model cited
@@ -54,61 +32,6 @@ const UNAVAILABLE: Record<GenerationFailureCode, string> = {
   content_changed: "The underlying reporting changed while this analysis was being written.",
 };
 
-// A citation is the invariant made clickable: the evidence id the claim cited, the
-// outlet it resolves to, and a link to the Article itself. An id with no frozen row
-// behind it is not rendered — the backend cannot persist one, and this is the last
-// place that could put one on screen.
-function Citations({ claim, evidence }: { claim: AnalysisClaim; evidence: Map<string, EvidenceRow> }) {
-  return (
-    <p className="claim-cites">
-      {claim.citations.map((evidenceId) => {
-        const row = evidence.get(evidenceId);
-        if (!row) return null;
-        return (
-          <Link key={evidenceId} to={`/articles/${row.articleId}`}>
-            {evidenceId} · {row.publisher.name}
-          </Link>
-        );
-      })}
-    </p>
-  );
-}
-
-function Analysis({ analysis }: { analysis: StoryAnalysis }) {
-  const evidence = new Map(analysis.evidence.map((row) => [row.evidenceId, row]));
-  const groups = CLAIM_ORDER.map((claimType) => ({
-    claimType,
-    claims: analysis.claims.filter((claim) => claim.claimType === claimType),
-  })).filter((group) => group.claims.length > 0);
-
-  return (
-    <>
-      <p className="record-prose">
-        Written from {analysis.articleCount} Article{analysis.articleCount === 1 ? "" : "s"} across{" "}
-        {analysis.distinctPublisherCount} publisher{analysis.distinctPublisherCount === 1 ? "" : "s"}, frozen when
-        this analysis was made. Every claim carries the reporting it rests on.
-      </p>
-      <dl className="record-note">
-        {groups.map((group) => (
-          <div key={group.claimType}>
-            <dt>{CLAIM_LABELS[group.claimType]}</dt>
-            <dd>
-              <ul className="claim-list">
-                {group.claims.map((claim) => (
-                  <li key={claim.id}>
-                    <p>{claim.text}</p>
-                    <Citations claim={claim} evidence={evidence} />
-                  </li>
-                ))}
-              </ul>
-            </dd>
-          </div>
-        ))}
-      </dl>
-    </>
-  );
-}
-
 // The first page on the Record archetype (#33): masthead, provenance ledger,
 // body. Everything shaped here is shared — see components/recordArchetype.
 export default function StoryDetail() {
@@ -126,6 +49,14 @@ export default function StoryDetail() {
   // has — but that is the backend's decision to make, not a reason to poll it.
   const analysis = useMutation({
     mutationFn: () => requestStoryAnalysis(id!, isAdmin ? adminLens : undefined),
+  });
+  const navigate = useNavigate();
+  // #55: the ownership loop. Saving is creating a Brief, so it lands the reader on the
+  // Brief they now own — the analysis is theirs from here, and stays as it is while
+  // this Story goes on being reported.
+  const save = useMutation({
+    mutationFn: () => saveAnalysisToBrief(analysis.data!.id),
+    onSuccess: (brief) => navigate(`/briefs/${brief.id}`),
   });
 
   if (query.isPending) return <PendingState>Loading Story…</PendingState>;
@@ -221,7 +152,29 @@ export default function StoryDetail() {
           (produced.claims.length === 0 ? (
             <EmptyState>This analysis produced no claims that could be cited.</EmptyState>
           ) : (
-            <Analysis analysis={produced} />
+            <>
+              <AnalysisRegister analysis={produced} />
+              {/* Offered to the two roles that own Briefs, and to nobody else: an
+                  Admin owns no artefacts (ADR-0004), so the API refuses them this
+                  exactly as it refuses them a Brief. Waits for the identity to
+                  resolve rather than assuming a reader — an Admin should never see a
+                  command that would 403. */}
+              {me.data && !isAdmin && (
+                <div className="record-actions">
+                  <button
+                    type="button"
+                    className="record-command"
+                    onClick={() => save.mutate()}
+                    disabled={save.isPending}
+                  >
+                    {save.isPending ? "Saving…" : "Save to a new Brief"}
+                  </button>
+                </div>
+              )}
+              {save.isError && (
+                <ErrorState>Could not save this analysis: {(save.error as Error).message}</ErrorState>
+              )}
+            </>
           ))}
       </RecordSection>
 

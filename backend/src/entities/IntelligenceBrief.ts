@@ -9,6 +9,7 @@ import {
   UpdateDateColumn,
 } from "typeorm";
 import { BriefArticle } from "./BriefArticle";
+import { GenerationRun } from "./GenerationRun";
 import { STORY_CATEGORIES, StoryCategory } from "./Story";
 import { User } from "./User";
 
@@ -37,6 +38,17 @@ export class IntelligenceBrief {
 
   @Column({ type: "varchar", nullable: true })
   coverImageKey!: string | null;
+
+  // The generation this Brief froze (#55, ADR-0027). Null for a Brief assembled by
+  // hand, which is every Brief the Foundation phase could make. A saved analysis
+  // keeps its claims while its Story regenerates, because the run is immutable and
+  // this points at that exact run rather than at "the Story's current analysis".
+  @ManyToOne(() => GenerationRun)
+  @JoinColumn({ name: "generationRunId" })
+  generationRun!: GenerationRun | null;
+
+  @Column({ type: "uuid", nullable: true })
+  generationRunId!: string | null;
 
   @ManyToOne(() => User)
   @JoinColumn({ name: "ownerId" })

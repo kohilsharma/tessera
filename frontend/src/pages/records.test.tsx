@@ -218,6 +218,44 @@ describe("Story detail — the analysis", () => {
     expect(await screen.findByText(analysis.claims[0].text)).toBeInTheDocument();
     expect(screen.queryByLabelText("Lens")).not.toBeInTheDocument();
   });
+
+  // #55: the ownership loop, from this end. Saving is creating a Brief, so it is
+  // offered to the roles that own one and it leaves the Story behind.
+  it("saves the analysis into a Brief the reader owns", async () => {
+    const posted: (BodyInit | null | undefined)[] = [];
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (init?.method === "POST") {
+        posted.push(init.body);
+        return jsonResponse(String(input).includes("/briefs") ? { ...brief, id: "b9" } : analysis);
+      }
+      return jsonResponse(String(input).includes("/auth/me") ? { id: "u2", email: "s@b.c", role: "student" } : story);
+    });
+    renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Request analysis" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Save to a new Brief" }));
+
+    // The run itself is what is saved — not the Story, and not the claims copied out
+    // of it (ADR-0027).
+    await waitFor(() => expect(posted).toContain(JSON.stringify({ generationRunId: analysis.id })));
+    // And the reader lands on the Brief they now own, so the Story record is gone.
+    await waitFor(() => expect(screen.queryByText(analysis.claims[0].text)).not.toBeInTheDocument());
+  });
+
+  it("offers an Admin no way to own the analysis they asked for", async () => {
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (init?.method === "POST") return jsonResponse(analysis);
+      return jsonResponse(String(input).includes("/auth/me") ? { id: "u1", email: "a@b.c", role: "admin" } : story);
+    });
+    renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Request analysis" }));
+
+    expect(await screen.findByText(analysis.claims[0].text)).toBeInTheDocument();
+    // ADR-0004: an Admin owns no artefacts, so a command the API would 403 is not one
+    // the console should offer.
+    expect(screen.queryByRole("button", { name: "Save to a new Brief" })).not.toBeInTheDocument();
+  });
 });
 
 describe("Article detail — the record's own terms", () => {
@@ -293,6 +331,9 @@ const brief: BriefRecord = {
   createdAt: "2026-01-05T00:00:00Z",
   updatedAt: "2026-01-07T00:00:00Z",
   articles: [article],
+  // The Foundation's Brief: assembled by hand, freezing no generation (#55).
+  generationRunId: null,
+  analysis: null,
 };
 
 function renderBrief(overrides: Partial<BriefRecord> = {}) {
@@ -338,6 +379,25 @@ describe("Brief detail — the owned artefact", () => {
     );
     expect(screen.getByRole("button", { name: "Delete Brief" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to My Briefs" })).toHaveAttribute("href", "/briefs");
+  });
+
+  // #55: a Brief that froze a generation renders the analysis itself, not a note
+  // about one — the same register Story detail uses, from the run the Brief pinned.
+  it("renders the frozen claims and their citations when it holds an analysis", async () => {
+    renderBrief({ generationRunId: analysis.id, analysis });
+
+    expect(await screen.findByText(analysis.claims[0].text)).toBeInTheDocument();
+    expect(screen.getByText("Where the reporting agrees")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /A2 · Harbour Ledger/ })).toHaveAttribute("href", "/articles/a2");
+    // And says what makes it worth owning: it stays as it is while the Story moves on.
+    expect(screen.getByText(/keeps what it froze/)).toBeInTheDocument();
+  });
+
+  it("says nothing about an analysis when the Brief was assembled by hand", async () => {
+    renderBrief();
+
+    expect(await screen.findByRole("heading", { level: 1, name: brief.title })).toBeInTheDocument();
+    expect(screen.queryByText("Saved analysis")).not.toBeInTheDocument();
   });
 
   it("shows the cover image where the Brief has one, and the plate's control either way", async () => {

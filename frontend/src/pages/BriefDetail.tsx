@@ -11,6 +11,7 @@ import {
   type BriefSummary,
 } from "../api/client";
 import { useBriefCoverImage } from "../components/coverImage";
+import { AnalysisRegister } from "../components/analysisRegister";
 import { ArticleEntry } from "../components/indexArchetype";
 import { RecordMasthead, RecordSection } from "../components/recordArchetype";
 import { EmptyState, EntryList, ErrorState, PendingState, RetryableError } from "../components/uiStates";
@@ -169,6 +170,24 @@ export default function BriefDetail() {
       </div>
       {remove.isError && (
         <ErrorState>Could not delete this Brief: {(remove.error as Error).message}</ErrorState>
+      )}
+
+      {/* The saved analysis, above the Articles for the same reason Story detail puts
+          it there: it is what the reader kept, and the Articles are what it cites.
+          Frozen — this is the run the Brief pinned, not the Story's current one, which
+          is what saving an analysis means (#55, ADR-0027). */}
+      {brief.analysis && (
+        <RecordSection heading="Saved analysis">
+          <AnalysisRegister analysis={brief.analysis} />
+          <p className="record-prose">
+            Saved from its Story on{" "}
+            <time dateTime={brief.analysis.completedAt}>
+              {new Date(brief.analysis.completedAt).toLocaleDateString()}
+            </time>
+            . These claims stay as they are while the reporting develops — the Story goes on being analysed
+            again, and this Brief keeps what it froze.
+          </p>
+        </RecordSection>
       )}
 
       <RecordSection heading="Attached Articles">

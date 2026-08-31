@@ -11,9 +11,13 @@ export class CreateGenerationRuns1755755000000 implements MigrationInterface {
 
     // ON DELETE CASCADE on storyId: merging a Story (#52) deletes the emptied row,
     // and an analysis of a Story that no longer exists is not an analysis of
-    // anything. The consequence to carry into #55 is that a Brief referencing a run
-    // must survive its Story being merged away — by holding its own copy of what it
-    // froze, not by holding this row.
+    // anything. #55 settled that differently from the plan recorded here: a Brief
+    // holds the run itself rather than a copy of it, and a merge *repoints* this table
+    // and generation_runs at the survivor before deleting the emptied row (see
+    // src/clustering/merge.ts) — a merge is the judgement that the two Stories were
+    // one event, so the analysis is an analysis of the survivor. The consequence to
+    // carry forward is that a repointed run is counted against a Story whose
+    // membership it never saw, which the Phase-5 eval harness will read.
     await queryRunner.query(`
       CREATE TABLE "evidence_sets" (
         "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),

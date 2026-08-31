@@ -165,6 +165,21 @@ error and the rejected text (`repairAttempts` on the run, `SYNTHESIS_TIMEOUT_MS`
 for *all* the calls, so a reader's wait is unchanged). Every failure mode is driven by a
 transcript of the configured model's own bad answer in `tests/fixtures/synthesis/`, with one
 live check behind `SYNTHESIS_LIVE_SMOKE=1`.
+**Saving an analysis** (#55) closes the ownership loop, on the endpoint that already
+existed: `POST /api/v1/briefs` takes an optional `generationRunId`, and with it the Brief is
+pre-filled with the Story's title and category, pins the EvidenceSet's Articles (without the
+accepted-membership check the manual attach applies — each one was an accepted member when its
+evidence was frozen) and references that exact run through a nullable
+`intelligence_briefs."generationRunId"`. Brief detail serves the frozen claims through
+generation's own `loadGenerationView`, so a saved analysis reads identically to the one that was
+saved and keeps reading that way after its Story is analysed again. Same endpoint means the same
+rules: the Student/Investor guard refuses an Admin here as everywhere else on `/briefs`, and the
+article capacity refuses a Brief smaller than the analysis cites rather than pinning part of it.
+A failed run cannot be saved at all, nor can a run written under a Lens that is not the caller's
+own — saving is the second door into the same claims, so it applies the rule the generation
+endpoint applies at the first. A Story merge now repoints `generation_runs` and
+`evidence_sets` at the survivor instead of letting `storyId`'s cascade delete a reader's saved
+analysis with the emptied row.
 Phase 3.5 (graph/timeline) is not built yet.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
@@ -185,7 +200,10 @@ mutation, never a fetch on render, since an analysis may cost money), a Lens sel
 only — a reader's Lens is their role, and the API refuses one from them — claims grouped by kind
 in the record's note register with each citation an `A1 · Publisher` link to the Article it
 resolves to, and a stated unavailable panel — worded per `failureCode` — for a run that failed
-rather than any part of it. The Admin console gained a fourth register for **IngestionRun** history and Run /
+rather than any part of it. A completed analysis carries a **Save to a new Brief** command (#55)
+for the two roles that own Briefs — never for an Admin, whom the API refuses — landing the reader
+on the Brief they now own; Brief detail carries the saved analysis as its own register, rendered
+by the register both records share (`components/analysisRegister.tsx`), stated as frozen. The Admin console gained a fourth register for **IngestionRun** history and Run /
 Enable-Disable commands on each connector row (#39 — Run states that it queued the run, since
 the worker is what executes it, #42), and each publisher row shows its Terms
 Class beside its article count (#40). A fifth register carries **ClusteringRun** history with a

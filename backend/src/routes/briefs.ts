@@ -6,7 +6,11 @@ import { AppDataSource } from "../data-source";
 import { BriefArticle } from "../entities/BriefArticle";
 import { Article } from "../entities/Article";
 import { BRIEF_CATEGORIES, DEFAULT_ARTICLE_CAPACITY_LIMIT, IntelligenceBrief } from "../entities/IntelligenceBrief";
-import type { StoryCategory } from "../entities/Story";
+import { GenerationRun } from "../entities/GenerationRun";
+import type { Story, StoryCategory } from "../entities/Story";
+import type { UserRole } from "../entities/User";
+import { lensForRole } from "../generation/config";
+import { loadGenerationView } from "../generation/runGeneration";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
@@ -104,6 +108,10 @@ function toPublicBrief(brief: IntelligenceBrief, articleCount: number) {
     // bytes are owner-only, so they're fetched the same authenticated way as
     // the rest of the Brief (see GET /briefs/:id/cover-image below).
     coverImageUrl: brief.coverImageKey ? `/api/v1/briefs/${brief.id}/cover-image` : null,
+    // The generation this Brief froze, or null for one assembled by hand (#55). The
+    // claims themselves come with the record (GET /briefs/:id below) rather than with
+    // a summary — an index of Briefs is not a place to render five analyses.
+    generationRunId: brief.generationRunId,
     ownerId: brief.ownerId,
     articleCount,
     createdAt: brief.createdAt,
@@ -156,6 +164,56 @@ function parseBriefInput(
 
   if (errors.length > 0) return { ok: false, error: errors.join("; ") };
   return { ok: true, value };
+}
+
+// #55: what "saving an analysis" pins. The GenerationRun is *referenced*, not copied:
+// a run is written once and never edited, so regenerating its Story writes a new run
+// and leaves this one — and the Brief pointing at it — exactly as it was. That is the
+// whole of "a Brief freezes a specific generation" (ADR-0027).
+type SavedAnalysis = { run: GenerationRun; story: Story; articleIds: string[] };
+
+async function loadSavedAnalysis(
+  generationRunId: unknown,
+  role: UserRole,
+): Promise<{ ok: true; value: SavedAnalysis } | { ok: false; error: string }> {
+  if (typeof generationRunId !== "string" || !isUuid(generationRunId)) {
+    return { ok: false, error: "generationRunId must be a valid analysis id" };
+  }
+  const run = await AppDataSource.getRepository(GenerationRun).findOne({
+    where: { id: generationRunId },
+    relations: { story: true },
+  });
+  if (!run) return { ok: false, error: "generationRunId must reference an existing analysis" };
+  // A failed run has no claims to keep, and ADR-0010's stated unavailable state is
+  // where a failure belongs — not inside an owned artefact whose point is the
+  // analysis it holds.
+  if (run.status !== "completed") {
+    return { ok: false, error: "Only a completed analysis can be saved to a Brief" };
+  }
+  // The same rule the generation endpoint applies, at the second door into the same
+  // claims: a Lens is the reader's role (ADR-0027), so a Student saving an
+  // investor_implication run would be reading as somebody else — which is exactly
+  // what asking for that Lens is refused for. An Admin reaches neither door: they own
+  // no Brief.
+  if (run.lens !== lensForRole(role)) {
+    return { ok: false, error: "This analysis was written for a different Lens than your own" };
+  }
+  // The EvidenceSet's Articles, in evidence-id order, which is the order A1…An reads
+  // in. Taken from the frozen rows rather than from the Story's membership now: the
+  // Articles a Brief pins are the ones its analysis cites.
+  const rows: { articleId: string; titleSnapshot: string | null }[] = await AppDataSource.query(
+    `SELECT "articleId", "titleSnapshot" FROM "evidence_set_articles"
+      WHERE "evidenceSetId" = $1 ORDER BY "sourceRank" ASC`,
+    [run.evidenceSetId],
+  );
+  // The exclusion reuse carries for the same reason (see reusableRunId): a set frozen
+  // before migration 1755756000000 has no provenance snapshot, and loadGenerationView
+  // refuses to render one. Refused here rather than pinned, because a Brief cannot
+  // unpin a run and the record would 404-by-500 forever.
+  if (rows.some((row) => row.titleSnapshot === null)) {
+    return { ok: false, error: "This analysis is missing its frozen provenance and cannot be saved" };
+  }
+  return { ok: true, value: { run, story: run.story, articleIds: rows.map((row) => row.articleId) } };
 }
 
 // Existence and ownership stay in middleware beside authentication/RBAC, while
@@ -219,20 +277,81 @@ briefsRouter.get(
 briefsRouter.post(
   "/briefs",
   asyncHandler(async (req, res) => {
-    const parsed = parseBriefInput(req.body, true);
+    // The one field that turns creating a Brief into saving an analysis (#55). Same
+    // endpoint, so the Student/Investor guard, the capacity rule and the ownership
+    // model above hold on this path without being restated — an Admin is refused here
+    // for the same reason they own no other Brief (ADR-0004).
+    const requested = (req.body ?? {}).generationRunId;
+    // `null` means what leaving it out means, so a client that round-trips a fetched
+    // Brief (whose generationRunId is null) into a create is not refused for it.
+    const saved = requested == null ? null : await loadSavedAnalysis(requested, req.user!.role);
+    if (saved && !saved.ok) {
+      res.status(422).json({ error: saved.error });
+      return;
+    }
+    const analysis = saved?.ok ? saved.value : null;
+
+    // Saving pre-fills what a hand-made Brief has to state — the Story's own title and
+    // category — and anything the caller did send still wins, so this is a pre-fill and
+    // not an override.
+    const parsed = parseBriefInput(req.body, analysis === null);
     if (!parsed.ok) {
       res.status(422).json({ error: parsed.error });
       return;
     }
+    const input = {
+      ...(analysis
+        ? {
+            title: analysis.story.title,
+            category: analysis.story.category,
+            note: null,
+            articleCapacityLimit: DEFAULT_ARTICLE_CAPACITY_LIMIT,
+          }
+        : {}),
+      ...parsed.value,
+    } as BriefInput;
+
+    // #20's capacity is the Brief's own rule and it holds here too. An EvidenceSet is
+    // bounded at ten Articles (ADR-0010), so this only fires for a caller who asked for
+    // a Brief smaller than the analysis they are saving — refused rather than pinning
+    // part of it, because a Brief holding some of what its claims cite is a Brief whose
+    // citations do not resolve.
+    if (analysis && analysis.articleIds.length > input.articleCapacityLimit) {
+      res.status(422).json({
+        error: `articleCapacityLimit cannot be below the ${analysis.articleIds.length} Article(s) this analysis cites`,
+      });
+      return;
+    }
+
     let brief: IntelligenceBrief;
     try {
-      brief = await briefRepo().save({ ...(parsed.value as BriefInput), ownerId: req.user!.id });
+      brief = await AppDataSource.transaction(async (manager) => {
+        const created = await manager.getRepository(IntelligenceBrief).save({
+          ...input,
+          ownerId: req.user!.id,
+          generationRunId: analysis?.run.id ?? null,
+        });
+        // Pinned without the accepted-membership check POST /briefs/:id/articles
+        // applies: every one of these was an accepted member when its evidence was
+        // frozen, and the point of freezing is that where the Article has moved since
+        // does not change what the analysis rested on. One statement, so every row
+        // shares a `createdAt` — the record's Article list has an id tiebreak rather
+        // than an order Postgres picks per request. Detaching one of these is one-way
+        // where the Article has since left its Story: the manual attach applies the
+        // membership rule, while the claims above go on citing it either way.
+        if (analysis) {
+          await manager
+            .getRepository(BriefArticle)
+            .insert(analysis.articleIds.map((articleId) => ({ briefId: created.id, articleId })));
+        }
+        return created;
+      });
     } catch (err) {
       if (!isCheckViolation(err)) throw err;
       res.status(422).json({ error: "Brief violates a database constraint" });
       return;
     }
-    res.status(201).json(toPublicBrief(brief, 0));
+    res.status(201).json(toPublicBrief(brief, analysis?.articleIds.length ?? 0));
   }),
 );
 
@@ -244,12 +363,17 @@ briefsRouter.get(
     const briefArticles = await briefArticleRepo().find({
       where: { briefId: brief.id },
       relations: { article: { publisher: true } },
-      order: { createdAt: "ASC" },
+      order: { createdAt: "ASC", articleId: "ASC" },
     });
 
     res.json({
       ...toPublicBrief(brief, briefArticles.length),
       articles: briefArticles.map((ba) => toPublicArticle(ba.article)),
+      // The frozen claims and their citations, read by the same loader Story detail
+      // serves a fresh run through (#53), so a saved analysis renders identically to
+      // the one that was saved — and keeps rendering that way after its Story has
+      // been analysed again.
+      analysis: brief.generationRunId ? await loadGenerationView(brief.generationRunId) : null,
     });
   }),
 );
