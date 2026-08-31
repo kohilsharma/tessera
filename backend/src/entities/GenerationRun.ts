@@ -46,6 +46,7 @@ export type GenerationFailureCode = (typeof GENERATION_FAILURE_CODES)[number];
 // generation pass-rate the Phase-5 eval harness wants (ADR-0027), collected from
 // day one as a side effect of enforcing the invariant.
 export type GenerationValidationResult = {
+  // Totals across every answer in the run, including answers a repair replaced.
   claimsReturned: number;
   claimsAccepted: number;
   claimsRejected: number;
@@ -55,9 +56,9 @@ export type GenerationValidationResult = {
   // How many repair attempts this run needed (ADR-0027, #54). Zero means the first
   // answer was publishable; the cap means the last one still was not.
   repairAttempts: number;
-  // Why each rejected claim was dropped, from the attempt that was persisted. A
-  // dropped claim is not a failed run under partial acceptance, so this is the only
-  // record that it was ever returned.
+  // Why each rejected claim was dropped across every validated attempt. A dropped
+  // claim is not a failed run under partial acceptance, so this is the only record
+  // that it was ever returned.
   issues: { claimIndex: number; code: string; detail?: string }[];
 };
 

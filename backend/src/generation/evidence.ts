@@ -116,20 +116,20 @@ export function excerptOf(analysisText: string): string {
 // A Story holds tens of members, so this is one small query either way; hoist it
 // into a CTE if a Story ever holds enough members to notice.
 async function rankedCandidates(storyId: string): Promise<Candidate[]> {
-  const rows: (Omit<Candidate, "sourceRank"> & { distance: string | null })[] = await AppDataSource.query(
+  const rows: (Omit<Candidate, "sourceRank"> & { distance: string })[] = await AppDataSource.query(
     `SELECT a."id" AS "articleId", a."title", a."url", a."publishedAt", a."analysisText", a."analysisTextMode",
             p."id" AS "publisherId", p."name" AS "publisherName", p."domain" AS "publisherDomain", p."termsClass",
-            CASE WHEN a."embedding" IS NULL THEN NULL ELSE a."embedding" <=> ${acceptedCentroid("s")} END AS distance
+            a."embedding" <=> ${acceptedCentroid("s")} AS distance
        FROM "articles" a
        JOIN "publishers" p ON p."id" = a."publisherId"
        JOIN "stories" s ON s."id" = a."storyId"
       WHERE a."storyId" = $1
         AND ${acceptedMembership("a")}
         AND a."analysisText" ~ '[^[:space:]]'
-      -- Relevance first, then chronology, then id: an unembedded member ranks last
-      -- rather than dropping out, so a Story whose vectors were just cleared by
-      -- enrichment can still be analysed.
-      ORDER BY distance ASC NULLS LAST, a."publishedAt" ASC, a."id" ASC`,
+        -- Fail closed until enrichment's cleared vector is restored: without a vector
+        -- Tessera cannot prove another masthead is independent reporting (#54).
+        AND a."embedding" IS NOT NULL
+      ORDER BY distance ASC, a."publishedAt" ASC, a."id" ASC`,
     [storyId],
   );
   return rows.map(({ distance: _distance, ...row }, index) => ({ ...row, sourceRank: index + 1 }));
@@ -145,11 +145,9 @@ async function rankedCandidates(storyId: string): Promise<Candidate[]> {
 // at thousands. Restricting the pair query to the candidates that can actually be selected
 // is the upgrade, and it needs the bounds applied first.
 //
-// An unembedded member is nobody's duplicate: absence of a vector is not evidence of
-// difference, and dropping it instead would silently shrink a set after enrichment cleared
-// a vector. The consequence is that the "counts newsrooms" guarantee below is conditional
-// on the members being embedded — a wire reprint enriched moments ago can still take a
-// second masthead's slot until the next clustering run re-embeds it.
+// Every candidate is embedded: rankedCandidates fails closed until enrichment's
+// cleared vector is restored, so this comparison cannot silently count an unknown
+// masthead as independent reporting.
 const pairKey = (left: string, right: string): string => (left < right ? `${left}|${right}` : `${right}|${left}`);
 
 async function nearDuplicatePairs(articleIds: string[]): Promise<Set<string>> {
@@ -186,12 +184,8 @@ function applyBounds(
     // independent publishers where there is one newsroom — which is exactly the count
     // the minimum-publisher refusal reads. The earliest is never collapsed, nothing
     // being selected before it, so a set is never empty for this reason.
-    //
-    // A collapsed *latest* is not replaced by the next-latest: the rank loop below can
-    // still pull a distinct later report in, but as `centroid_rank`, so a set can carry
-    // no `latest_reporting` row at all. That is the honest outcome — the end of the
-    // window was a copy of its start — and retrying down the list would be inventing a
-    // span the reporting does not have.
+    // If the chronological endpoint is a copy of an earlier selection, the latest
+    // remaining independent report carries the bound instead (v3 §16.2).
     if ([...selected.keys()].some((held) => duplicates.has(pairKey(held, candidate.articleId)))) return;
     selected.set(candidate.articleId, { candidate, selectionReason });
     perPublisher.set(candidate.publisherId, (perPublisher.get(candidate.publisherId) ?? 0) + 1);
@@ -200,7 +194,11 @@ function applyBounds(
   // A one-Article Story's sole member is its earliest reporting; first write wins,
   // so it is not also recorded as its latest.
   if (byTime.length > 0) take(byTime[0], "earliest_reporting");
-  if (byTime.length > 1) take(byTime[byTime.length - 1], "latest_reporting");
+  for (let index = byTime.length - 1; index > 0; index -= 1) {
+    const before = selected.size;
+    take(byTime[index], "latest_reporting");
+    if (selected.size > before) break;
+  }
 
   for (const candidate of ranked) {
     if (selected.size >= MAX_EVIDENCE_ARTICLES) break;

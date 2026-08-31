@@ -20,6 +20,7 @@ import {
   MAX_EVIDENCE_ARTICLES,
   MAX_REPAIR_ATTEMPTS,
   PROMPT_VERSION,
+  SYNTHESIS_TIMEOUT_MS,
 } from "../src/generation/config";
 import { MockSynthesisProvider } from "../src/synthesis/MockSynthesisProvider";
 import type { SynthesisProvider, SynthesisRequest } from "../src/synthesis";
@@ -1071,6 +1072,47 @@ describe("wire copy", () => {
     expect(held).toEqual([{ storyAssignmentStatus: "auto_accepted" }]);
   });
 
+  it("uses the latest remaining independent report when the chronological endpoint is wire copy", async () => {
+    const story = await createStory();
+    const wire = axisVector(3);
+    const origin = await createPublisher("timeline-origin.example");
+    const own = await createPublisher("timeline-own.example");
+    const reprint = await createPublisher("timeline-reprint.example");
+    const earliest = await createArticle({
+      storyId: story.id,
+      publisherId: origin.id,
+      title: "Pilot line targets 2027 output",
+      vector: wire,
+      publishedAt: new Date("2026-01-01T00:00:00Z"),
+    });
+    const latestIndependent = await createArticle({
+      storyId: story.id,
+      publisherId: own.id,
+      title: "Subsidy timing still unresolved",
+      vector: distinctVector(3, 77),
+      publishedAt: new Date("2026-01-09T00:00:00Z"),
+    });
+    const copiedEndpoint = await createArticle({
+      storyId: story.id,
+      publisherId: reprint.id,
+      title: "Pilot line targets 2027 output",
+      vector: wire,
+      publishedAt: new Date("2026-01-10T00:00:00Z"),
+    });
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+    const reasons = new Map<string, string>(
+      res.body.evidence.map((row: { articleId: string; selectionReason: string }) => [
+        row.articleId,
+        row.selectionReason,
+      ]),
+    );
+
+    expect(reasons.get(earliest.id)).toBe("earliest_reporting");
+    expect(reasons.get(latestIndependent.id)).toBe("latest_reporting");
+    expect(reasons.has(copiedEndpoint.id)).toBe(false);
+  });
+
   it("keeps reporting that is close without being the same report", async () => {
     const story = await createStory();
     const one = await createPublisher("close-one.example");
@@ -1091,7 +1133,7 @@ describe("wire copy", () => {
     expect(res.body.distinctPublisherCount).toBe(2);
   });
 
-  it("cannot see a copy whose vector enrichment has just cleared", async () => {
+  it("refuses to count an unembedded copy as independent reporting", async () => {
     const story = await createStory();
     const origin = await createPublisher("cleared-origin.example");
     const reprint = await createPublisher("cleared-reprint.example");
@@ -1112,12 +1154,12 @@ describe("wire copy", () => {
 
     const res = await requestAnalysis(story.id, await tokenFor("student"));
 
-    // The collapse is a vector comparison, so a member with no vector is nobody's
-    // duplicate and this set counts two publishers for one report. Fails open on
-    // purpose — dropping unembedded members would shrink a set every time enrichment
-    // touched it — and it lasts until the next clustering run re-embeds the row.
-    expect(res.body.evidence.map((row: { articleId: string }) => row.articleId)).toContain(unembedded.id);
-    expect(res.body.distinctPublisherCount).toBe(2);
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatch(/two publishers/i);
+    expect(synth.requests).toHaveLength(0);
+    // The Article remains a Story member; it becomes eligible evidence after the next
+    // clustering run restores the vector enrichment cleared.
+    expect(await AppDataSource.getRepository(Article).findOneBy({ id: unembedded.id })).not.toBeNull();
   });
 
   it("refuses a Story that is one wire report under five mastheads", async () => {
@@ -1335,7 +1377,8 @@ describe("captured model failures", () => {
     expect(res.body.claims).toEqual([]);
     const runs: { validationResult: { claimsAccepted: number; issues: unknown[] }; failureMessage: string }[] =
       await AppDataSource.query(`SELECT "validationResult", "failureMessage" FROM "generation_runs"`);
-    expect(runs[0].validationResult).toMatchObject({ claimsReturned: 1, claimsAccepted: 1, claimsRejected: 0 });
+    // The same thin answer was measured across the initial ask and both repairs.
+    expect(runs[0].validationResult).toMatchObject({ claimsReturned: 3, claimsAccepted: 3, claimsRejected: 0 });
     expect(runs[0].validationResult.issues).toEqual([]);
     expect(runs[0].failureMessage).toMatch(/consensus/i);
   });
@@ -1364,6 +1407,36 @@ describe("repair", () => {
     expect(runs[0].validationResult.repairAttempts).toBe(1);
   });
 
+  it("records rejected claims from answers that a repair replaces", async () => {
+    const { story } = await twoPublisherStory();
+    answering(
+      claimsAnswer(consensus(["A1"]), consensus(["A9"], "A ninth source that was never frozen.")),
+      publishable(["A1", "A2"]),
+    );
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
+    expect(res.body.status).toBe("completed");
+    const runs: {
+      validationResult: {
+        claimsReturned: number;
+        claimsAccepted: number;
+        claimsRejected: number;
+        unknownEvidenceIds: string[];
+        issues: { claimIndex: number; code: string; detail?: string }[];
+        repairAttempts: number;
+      };
+    }[] = await AppDataSource.query(`SELECT "validationResult" FROM "generation_runs"`);
+    expect(runs[0].validationResult).toEqual({
+      claimsReturned: 4,
+      claimsAccepted: 3,
+      claimsRejected: 1,
+      unknownEvidenceIds: ["A9"],
+      issues: [{ claimIndex: 1, code: "unknown_evidence_id", detail: "A9" }],
+      repairAttempts: 1,
+    });
+  });
+
   it("gives up after two repairs rather than asking forever", async () => {
     const { story } = await twoPublisherStory();
     insisting(fixture("thin-answer"));
@@ -1376,6 +1449,31 @@ describe("repair", () => {
       `SELECT "validationResult" FROM "generation_runs"`,
     );
     expect(runs[0].validationResult.repairAttempts).toBe(MAX_REPAIR_ATTEMPTS);
+  });
+
+  it("reserves the shared timeout for both repair attempts", async () => {
+    const { story } = await twoPublisherStory();
+    const token = await tokenFor("student");
+    let now = Date.now();
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    let calls = 0;
+    synth.provider = {
+      complete: async () => {
+        calls += 1;
+        if (calls === 1) now += SYNTHESIS_TIMEOUT_MS - 1_000;
+        return fixture("thin-answer");
+      },
+    };
+
+    try {
+      const res = await requestAnalysis(story.id, token);
+
+      expect(res.body.status).toBe("failed");
+      expect(synth.requests).toHaveLength(1 + MAX_REPAIR_ATTEMPTS);
+      expect(synth.requests[0].timeoutMs).toBeLessThan(SYNTHESIS_TIMEOUT_MS / 2);
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it("does not repair a provider that never answered", async () => {

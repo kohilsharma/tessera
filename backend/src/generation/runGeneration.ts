@@ -12,7 +12,7 @@ import {
 import { mayServeText, type TermsClass } from "../entities/Publisher";
 import type { SelectionReason } from "../entities/EvidenceSetArticle";
 import type { SynthesisProvider } from "../synthesis";
-import { MAX_REPAIR_ATTEMPTS, MIN_DISTINCT_PUBLISHERS, MIN_REPAIR_BUDGET_MS, PROMPT_VERSION, SYNTHESIS_TIMEOUT_MS } from "./config";
+import { MAX_REPAIR_ATTEMPTS, MIN_DISTINCT_PUBLISHERS, PROMPT_VERSION, SYNTHESIS_TIMEOUT_MS } from "./config";
 import {
   distinctPublisherCount,
   evidenceDataMode,
@@ -223,9 +223,8 @@ async function generateOnce(
   // no dependable stronger rung to climb to (ADR-0025).
   //
   // One deadline across all of them, not one per call: SYNTHESIS_TIMEOUT_MS is the
-  // promise made to a reader who is waiting, and three attempts at a minute each would
-  // make it a lie. A repair with no budget left is not attempted, and the run is stated
-  // as the validation failure it actually is rather than as a timeout.
+  // promise made to a reader who is waiting. Each call gets an equal share of the
+  // remaining budget, reserving time for both required repairs.
   const deadline = startedAt.getTime() + SYNTHESIS_TIMEOUT_MS;
   const frozenEvidence = new Map(selected.map((row) => [row.evidenceId, row.publisherId]));
   const fullPermittedText = carriesFullPermittedText(dataMode);
@@ -236,6 +235,7 @@ async function generateOnce(
   // measurement are the only record a claim was ever returned and dropped, and the
   // input the eval harness reads (ADR-0027).
   let recorded: RunFields = base;
+  let accumulatedValidation: GenerationValidationResult | null = null;
 
   for (let repairAttempts = 0; ; repairAttempts += 1) {
     const ask =
@@ -243,7 +243,11 @@ async function generateOnce(
         ? analysisRequest(selected, lens, dataMode)
         : repairRequest(selected, lens, dataMode, raw, refusal);
     try {
-      raw = await deps.synth.complete({ ...ask, timeoutMs: Math.max(1, deadline - Date.now()) });
+      const attemptsLeft = 1 + MAX_REPAIR_ATTEMPTS - repairAttempts;
+      raw = await deps.synth.complete({
+        ...ask,
+        timeoutMs: Math.max(1, Math.floor((deadline - Date.now()) / attemptsLeft)),
+      });
     } catch (err) {
       // Includes the timeout: an AbortError arrives here like any other. The message is
       // recorded for an Admin and never returned — it can name hosts and models. Not
@@ -257,16 +261,26 @@ async function generateOnce(
     }
 
     const validated = validateAnalysis(raw, lens, frozenEvidence, { fullPermittedText });
-    // The persisted answer and measurement are the last attempt's: what a reader would
-    // have been shown, and what it cost to get there.
+    accumulatedValidation = accumulatedValidation
+      ? {
+          claimsReturned: accumulatedValidation.claimsReturned + validated.result.claimsReturned,
+          claimsAccepted: accumulatedValidation.claimsAccepted + validated.result.claimsAccepted,
+          claimsRejected: accumulatedValidation.claimsRejected + validated.result.claimsRejected,
+          unknownEvidenceIds: [
+            ...new Set([...accumulatedValidation.unknownEvidenceIds, ...validated.result.unknownEvidenceIds]),
+          ],
+          repairAttempts,
+          issues: [...accumulatedValidation.issues, ...validated.result.issues],
+        }
+      : { ...validated.result, repairAttempts };
     const withAnswer: RunFields = {
       ...base,
       rawResponse: raw,
-      validationResult: { ...validated.result, repairAttempts },
+      validationResult: accumulatedValidation,
     };
 
     if (!validated.ok) {
-      if (repairAttempts < MAX_REPAIR_ATTEMPTS && deadline - Date.now() >= MIN_REPAIR_BUDGET_MS) {
+      if (repairAttempts < MAX_REPAIR_ATTEMPTS) {
         refusal = validated.failureMessage;
         recorded = withAnswer;
         continue;

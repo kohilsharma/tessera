@@ -39,11 +39,6 @@ export const MIN_SURVIVING_CLAIMS = 2;
 // would be a cost path for a capability we do not have.
 export const MAX_REPAIR_ATTEMPTS = 2;
 
-// A repair needs enough of the reader's remaining budget to actually answer in. Below
-// this, asking again would abort mid-flight and report a timeout in place of the
-// validation failure that is the true story of the run.
-export const MIN_REPAIR_BUDGET_MS = 5_000;
-
 // ADR-0027's ~1500-character excerpt. Long enough to carry a lede and its
 // qualifications, short enough that ten of them fit a cheap model's context.
 export const EXCERPT_CHARS = 1500;
