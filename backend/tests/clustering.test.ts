@@ -1457,6 +1457,70 @@ describe("merging two Stories", () => {
     expect(detail.body.articleCount).toBe(4);
   });
 
+  it("serializes a merge with a concurrent pending decision", async () => {
+    const { survivor, merged, proposal } = await seedMergeablePair();
+    const admin = await createAdmin("merge-race-operator@example.com");
+    const token = signToken({ sub: admin.id, role: admin.role });
+    const advisoryKey = 520052;
+    const blocker = AppDataSource.createQueryRunner();
+    await blocker.connect();
+
+    const waitForBlockedLock = async (locktype: "advisory" | "transactionid") => {
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const [{ waiting }]: { waiting: boolean }[] = await AppDataSource.query(
+          `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = $1 AND NOT granted) AS waiting`,
+          [locktype],
+        );
+        if (waiting) return;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      throw new Error(`Timed out waiting for a blocked ${locktype} lock`);
+    };
+
+    try {
+      // Hold rejection after it locks the proposal but before its foreign-key check
+      // locks the Story. The merge must wait behind that Article without first
+      // locking the Story, or the two commands deadlock in opposite lock order.
+      await blocker.query(`SELECT pg_advisory_lock($1)`, [advisoryKey]);
+      await AppDataSource.query(`
+        CREATE FUNCTION block_rejection_for_merge_test() RETURNS trigger AS $$
+        BEGIN
+          PERFORM pg_advisory_xact_lock(${advisoryKey});
+          RETURN NEW;
+        END
+        $$ LANGUAGE plpgsql
+      `);
+      await AppDataSource.query(`
+        CREATE TRIGGER block_rejection_for_merge_test
+        BEFORE INSERT ON rejected_story_assignments
+        FOR EACH ROW EXECUTE FUNCTION block_rejection_for_merge_test()
+      `);
+
+      const reviewPromise = decidePendingAssignment(proposal.id, "reject", admin.id);
+      await waitForBlockedLock("advisory");
+
+      const mergePromise = Promise.resolve(
+        merge(token, { survivorStoryId: survivor.id, mergedStoryId: merged.id }),
+      );
+      await waitForBlockedLock("transactionid");
+      await blocker.query(`SELECT pg_advisory_unlock($1)`, [advisoryKey]);
+
+      const [reviewOutcome, mergeOutcome] = await Promise.allSettled([reviewPromise, mergePromise]);
+      expect(reviewOutcome).toMatchObject({
+        status: "fulfilled",
+        value: { articleId: proposal.id, storyId: merged.id, decision: "reject" },
+      });
+      expect(mergeOutcome).toMatchObject({ status: "fulfilled", value: { status: 200 } });
+      expect((await AppDataSource.getRepository(Article).findOneByOrFail({ id: proposal.id })).storyId).toBeNull();
+      expect(await AppDataSource.getRepository(Story).findOneBy({ id: merged.id })).toBeNull();
+    } finally {
+      await blocker.query(`SELECT pg_advisory_unlock($1)`, [advisoryKey]);
+      await blocker.release();
+      await AppDataSource.query(`DROP TRIGGER IF EXISTS block_rejection_for_merge_test ON rejected_story_assignments`);
+      await AppDataSource.query(`DROP FUNCTION IF EXISTS block_rejection_for_merge_test()`);
+    }
+  });
+
   it("leaves a Brief citing a moved Article untouched", async () => {
     const { survivor, merged, moved } = await seedMergeablePair();
     const reader = await registerAndLogin("merge-brief-owner@example.com", "student");

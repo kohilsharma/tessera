@@ -188,7 +188,10 @@ async function assignToStory(
 
     // Lock members before comparing the stored centroid with their current mean,
     // so enrichment cannot invalidate it between validation and assignment.
-    await manager.query(`SELECT "id" FROM "articles" WHERE "storyId" = $1 FOR UPDATE`, [storyId]);
+    await manager.query(
+      `SELECT "id" FROM "articles" WHERE "storyId" = $1 ORDER BY "id" FOR UPDATE`,
+      [storyId],
+    );
     const storyRows = await manager.query(
       `SELECT s."id" FROM "stories" s
        WHERE s."id" = $1

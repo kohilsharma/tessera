@@ -10,23 +10,35 @@ export type DecidedAssignment = { articleId: string; storyId: string; decision: 
 // job would not commit on its own. Null means there was no pending assignment to
 // decide — a wrong id, or a decision that lost a race with another operator's.
 //
-// A transaction rather than two updates, and locking in the same order
-// runClustering's attachToStory takes: the candidate row first, then the Story's
-// members. Accepting changes a centroid, and so does an assignment in a concurrent
-// run, so the two have to serialise or one commits against a mean the other has
-// already moved.
+// A transaction rather than two updates, locking every Article already assigned
+// to the Story in id order before anything locks the Story itself. Clustering and
+// merge use that same order: accepting changes a centroid, and so does an
+// assignment in a concurrent run, so the writers must serialise or one commits
+// against a mean the other has already moved.
 export async function decidePendingAssignment(
   articleId: string,
   decision: AssignmentDecision,
   decidedByUserId: string,
 ): Promise<DecidedAssignment | null> {
   return AppDataSource.transaction(async (manager) => {
-    const rows: { storyId: string }[] = await manager.query(
-      `SELECT "storyId" FROM "articles" WHERE "id" = $1 AND "storyAssignmentStatus" = $2 FOR UPDATE`,
+    const proposed: { storyId: string }[] = await manager.query(
+      `SELECT "storyId" FROM "articles" WHERE "id" = $1 AND "storyAssignmentStatus" = $2`,
       [articleId, PENDING_ASSIGNMENT],
     );
-    if (rows.length === 0) return null;
-    const { storyId } = rows[0];
+    if (proposed.length === 0) return null;
+    const { storyId } = proposed[0];
+
+    // Every membership writer locks overlapping Article sets in id order before
+    // locking their Story. Revalidate the proposal after waiting: a concurrent
+    // merge may have moved it while this transaction was between the two reads.
+    const members: { id: string; storyAssignmentStatus: string }[] = await manager.query(
+      `SELECT "id", "storyAssignmentStatus" FROM "articles"
+       WHERE "storyId" = $1 ORDER BY "id" FOR UPDATE`,
+      [storyId],
+    );
+    if (!members.some((member) => member.id === articleId && member.storyAssignmentStatus === PENDING_ASSIGNMENT)) {
+      return null;
+    }
 
     if (decision === "reject") {
       // Remembered before the membership is cleared: the pairing is what later runs
@@ -48,7 +60,6 @@ export async function decidePendingAssignment(
       return { articleId, storyId, decision };
     }
 
-    await manager.query(`SELECT "id" FROM "articles" WHERE "storyId" = $1 FOR UPDATE`, [storyId]);
     // The score stays as the run wrote it: it records what produced this
     // membership, and an Admin accepting a 0.8 has not made it a 1.
     await manager.query(`UPDATE "articles" SET "storyAssignmentStatus" = $2 WHERE "id" = $1`, [

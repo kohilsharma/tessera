@@ -18,8 +18,17 @@ export async function mergeStories(survivorStoryId: string, mergedStoryId: strin
   if (survivorStoryId === mergedStoryId) return { status: "refused", reason: "same_story" };
 
   return AppDataSource.transaction(async (manager) => {
-    // Both Story rows, locked in id order so two operators merging the same pair in
-    // opposite directions queue instead of deadlocking.
+    // Every membership writer locks Articles before its Story, with overlapping
+    // Article sets ordered by id. Review and clustering use the same order, so a
+    // merge waits behind an in-flight decision instead of each holding the row the
+    // other needs.
+    await manager.query(
+      `SELECT "id" FROM "articles" WHERE "storyId" = ANY($1::uuid[]) ORDER BY "id" FOR UPDATE`,
+      [[survivorStoryId, mergedStoryId]],
+    );
+
+    // Both Story rows also lock in id order so two operators merging the same pair
+    // in opposite directions queue instead of deadlocking.
     const locked: { id: string }[] = await manager.query(
       `SELECT "id" FROM "stories" WHERE "id" = ANY($1::uuid[]) ORDER BY "id" FOR UPDATE`,
       [[survivorStoryId, mergedStoryId]],
