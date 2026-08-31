@@ -7,11 +7,16 @@ Terms are canonical: use these words in code, docs, and conversation.
 
 - **Story** — A persistent cluster of related Articles about one evolving real-world
   event. Shared global knowledge; has no single user owner. Not a user's saved item.
+  Clustering forms one only from Articles that carry text (`feed_excerpt` or above) and only
+  when at least two of them, from two distinct Publishers, agree — a Story of one is not a
+  Story. The **Curated Corpus** is closed to clustering in both directions. (ADR-0026)
 
 - **Article** — One piece of reporting discovered from a connector. Carries the text
   actually available for analysis (see *Analysis Text Mode*), not necessarily full body.
   An **Unclustered Article** is an Article with no Story yet — the normal state of everything
-  ingestion produces, since clustering is Phase 3. A *state*, not a second entity: every
+  ingestion produces until clustering assigns it, and the permanent state of what clustering
+  will not consider: `metadata_only` rows, and reporting that has not yet found a second,
+  independently published match (ADR-0026). A *state*, not a second entity: every
   public read path joins through Story, so unclustered Articles are invisible to browse and
   search by construction. (ADR-0022)
 
@@ -34,7 +39,15 @@ Terms are canonical: use these words in code, docs, and conversation.
 
 - **GenerationRun** — One attempt to produce analysis from an EvidenceSet with a specific
   prompt+model. Records status, raw output, validation result, cost, and the *PromptTemplate
-  version* used. Reproducible from its frozen EvidenceSet.
+  version* used. Reproducible from its frozen EvidenceSet. Belongs to the **Story**, one
+  current run per **Lens**, so synthesis is shared rather than paid for per reader; an
+  IntelligenceBrief owns a generation by referencing the run it froze. (ADR-0027)
+
+- **Lens** — The single role-specific claim type carried by one generation:
+  `student_context` or `investor_implication`. Exactly one per GenerationRun, chosen by the
+  requesting user's role rather than picked from a menu — which is what makes Student and
+  Investor different *output*, not a flag. _Avoid_: "mode", "view" — both already mean other
+  things here. (ADR-0010, ADR-0021, ADR-0027)
 
 - **PromptTemplate** — A versioned prompt + generation-params record that Admin tunes to shape
   responses for everyone (tone, verbosity, lens emphasis, which claim types surface). Tunes the
@@ -43,6 +56,26 @@ Terms are canonical: use these words in code, docs, and conversation.
 - **Flashcard** — A Student-owned Q/A study card generated from a Story/Brief. Its answer must
   cite evidence from a frozen EvidenceSet like any other claim; scheduled via spaced repetition
   (SM-2). (ADR-0021)
+
+## Clustering
+
+- **Story Assignment** — An Article's membership in a Story, carrying the state that decides
+  whether anyone can see it: *auto-accepted* (above the similarity threshold) or *pending
+  review* (in the band beneath it, awaiting an Admin). A pending assignment is invisible to
+  browse, to search, and to evidence selection — so a borderline guess can never reach a
+  reader or ground a claim. (ADR-0009, ADR-0026)
+
+- **Clustering Run** — One invocation of the clustering job, and the record of what it did:
+  how many Articles it embedded, assigned, held for review and left unclustered, and how many
+  Stories it created or merged. The counterpart of an *IngestionRun*, and read from Postgres
+  for the same reason — the Admin view must render with the worker down. (ADR-0026)
+
+- **Curated Corpus** — The hand-authored fixture Stories and Articles: synthetic reporting
+  from invented Publishers, guaranteed clean, multi-source and reproducible, and the
+  rehearsed demo path (ADR-0007). Closed to clustering in both directions — its Articles are
+  never clustered and its Stories never accept a live Article — so it cannot drift, and a
+  demo Story can never turn out to be half real and half invented. _Avoid_: "seed data",
+  which also means the demo users and the connector list. (ADR-0026)
 
 ## Knowledge graph & timeline (Phase 3.5 — bounded, GKG-backed)
 
@@ -124,8 +157,11 @@ Terms are canonical: use these words in code, docs, and conversation.
   *different* canonical URL, caught on normalized title + publisher + date, or a same-URL
   sighting with nothing to contribute (above). Rejected on arrival and counted on the
   IngestionRun. Syndicated wire copy running across many publishers is deliberately *not*
-  handled here — collapsing it is a Phase-3 question about evidence weight, not a Phase-2
-  question about rows. (ADR-0024)
+  handled here: the rows are real, and five outlets running one report is itself signal.
+  It is collapsed where it would mislead — inside an **EvidenceSet**, which is a claim about
+  *independent* corroboration, so a near-identical copy of an already-selected Article is
+  skipped and `distinctPublisherCount` counts newsrooms rather than mastheads.
+  (ADR-0024, ADR-0027)
 - **GKG Annotation** — One surface-name occurrence of a person, organization, location or
   theme in one Article, exactly as GDELT's GKG reported it, before any resolution. The
   pre-resolution raw material an **Entity** is later resolved *from*. _Avoid_: "GKG mention" —
@@ -180,7 +216,13 @@ Terms are canonical: use these words in code, docs, and conversation.
 
 ## Decision index
 
-All decisions are recorded in `docs/adr/0001`–`0024`. ADR-0024 (2026-08-30) makes Analysis
+All decisions are recorded in `docs/adr/0001`–`0027`. The 2026-08-31 additions open Phase 3:
+ADR-0025 puts embeddings and synthesis behind one OpenAI-compatible transport with
+NVIDIA-hosted defaults (superseding ADR-0023's hosted-default clause, not its `vector(1024)`
+decision), ADR-0026 fixes clustering as a single similarity knob with no singleton Stories and
+a closed Curated Corpus, and ADR-0027 settles what ADR-0010 left open — deterministic evidence
+selection, partial claim acceptance with a floor, and repair in place of a model-escalation
+ladder. ADR-0024 (2026-08-30) makes Analysis
 Text Mode an ordered ladder, adds the `metadata_only` rung for GKG-discovered Articles, and
 separates enrichment from duplication at the connector seam. ADR-0023 (2026-08-21) moves embedding
 serving to a hosted API default after a system-RAM measurement on the demo machine; the
