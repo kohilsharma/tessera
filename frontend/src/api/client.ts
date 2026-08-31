@@ -510,6 +510,7 @@ export type GenerationFailureCode =
   | "unparseable_output"
   | "schema_violation"
   | "invalid_citations"
+  | "below_claim_floor"
   | "content_changed";
 
 export type StoryAnalysis = {

@@ -59,6 +59,13 @@ generationRouter.post(
       res.status(422).json({ error: "This Story has no reporting available to analyse" });
       return;
     }
+    // v3 §16.2's minimum distinct Publishers, after the wire-copy collapse: five
+    // outlets running one wire report are one source, and an analysis of how the
+    // coverage compares needs something to compare it with.
+    if (outcome.status === "insufficient_publishers") {
+      res.status(422).json({ error: "This Story needs independent reporting from at least two publishers to analyse" });
+      return;
+    }
     res.json({ ...outcome.view, reused: outcome.status === "reused" });
   }),
 );

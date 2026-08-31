@@ -1,0 +1,27 @@
+{
+  "claims": [
+    {
+      "text": "The company maintained its unchanged timetable for the pilot line to reach volume output in 2027.",
+      "claim_type": "consensus",
+      "citations": [
+        "A1",
+        "A2"
+      ]
+    },
+    {
+      "text": "Two people familiar with the plan stated that the subsidy application is still pending.",
+      "claim_type": "source_specific",
+      "citations": [
+        "A1"
+      ]
+    },
+    {
+      "text": "Northwind Ledger omitted the detail that officials declined to comment on hiring, whereas Harbour Dispatch omitted the information regarding the pending subsidy application.",
+      "claim_type": "contradiction",
+      "citations": [
+        "A1",
+        "A2"
+      ]
+    }
+  ]
+}

@@ -44,8 +44,13 @@ const UNAVAILABLE: Record<GenerationFailureCode, string> = {
   provider_error: "The analysis provider did not answer.",
   unparseable_output: "The provider's answer could not be read.",
   schema_violation: "The provider answered outside the claim contract.",
+  // Partial acceptance means a single bad claim is dropped rather than fatal (#54), so
+  // both of these are the harder case: after dropping what could not be shown, too
+  // little was left to publish. They differ in why — a citation that did not resolve
+  // into this Story's evidence, or anything else.
   invalid_citations:
-    "Some claims cited reporting that is not in this Story's evidence, so none of them were displayed.",
+    "Too little of it could be traced back to this Story's evidence, so none of it was displayed.",
+  below_claim_floor: "Too little of it could be published as an analysis.",
   content_changed: "The underlying reporting changed while this analysis was being written.",
 };
 

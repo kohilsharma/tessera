@@ -175,7 +175,9 @@ describe("Story detail — the analysis", () => {
 
     const stated = await screen.findByRole("alert");
     expect(stated).toHaveTextContent(/unavailable/i);
-    expect(stated).toHaveTextContent(/not in this Story's evidence/);
+    // A single untraceable claim is dropped rather than fatal (#54), so this state is
+    // the harder one: too little survived to publish as an analysis at all.
+    expect(stated).toHaveTextContent(/traced back to this Story's evidence/);
     expect(screen.queryByText("Where the reporting agrees")).not.toBeInTheDocument();
     // A failure is recoverable by asking again, so the command stays.
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();

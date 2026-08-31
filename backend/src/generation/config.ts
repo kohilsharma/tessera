@@ -9,6 +9,41 @@ import type { UserRole } from "../entities/User";
 export const MAX_EVIDENCE_ARTICLES = 10;
 export const MAX_ARTICLES_PER_PUBLISHER = 2;
 
+// ADR-0027's wire-copy floor. Ingestion keys duplicate detection on title +
+// *publisher* + date, so one wire report republished by five outlets is five Articles
+// by design — and they cluster together trivially, sit closest to a centroid they
+// themselves define, and pass the ≤2-per-publisher cap five times over. Above this
+// cosine similarity to an already-selected member a candidate is the same report under
+// another masthead, so it is skipped and `distinctPublisherCount` goes on counting
+// independent reporting, which is what the minimum below assumes it counts.
+//
+// High, and not an env knob: this is a statement about identical text, not
+// calibration. Independent reporting on one event lands well below it; wire copy
+// lands just under 1.
+export const NEAR_DUPLICATE_SIMILARITY = 0.97;
+
+// v3 §16.2's "minimum 2 distinct Publishers for comparative synthesis". Checked
+// after the collapse above, and before anything is frozen or paid for: an analysis
+// of how outlets compare needs two outlets.
+export const MIN_DISTINCT_PUBLISHERS = 2;
+
+// ADR-0027's floor under partial acceptance. Dropping an invalid claim keeps the
+// invariant ("no *displayed* claim without a valid citation") without throwing away
+// four good claims for one bad one — and this is what stops that degrading into "we
+// showed whatever survived".
+export const MIN_SURVIVING_CLAIMS = 2;
+
+// Repair, not escalation (ADR-0027): two more attempts, each re-prompting with the
+// specific validation error, then a stated unavailable state. There is no stronger
+// model to climb to — ADR-0025 found no dependable one on a free tier — so a ladder
+// would be a cost path for a capability we do not have.
+export const MAX_REPAIR_ATTEMPTS = 2;
+
+// A repair needs enough of the reader's remaining budget to actually answer in. Below
+// this, asking again would abort mid-flight and report a timeout in place of the
+// validation failure that is the true story of the run.
+export const MIN_REPAIR_BUDGET_MS = 5_000;
+
 // ADR-0027's ~1500-character excerpt. Long enough to carry a lede and its
 // qualifications, short enough that ten of them fit a cheap model's context.
 export const EXCERPT_CHARS = 1500;
@@ -16,10 +51,12 @@ export const EXCERPT_CHARS = 1500;
 // ADR-0027: a versioned code constant, recorded on every run, and the third part of
 // the reuse key — so bumping it invalidates every cached analysis by design. Bump
 // it whenever prompt.ts changes what it asks for.
-export const PROMPT_VERSION = "2026-09-01";
+export const PROMPT_VERSION = "2026-09-02";
 
-// The whole call including retries. Generation is synchronous, so this is also how
-// long a reader's request can hang before it is answered with a stated failure.
+// The whole request's budget for model calls, repairs included — not per attempt.
+// Generation is synchronous, so this is how long a reader's request can hang before
+// it is answered with a stated failure, and three attempts at 60 seconds each would
+// make that promise a lie.
 export const SYNTHESIS_TIMEOUT_MS = 60_000;
 
 // ADR-0027: the Lens is derived from the caller's role, not chosen by them — a

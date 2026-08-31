@@ -29,8 +29,13 @@ export const GENERATION_FAILURE_CODES = [
   // It answered with JSON that is not the claim contract.
   "schema_violation",
   // The contract held but a claim cited nothing, or cited an evidence id that is
-  // not in the frozen set. This is ADR-0002's invariant refusing to be displayed.
+  // not in the frozen set, or said something the evidence does not license — and
+  // after dropping those, too little survived to publish. This is ADR-0002's
+  // invariant refusing to be displayed.
   "invalid_citations",
+  // Nothing was wrong with what the model returned; there was just too little of
+  // it — fewer than two claims, or none they agree on (ADR-0027's floor).
+  "below_claim_floor",
   // An Article's analysis text changed between freezing and persisting, so the
   // claims describe text this run no longer holds (v3 §16.5).
   "content_changed",
@@ -47,6 +52,12 @@ export type GenerationValidationResult = {
   // Evidence ids the model cited that were never in the frozen set — the direct
   // measure of "how often does it cite evidence that does not exist".
   unknownEvidenceIds: string[];
+  // How many repair attempts this run needed (ADR-0027, #54). Zero means the first
+  // answer was publishable; the cap means the last one still was not.
+  repairAttempts: number;
+  // Why each rejected claim was dropped, from the attempt that was persisted. A
+  // dropped claim is not a failed run under partial acceptance, so this is the only
+  // record that it was ever returned.
   issues: { claimIndex: number; code: string; detail?: string }[];
 };
 

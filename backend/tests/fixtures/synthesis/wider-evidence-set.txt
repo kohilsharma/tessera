@@ -1,0 +1,32 @@
+{
+  "claims": [
+    {
+      "text": "The company stated that its pilot line will reach volume output in 2027.",
+      "claim_type": "consensus",
+      "citations": [
+        "A1"
+      ]
+    },
+    {
+      "text": "Officials declined to specify when the subsidy decision will be announced.",
+      "claim_type": "source_specific",
+      "citations": [
+        "A2"
+      ]
+    },
+    {
+      "text": "The plant plans to add 400 roles prior to the pilot line reaching volume production.",
+      "claim_type": "investor_implication",
+      "citations": [
+        "A3"
+      ]
+    },
+    {
+      "text": "Two officials stated that the subsidy review has progressed to the second stage.",
+      "claim_type": "source_specific",
+      "citations": [
+        "A4"
+      ]
+    }
+  ]
+}

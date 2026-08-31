@@ -1,5 +1,7 @@
 import "reflect-metadata";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import bcrypt from "bcryptjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
@@ -12,7 +14,13 @@ import { Article, type AnalysisTextMode, type StoryAssignmentStatus } from "../s
 import { Publisher, type TermsClass } from "../src/entities/Publisher";
 import { Story } from "../src/entities/Story";
 import { User, type UserRole } from "../src/entities/User";
-import { EXCERPT_CHARS, MAX_ARTICLES_PER_PUBLISHER, MAX_EVIDENCE_ARTICLES, PROMPT_VERSION } from "../src/generation/config";
+import {
+  EXCERPT_CHARS,
+  MAX_ARTICLES_PER_PUBLISHER,
+  MAX_EVIDENCE_ARTICLES,
+  MAX_REPAIR_ATTEMPTS,
+  PROMPT_VERSION,
+} from "../src/generation/config";
 import { MockSynthesisProvider } from "../src/synthesis/MockSynthesisProvider";
 import type { SynthesisProvider, SynthesisRequest } from "../src/synthesis";
 import { setupTestDb } from "./setupTestDb";
@@ -61,15 +69,44 @@ const consensus = (citations: string[], text = "Every outlet reports the same pi
   claim_type: "consensus",
   citations,
 });
+const sourceSpecific = (citations: string[], text = "Only one outlet names the subsidy deadline.") => ({
+  text,
+  claim_type: "source_specific",
+  citations,
+});
+// The smallest answer that clears ADR-0027's floor: two surviving claims, one of them
+// consensus. Anything thinner is a failed run now, however valid its citations (#54).
+const publishable = (citations: string[] = ["A1", "A2"]) =>
+  claimsAnswer(consensus(citations), sourceSpecific([citations[0]]));
+// A rejected answer is re-prompted twice before its run fails (ADR-0027), so a test
+// about a refusal has to hand the provider the same bad answer three times.
+const insisting = (answer: string) => answering(answer, answer, answer);
 
 // Vectors are the fixture, exactly as they are in tests/clustering.test.ts: an axis
 // vector per plane, so "this Article is about something else" is a statement about
 // geometry rather than a hope about a real model.
+//
+// Two Articles given the same plane are byte-identical vectors, which is #54's wire
+// copy: one report under two mastheads. Independent reporting on one event is *close*
+// and not identical, which is what `distinctVector` is for and what every Article in
+// this suite gets unless a test is about syndication.
 function axisVector(plane: number): number[] {
   const vector = new Array<number>(EMBEDDING_DIMENSIONS).fill(0);
   vector[plane] = 1;
   return vector;
 }
+
+function distinctVector(plane: number, seed: number): number[] {
+  const vector = axisVector(plane);
+  // A third off the axis puts two of these at cosine ≈ 0.89, and either of them against
+  // the bare axis at ≈ 0.94 — inside any plausible clustering threshold, outside
+  // NEAR_DUPLICATE_SIMILARITY on both counts.
+  vector[EMBEDDING_DIMENSIONS - 1 - (seed % 512)] = 0.35;
+  return vector;
+}
+
+const fixture = (name: string) =>
+  readFileSync(join(__dirname, "fixtures", "synthesis", `${name}.txt`), "utf-8");
 
 let nextArticle = 0;
 
@@ -97,7 +134,7 @@ async function createArticle(fields: {
   mode?: AnalysisTextMode;
   assignmentStatus?: StoryAssignmentStatus;
   publishedAt?: Date;
-  vector?: number[];
+  vector?: number[] | null;
 }): Promise<Article> {
   nextArticle += 1;
   const article = await AppDataSource.getRepository(Article).save({
@@ -111,10 +148,14 @@ async function createArticle(fields: {
     analysisTextMode: fields.mode ?? "manual_fixture",
     publishedAt: fields.publishedAt ?? new Date("2026-01-04T00:00:00Z"),
   });
-  await AppDataSource.query(`UPDATE "articles" SET "embedding" = $1::vector WHERE "id" = $2`, [
-    toVectorLiteral(fields.vector ?? axisVector(0)),
-    article.id,
-  ]);
+  // `vector: null` leaves the column NULL, which is what enrichment does when it writes
+  // new text: the vector is stale, so it is cleared until the next clustering run.
+  if (fields.vector !== null) {
+    await AppDataSource.query(`UPDATE "articles" SET "embedding" = $1::vector WHERE "id" = $2`, [
+      toVectorLiteral(fields.vector ?? distinctVector(0, nextArticle)),
+      article.id,
+    ]);
+  }
   return article;
 }
 
@@ -136,7 +177,9 @@ function requestAnalysis(storyId: string, token: string, body?: Record<string, u
 }
 
 // A Story two Publishers reported, which is the shape everything below starts from.
-async function twoPublisherStory(): Promise<{ story: Story; first: Article; second: Article }> {
+// The rung is a parameter because #54's wording rule turns on it: `manual_fixture` is
+// our own complete seed text, and the constrained wording is for everything below.
+async function twoPublisherStory(mode?: AnalysisTextMode): Promise<{ story: Story; first: Article; second: Article }> {
   const story = await createStory();
   const one = await createPublisher(`one-${(nextArticle += 1)}.example`);
   const two = await createPublisher(`two-${(nextArticle += 1)}.example`);
@@ -144,12 +187,14 @@ async function twoPublisherStory(): Promise<{ story: Story; first: Article; seco
     storyId: story.id,
     publisherId: one.id,
     title: "Pilot line targets 2027 output",
+    mode,
     publishedAt: new Date("2026-01-02T00:00:00Z"),
   });
   const second = await createArticle({
     storyId: story.id,
     publisherId: two.id,
     title: "Subsidy timing still unresolved",
+    mode,
     publishedAt: new Date("2026-01-08T00:00:00Z"),
   });
   return { story, first, second };
@@ -246,7 +291,8 @@ describe("evidence selection", () => {
     }
     await createArticle({ storyId: story.id, publisherId: core.id, title: "core", vector: axisVector(0) });
     // Both ends of the coverage window point away from the centroid, so ranking alone
-    // would never reach them.
+    // would never reach them — and away from each other, because two ends carrying the
+    // same text are one report and the second copy is collapsed (#54).
     const earliest = await createArticle({
       storyId: story.id,
       publisherId: edges.id,
@@ -259,7 +305,7 @@ describe("evidence selection", () => {
       publisherId: edges.id,
       title: "last word on it",
       publishedAt: new Date("2026-01-20T00:00:00Z"),
-      vector: axisVector(9),
+      vector: axisVector(8),
     });
 
     const res = await requestAnalysis(story.id, await tokenFor("student"));
@@ -404,7 +450,7 @@ describe("evidence selection", () => {
           `UPDATE "publishers" SET "name" = 'Changed Publisher', "domain" = 'changed.example' WHERE "id" = $1`,
           [publisher.id],
         );
-        return claimsAnswer(consensus(["A1", "A2"]));
+        return publishable(["A1", "A2"]);
       },
     };
 
@@ -524,47 +570,83 @@ describe("citation validation", () => {
     expect(runs[0].validationResult).toMatchObject({ claimsReturned: 2, claimsAccepted: 2, claimsRejected: 0 });
   });
 
-  it("refuses an answer whose citation names evidence outside the frozen set", async () => {
+  it("drops a claim whose citation names evidence outside the frozen set", async () => {
     const { story } = await twoPublisherStory();
-    answering(claimsAnswer(consensus(["A1"]), consensus(["A9"], "A ninth source that was never frozen.")));
+    // Two good claims and one citing a ninth source that was never frozen: under
+    // partial acceptance the bad claim costs itself, and the analysis stands (#54).
+    insisting(
+      claimsAnswer(
+        consensus(["A1", "A2"]),
+        sourceSpecific(["A2"]),
+        consensus(["A9"], "A ninth source that was never frozen."),
+      ),
+    );
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
+    expect(res.body.status).toBe("completed");
+    expect(res.body.claims).toHaveLength(2);
+    expect(res.body.claims.map((claim: { citations: string[] }) => claim.citations).flat()).not.toContain("A9");
+    // The drop is recorded, not silent: this is the per-run record of a model citing
+    // evidence that does not exist (ADR-0027), and the generation pass-rate an eval
+    // harness reads.
+    const runs: { validationResult: { unknownEvidenceIds: string[]; issues: { code: string }[] } }[] =
+      await AppDataSource.query(`SELECT "validationResult" FROM "generation_runs"`);
+    expect(runs[0].validationResult.unknownEvidenceIds).toEqual(["A9"]);
+    expect(runs[0].validationResult.issues).toEqual([{ claimIndex: 2, code: "unknown_evidence_id", detail: "A9" }]);
+    // A repair is for an answer that cannot be published. This one could be.
+    expect(synth.requests).toHaveLength(1);
+  });
+
+  it("fails the run when too little survives the drop to publish", async () => {
+    const { story } = await twoPublisherStory();
+    insisting(claimsAnswer(consensus(["A1"]), consensus(["A9"], "A ninth source that was never frozen.")));
 
     const res = await requestAnalysis(story.id, await tokenFor("student"));
 
     expect(res.body.status).toBe("failed");
     expect(res.body.failureCode).toBe("invalid_citations");
     expect(res.body.claims).toEqual([]);
-    // Nothing is displayed and nothing is kept, but the measurement is: this is the
-    // per-run record of a model citing evidence that does not exist (ADR-0027).
-    const runs: { validationResult: { unknownEvidenceIds: string[] } }[] = await AppDataSource.query(
-      `SELECT "validationResult" FROM "generation_runs"`,
-    );
-    expect(runs[0].validationResult.unknownEvidenceIds).toEqual(["A9"]);
     expect(await AppDataSource.query(`SELECT "id" FROM "analysis_claims"`)).toEqual([]);
   });
 
-  it("refuses a claim that cites nothing at all", async () => {
+  it("drops a claim that cites nothing at all", async () => {
     const { story } = await twoPublisherStory();
-    answering(claimsAnswer({ text: "Analysts expect consolidation.", claim_type: "consensus", citations: [] }));
+    insisting(
+      claimsAnswer(
+        consensus(["A1", "A2"]),
+        sourceSpecific(["A1"]),
+        { text: "Analysts expect consolidation.", claim_type: "consensus", citations: [] },
+      ),
+    );
 
     const res = await requestAnalysis(story.id, await tokenFor("student"));
 
-    expect(res.body.failureCode).toBe("invalid_citations");
-    expect(res.body.claims).toEqual([]);
+    expect(res.body.status).toBe("completed");
+    expect(res.body.claims).toHaveLength(2);
+    const runs: { validationResult: { issues: { code: string }[] } }[] = await AppDataSource.query(
+      `SELECT "validationResult" FROM "generation_runs"`,
+    );
+    expect(runs[0].validationResult.issues).toEqual([{ claimIndex: 2, code: "claim_without_citation" }]);
   });
 
   it("fails the whole run on output that is not the contract", async () => {
     const { story } = await twoPublisherStory();
     const token = await tokenFor("student");
 
-    answering("I'm sorry, I can't help with that request.");
+    insisting("I'm sorry, I can't help with that request.");
     expect((await requestAnalysis(story.id, token)).body.failureCode).toBe("unparseable_output");
 
-    answering(JSON.stringify({ analysis: "the story so far" }));
+    insisting(JSON.stringify({ analysis: "the story so far" }));
     expect((await requestAnalysis(story.id, token)).body.failureCode).toBe("schema_violation");
 
     // The other Lens is off-contract, not a claim to drop: a run carries exactly one.
-    answering(
-      claimsAnswer({ text: "Margins may compress.", claim_type: "investor_implication", citations: ["A1"] }),
+    insisting(
+      claimsAnswer(consensus(["A1", "A2"]), {
+        text: "Margins may compress.",
+        claim_type: "investor_implication",
+        citations: ["A1"],
+      }),
     );
     expect((await requestAnalysis(story.id, token)).body.failureCode).toBe("schema_violation");
 
@@ -597,7 +679,7 @@ describe("citation validation", () => {
           first.id,
           "a fuller body, extracted after the freeze",
         ]);
-        return claimsAnswer(consensus(["A1", "A2"]));
+        return publishable(["A1", "A2"]);
       },
     };
 
@@ -619,7 +701,7 @@ describe("citation validation", () => {
                   "storyAssignmentScore" = NULL WHERE "id" = $1`,
           [first.id],
         );
-        return claimsAnswer(consensus(["A1", "A2"]));
+        return publishable(["A1", "A2"]);
       },
     };
 
@@ -638,7 +720,7 @@ describe("citation validation", () => {
         publishedAt: new Date(Date.UTC(2026, 0, 4, index)),
       });
     }
-    answering(claimsAnswer(consensus(["A10", "A2"])));
+    answering(claimsAnswer(consensus(["A10", "A2"]), sourceSpecific(["A1"])));
 
     const res = await requestAnalysis(story.id, await tokenFor("student"));
 
@@ -652,7 +734,7 @@ describe("reuse", () => {
   it("returns the existing run rather than calling the model again", async () => {
     const { story } = await twoPublisherStory();
     const token = await tokenFor("student");
-    answering(claimsAnswer(consensus(["A1", "A2"])));
+    answering(publishable(["A1", "A2"]));
 
     const first = await requestAnalysis(story.id, token);
     const again = await requestAnalysis(story.id, token);
@@ -676,7 +758,7 @@ describe("reuse", () => {
       complete: async () => {
         markEntered();
         await blocked;
-        return claimsAnswer(consensus(["A1", "A2"]));
+        return publishable(["A1", "A2"]);
       },
     };
 
@@ -723,7 +805,7 @@ describe("reuse", () => {
 
   it("is per Lens, so an Investor does not read the Student's analysis", async () => {
     const { story } = await twoPublisherStory();
-    answering(claimsAnswer(consensus(["A1"])), claimsAnswer(consensus(["A2"])));
+    answering(publishable(["A1", "A2"]), publishable(["A2", "A1"]));
 
     const student = await requestAnalysis(story.id, await tokenFor("student"));
     const investor = await requestAnalysis(story.id, await tokenFor("investor"));
@@ -735,7 +817,7 @@ describe("reuse", () => {
   it("does not survive the reporting changing underneath it", async () => {
     const { story, first } = await twoPublisherStory();
     const token = await tokenFor("student");
-    answering(claimsAnswer(consensus(["A1", "A2"])), claimsAnswer(consensus(["A1", "A2"])));
+    answering(publishable(["A1", "A2"]), publishable(["A1", "A2"]));
 
     const before = await requestAnalysis(story.id, token);
     // Enrichment rewriting a body in place is exactly what a timestamp comparison
@@ -754,7 +836,7 @@ describe("reuse", () => {
   it("does not reuse a run when a different Article has identical text", async () => {
     const { story, first } = await twoPublisherStory();
     const token = await tokenFor("student");
-    answering(claimsAnswer(consensus(["A1", "A2"])), claimsAnswer(consensus(["A1", "A2"])));
+    answering(publishable(["A1", "A2"]), publishable(["A1", "A2"]));
 
     const before = await requestAnalysis(story.id, token);
     await AppDataSource.query(
@@ -780,7 +862,7 @@ describe("reuse", () => {
   it("does not reuse a legacy run that has no provenance snapshot", async () => {
     const { story } = await twoPublisherStory();
     const token = await tokenFor("student");
-    answering(claimsAnswer(consensus(["A1", "A2"])), claimsAnswer(consensus(["A1", "A2"])));
+    answering(publishable(["A1", "A2"]), publishable(["A1", "A2"]));
 
     const legacy = await requestAnalysis(story.id, token);
     await AppDataSource.query(
@@ -802,20 +884,20 @@ describe("reuse", () => {
   it("does not cache a failure", async () => {
     const { story } = await twoPublisherStory();
     const token = await tokenFor("student");
-    answering("not json at all", claimsAnswer(consensus(["A1"])));
+    answering("not json at all", "not json at all", "not json at all", publishable(["A1", "A2"]));
 
     const failed = await requestAnalysis(story.id, token);
     const retried = await requestAnalysis(story.id, token);
 
     expect(failed.body.status).toBe("failed");
     expect(retried.body.status).toBe("completed");
-    expect(synth.requests).toHaveLength(2);
+    expect(synth.requests).toHaveLength(4);
   });
 
   it("does not outlive the provider that wrote it", async () => {
     const { story } = await twoPublisherStory();
     const token = await tokenFor("student");
-    answering(claimsAnswer(consensus(["A1"])), claimsAnswer(consensus(["A2"])));
+    answering(publishable(["A1", "A2"]), publishable(["A2", "A1"]));
 
     const withMock = await requestAnalysis(story.id, token);
     // The trap this closes: a demo with no key persists Mock-written claims as a
@@ -846,7 +928,7 @@ describe("reuse", () => {
   it("does not reuse across provider origins that share a model id", async () => {
     const { story } = await twoPublisherStory();
     const token = await tokenFor("student");
-    answering(claimsAnswer(consensus(["A1"])), claimsAnswer(consensus(["A2"])));
+    answering(publishable(["A1", "A2"]), publishable(["A2", "A1"]));
     process.env.SYNTHESIS_PROVIDER = "openai";
     process.env.SYNTHESIS_MODEL = "shared-model";
     process.env.SYNTHESIS_API_BASE = "https://first-provider.example/v1";
@@ -937,5 +1019,451 @@ describe("the no-key path and rights", () => {
          JOIN "articles" a ON a."id" = esa."articleId" WHERE a."title" = 'held'`,
     );
     expect(frozen[0].includedExcerptSnapshot).toContain("held body text");
+  });
+});
+
+
+// ADR-0027's wire-copy collapse. Ingestion keys duplicates on title + *publisher* +
+// date, so one wire report run by five outlets is five Articles by design — and the
+// count that makes a consensus claim mean anything is publishers, not mastheads.
+describe("wire copy", () => {
+  it("skips the same report under another masthead and leaves the Article where it is", async () => {
+    const story = await createStory();
+    const wire = axisVector(3);
+    const origin = await createPublisher("origin.example");
+    const reprint = await createPublisher("reprint.example");
+    const own = await createPublisher("own-desk.example");
+    const filed = await createArticle({
+      storyId: story.id,
+      publisherId: origin.id,
+      title: "Pilot line targets 2027 output",
+      vector: wire,
+      publishedAt: new Date("2026-01-02T00:00:00Z"),
+    });
+    const republished = await createArticle({
+      storyId: story.id,
+      publisherId: reprint.id,
+      title: "Pilot line targets 2027 output",
+      vector: wire,
+      publishedAt: new Date("2026-01-03T00:00:00Z"),
+    });
+    const reported = await createArticle({
+      storyId: story.id,
+      publisherId: own.id,
+      title: "Subsidy timing still unresolved",
+      vector: distinctVector(3, 77),
+      publishedAt: new Date("2026-01-05T00:00:00Z"),
+    });
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
+    const ids = res.body.evidence.map((row: { articleId: string }) => row.articleId);
+    expect(ids.sort()).toEqual([filed.id, reported.id].sort());
+    expect(ids).not.toContain(republished.id);
+    // So the count means independent reporting: two newsrooms, not three mastheads.
+    expect(res.body.distinctPublisherCount).toBe(2);
+    // The row stays — syndication reach is signal, and this is a decision about one
+    // EvidenceSet, not about the corpus.
+    const held: { storyAssignmentStatus: string }[] = await AppDataSource.query(
+      `SELECT "storyAssignmentStatus" FROM "articles" WHERE "id" = $1`,
+      [republished.id],
+    );
+    expect(held).toEqual([{ storyAssignmentStatus: "auto_accepted" }]);
+  });
+
+  it("keeps reporting that is close without being the same report", async () => {
+    const story = await createStory();
+    const one = await createPublisher("close-one.example");
+    const two = await createPublisher("close-two.example");
+    // Cosine ≈ 0.94: the same event covered twice, which is what a Story is.
+    await createArticle({ storyId: story.id, publisherId: one.id, title: "one", vector: axisVector(5) });
+    await createArticle({
+      storyId: story.id,
+      publisherId: two.id,
+      title: "two",
+      vector: distinctVector(5, 11),
+      publishedAt: new Date("2026-01-06T00:00:00Z"),
+    });
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
+    expect(res.body.evidence).toHaveLength(2);
+    expect(res.body.distinctPublisherCount).toBe(2);
+  });
+
+  it("cannot see a copy whose vector enrichment has just cleared", async () => {
+    const story = await createStory();
+    const origin = await createPublisher("cleared-origin.example");
+    const reprint = await createPublisher("cleared-reprint.example");
+    await createArticle({
+      storyId: story.id,
+      publisherId: origin.id,
+      title: "Pilot line targets 2027 output",
+      vector: axisVector(6),
+      publishedAt: new Date("2026-01-02T00:00:00Z"),
+    });
+    const unembedded = await createArticle({
+      storyId: story.id,
+      publisherId: reprint.id,
+      title: "Pilot line targets 2027 output",
+      vector: null,
+      publishedAt: new Date("2026-01-03T00:00:00Z"),
+    });
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
+    // The collapse is a vector comparison, so a member with no vector is nobody's
+    // duplicate and this set counts two publishers for one report. Fails open on
+    // purpose — dropping unembedded members would shrink a set every time enrichment
+    // touched it — and it lasts until the next clustering run re-embeds the row.
+    expect(res.body.evidence.map((row: { articleId: string }) => row.articleId)).toContain(unembedded.id);
+    expect(res.body.distinctPublisherCount).toBe(2);
+  });
+
+  it("refuses a Story that is one wire report under five mastheads", async () => {
+    const story = await createStory();
+    const wire = axisVector(4);
+    for (let index = 0; index < 5; index += 1) {
+      await createArticle({
+        storyId: story.id,
+        publisherId: await createPublisher(`masthead-${index}.example`).then((p) => p.id),
+        title: "Pilot line targets 2027 output",
+        vector: wire,
+        publishedAt: new Date(Date.UTC(2026, 0, 4, index)),
+      });
+    }
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatch(/two publishers/i);
+    // Refused before anything is frozen or paid for.
+    expect(synth.requests).toHaveLength(0);
+    expect(await AppDataSource.query(`SELECT "id" FROM "evidence_sets"`)).toEqual([]);
+    expect(await AppDataSource.query(`SELECT "id" FROM "generation_runs"`)).toEqual([]);
+  });
+
+  it("refuses a Story only one publisher reported", async () => {
+    const story = await createStory();
+    const alone = await createPublisher("alone.example");
+    await createArticle({ storyId: story.id, publisherId: alone.id, title: "first take" });
+    await createArticle({
+      storyId: story.id,
+      publisherId: alone.id,
+      title: "follow-up",
+      publishedAt: new Date("2026-01-07T00:00:00Z"),
+    });
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
+    expect(res.status).toBe(422);
+    expect(synth.requests).toHaveLength(0);
+  });
+});
+
+// ADR-0024's ladder reaching the prompt (v3 §16.6). An excerpt is not the report, so
+// what may be said about absence changes with the rung — and the phrase check under the
+// prompt is what makes that more than a request.
+describe("the mixed-rung wording rule", () => {
+  it("records the weakest rung and carries the constrained wording below full text", async () => {
+    const story = await createStory();
+    const full = await createPublisher("full.example");
+    const feed = await createPublisher("feed.example");
+    await createArticle({ storyId: story.id, publisherId: full.id, title: "full report", mode: "licensed_full_text" });
+    await createArticle({
+      storyId: story.id,
+      publisherId: feed.id,
+      title: "feed item",
+      mode: "feed_excerpt",
+      publishedAt: new Date("2026-01-06T00:00:00Z"),
+    });
+
+    await requestAnalysis(story.id, await tokenFor("student"));
+
+    const sets: { dataMode: string }[] = await AppDataSource.query(`SELECT "dataMode" FROM "evidence_sets"`);
+    expect(sets).toEqual([{ dataMode: "feed_excerpt" }]);
+    expect(synth.requests[0].prompt).toContain("excerpt of each report");
+    expect(synth.requests[0].prompt).toContain("not found in the available excerpt");
+  });
+
+  it("says nothing about excerpts when the whole permitted report was analysed", async () => {
+    const { story } = await twoPublisherStory();
+
+    await requestAnalysis(story.id, await tokenFor("student"));
+
+    // A seed fixture is our own synthetic body, complete by construction.
+    const sets: { dataMode: string }[] = await AppDataSource.query(`SELECT "dataMode" FROM "evidence_sets"`);
+    expect(sets).toEqual([{ dataMode: "manual_fixture" }]);
+    expect(synth.requests[0].prompt).not.toContain("excerpt of each report");
+  });
+
+  it("drops a claim of omission when all it read was an excerpt", async () => {
+    const { story } = await twoPublisherStory("feed_excerpt");
+    insisting(fixture("omission-language"));
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
+    expect(res.body.status).toBe("completed");
+    expect(res.body.claims).toHaveLength(2);
+    expect(res.body.claims.some((claim: { text: string }) => /omitted/i.test(claim.text))).toBe(false);
+    const runs: { validationResult: { issues: { claimIndex: number; code: string }[] } }[] =
+      await AppDataSource.query(`SELECT "validationResult" FROM "generation_runs"`);
+    expect(runs[0].validationResult.issues).toEqual([{ claimIndex: 2, code: "omission_language" }]);
+  });
+
+  it("allows a claim of omission over the whole permitted report", async () => {
+    const { story } = await twoPublisherStory("licensed_full_text");
+    answering(fixture("omission-language"));
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
+    expect(res.body.status).toBe("completed");
+    expect(res.body.claims).toHaveLength(3);
+    expect(res.body.claims.some((claim: { text: string }) => /omitted/i.test(claim.text))).toBe(true);
+  });
+});
+
+// Every fixture below is a transcript: the configured cheap model's own answer to a
+// prompt built the way generation builds one, captured once and replayed offline. One
+// per failure mode, which is what makes the contract testable with no key and no
+// network (ADR-0027).
+describe("captured model failures", () => {
+  it("tolerates the fenced JSON a cheap model actually returns", async () => {
+    const { story } = await twoPublisherStory();
+    answering(fixture("fenced-json"));
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
+    expect(res.body.status).toBe("completed");
+    expect(res.body.claims).toHaveLength(3);
+  });
+
+  it("fails an answer the token budget cut off, because there is nothing to keep", async () => {
+    const { story } = await twoPublisherStory();
+    insisting(fixture("truncated-answer"));
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
+    expect(res.body.failureCode).toBe("unparseable_output");
+    expect(res.body.claims).toEqual([]);
+  });
+
+  it("fails an answer of the wrong shape structurally", async () => {
+    const { story } = await twoPublisherStory();
+    insisting(fixture("wrong-shape"));
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
+    expect(res.body.failureCode).toBe("schema_violation");
+  });
+
+  it("drops investment advice and a price target, whatever the prompt asked for", async () => {
+    const { story } = await twoPublisherStory();
+    insisting(fixture("investment-advice"));
+
+    const res = await requestAnalysis(story.id, await tokenFor("investor"));
+
+    expect(res.body.status).toBe("completed");
+    expect(res.body.claims).toHaveLength(2);
+    expect(res.body.claims.some((claim: { text: string }) => /price target/i.test(claim.text))).toBe(false);
+    const runs: { validationResult: { issues: { code: string }[] } }[] = await AppDataSource.query(
+      `SELECT "validationResult" FROM "generation_runs"`,
+    );
+    expect(runs[0].validationResult.issues).toEqual([{ claimIndex: 2, code: "prohibited_investor_language" }]);
+  });
+
+  it("drops a contradiction only one publisher is behind", async () => {
+    const { story } = await twoPublisherStory();
+    insisting(fixture("unsupported-contradiction"));
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
+    expect(res.body.status).toBe("completed");
+    expect(res.body.claims.map((claim: { claimType: string }) => claim.claimType)).toEqual([
+      "consensus",
+      "source_specific",
+    ]);
+    const runs: { validationResult: { issues: { code: string }[] } }[] = await AppDataSource.query(
+      `SELECT "validationResult" FROM "generation_runs"`,
+    );
+    expect(runs[0].validationResult.issues).toEqual([{ claimIndex: 2, code: "unsupported_contradiction" }]);
+  });
+
+  it("keeps a contradiction two publishers are behind", async () => {
+    const { story } = await twoPublisherStory();
+    answering(
+      claimsAnswer(consensus(["A1", "A2"]), {
+        text: "One outlet reports the timetable as unchanged; the other reports it as under review.",
+        claim_type: "contradiction",
+        citations: ["A1", "A2"],
+      }),
+    );
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
+    expect(res.body.status).toBe("completed");
+    expect(res.body.claims).toHaveLength(2);
+    expect(res.body.claims[1].citations).toEqual(["A1", "A2"]);
+  });
+
+  it("drops the claims of a wider set and keeps the rest", async () => {
+    const { story } = await twoPublisherStory();
+    // Captured over four evidence blocks and replayed against a set of two, which is
+    // what validation sees whenever a model names an id that was never frozen.
+    insisting(fixture("wider-evidence-set"));
+
+    const res = await requestAnalysis(story.id, await tokenFor("investor"));
+
+    expect(res.body.status).toBe("completed");
+    expect(res.body.claims).toHaveLength(2);
+    const runs: { validationResult: { claimsReturned: number; claimsAccepted: number; unknownEvidenceIds: string[] } }[] =
+      await AppDataSource.query(`SELECT "validationResult" FROM "generation_runs"`);
+    expect(runs[0].validationResult).toMatchObject({ claimsReturned: 4, claimsAccepted: 2, claimsRejected: 2 });
+    expect(runs[0].validationResult.unknownEvidenceIds).toEqual(["A3", "A4"]);
+  });
+
+  it("fails a run whose answer is too thin to publish, with nothing wrong in it", async () => {
+    const { story } = await twoPublisherStory();
+    insisting(fixture("thin-answer"));
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
+    // One valid claim, no consensus among them: nothing to reject and nothing to show,
+    // so the reader gets a stated unavailable state rather than a partial analysis.
+    expect(res.body.status).toBe("failed");
+    expect(res.body.failureCode).toBe("below_claim_floor");
+    expect(res.body.claims).toEqual([]);
+    const runs: { validationResult: { claimsAccepted: number; issues: unknown[] }; failureMessage: string }[] =
+      await AppDataSource.query(`SELECT "validationResult", "failureMessage" FROM "generation_runs"`);
+    expect(runs[0].validationResult).toMatchObject({ claimsReturned: 1, claimsAccepted: 1, claimsRejected: 0 });
+    expect(runs[0].validationResult.issues).toEqual([]);
+    expect(runs[0].failureMessage).toMatch(/consensus/i);
+  });
+});
+
+describe("repair", () => {
+  it("re-prompts with the specific validation error and accepts the correction", async () => {
+    const { story } = await twoPublisherStory();
+    answering(fixture("thin-answer"), publishable(["A1", "A2"]));
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
+    expect(res.body.status).toBe("completed");
+    expect(synth.requests).toHaveLength(2);
+    // The second ask names what was wrong and shows what was rejected, because an error
+    // that points at a claim by position needs the positions to be visible.
+    expect(synth.requests[1].prompt).toContain("Your previous answer was rejected");
+    expect(synth.requests[1].prompt).toMatch(/no consensus claim survived/i);
+    expect(synth.requests[1].prompt).toContain("The company declined to comment on hiring");
+    // Same evidence throughout: repairing is asking again, not selecting again.
+    expect(await AppDataSource.query(`SELECT "id" FROM "evidence_sets"`)).toHaveLength(1);
+    const runs: { validationResult: { repairAttempts: number } }[] = await AppDataSource.query(
+      `SELECT "validationResult" FROM "generation_runs"`,
+    );
+    expect(runs).toHaveLength(1);
+    expect(runs[0].validationResult.repairAttempts).toBe(1);
+  });
+
+  it("gives up after two repairs rather than asking forever", async () => {
+    const { story } = await twoPublisherStory();
+    insisting(fixture("thin-answer"));
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
+    expect(res.body.status).toBe("failed");
+    expect(synth.requests).toHaveLength(1 + MAX_REPAIR_ATTEMPTS);
+    const runs: { validationResult: { repairAttempts: number } }[] = await AppDataSource.query(
+      `SELECT "validationResult" FROM "generation_runs"`,
+    );
+    expect(runs[0].validationResult.repairAttempts).toBe(MAX_REPAIR_ATTEMPTS);
+  });
+
+  it("does not repair a provider that never answered", async () => {
+    const { story } = await twoPublisherStory();
+    answering(new Error("503 upstream unavailable"));
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
+    // There is no validation error to correct, so re-asking would just spend the
+    // reader's wait on the same silence.
+    expect(res.body.failureCode).toBe("provider_error");
+    expect(synth.requests).toHaveLength(1);
+  });
+
+  it("keeps the rejected answer on the row when a repair attempt never answers", async () => {
+    const { story } = await twoPublisherStory();
+    answering(fixture("thin-answer"), new Error("503 upstream unavailable"));
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
+    expect(res.body.failureCode).toBe("provider_error");
+    // The provider silence is the last thing that happened, not the only thing: the
+    // answer that provoked the repair, and what validation measured about it, are the
+    // record that a claim was returned and dropped at all (ADR-0027).
+    const runs: { rawResponse: string; validationResult: { claimsReturned: number } }[] =
+      await AppDataSource.query(`SELECT "rawResponse", "validationResult" FROM "generation_runs"`);
+    expect(runs[0].rawResponse).toContain("declined to comment on hiring");
+    expect(runs[0].validationResult).toMatchObject({ claimsReturned: 1, claimsAccepted: 1, repairAttempts: 0 });
+  });
+});
+
+// The two phrase checks are blunt by design and they *drop claims*, so what they leave
+// alone matters as much as what they catch.
+describe("the phrase checks", () => {
+  it("leaves ordinary reporting about the companies in the story alone", async () => {
+    const { story } = await twoPublisherStory("feed_excerpt");
+    answering(
+      claimsAnswer(
+        consensus(["A1", "A2"], "Both outlets report that the government must sell its remaining stake."),
+        sourceSpecific(["A2"], "One outlet reports the plant will buy the line outright."),
+      ),
+    );
+
+    const res = await requestAnalysis(story.id, await tokenFor("investor"));
+
+    // Reporting that an actor in the story will trade something is not advice to the
+    // reader, and the excerpt rung does not make it an omission claim either.
+    expect(res.body.status).toBe("completed");
+    expect(res.body.claims).toHaveLength(2);
+  });
+
+  it("catches a target the model phrased without the words price target", async () => {
+    const { story } = await twoPublisherStory();
+    insisting(
+      claimsAnswer(consensus(["A1", "A2"]), sourceSpecific(["A2"]), {
+        text: "The reporting implies fair value at $45, roughly 30% upside from here.",
+        claim_type: "investor_implication",
+        citations: ["A1"],
+      }),
+    );
+
+    const res = await requestAnalysis(story.id, await tokenFor("investor"));
+
+    expect(res.body.status).toBe("completed");
+    expect(res.body.claims).toHaveLength(2);
+    const runs: { validationResult: { issues: { code: string }[] } }[] = await AppDataSource.query(
+      `SELECT "validationResult" FROM "generation_runs"`,
+    );
+    expect(runs[0].validationResult.issues).toEqual([{ claimIndex: 2, code: "prohibited_investor_language" }]);
+  });
+
+  it("states a refusal that is nothing to do with citations as one", async () => {
+    const { story } = await twoPublisherStory("feed_excerpt");
+    // Every citation resolves; both claims are refused on rights grounds. Reporting that
+    // as a citation failure would misdescribe the run and the pass-rate read off it.
+    insisting(
+      claimsAnswer(
+        consensus(["A1", "A2"], "Northwind omitted the subsidy detail Harbour carried."),
+        sourceSpecific(["A2"], "Harbour omitted the hiring question entirely."),
+      ),
+    );
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
+    expect(res.body.failureCode).toBe("below_claim_floor");
+    const runs: { failureMessage: string }[] = await AppDataSource.query(
+      `SELECT "failureMessage" FROM "generation_runs"`,
+    );
+    expect(runs[0].failureMessage).toMatch(/omitted something/i);
   });
 });

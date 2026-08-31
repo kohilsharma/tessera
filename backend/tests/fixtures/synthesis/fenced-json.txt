@@ -1,0 +1,21 @@
+```json
+{
+  "claims": [
+    {
+      "text": "The company maintains its target for the pilot line to reach volume output in 2027.",
+      "claim_type": "consensus",
+      "citations": ["A1", "A2"]
+    },
+    {
+      "text": "Two people familiar with the plan stated that the subsidy application is still pending.",
+      "claim_type": "source_specific",
+      "citations": ["A1"]
+    },
+    {
+      "text": "Officials stated they would not say when the subsidy decision will land.",
+      "claim_type": "source_specific",
+      "citations": ["A2"]
+    }
+  ]
+}
+```

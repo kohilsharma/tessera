@@ -1,4 +1,5 @@
 import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
+import type { AnalysisTextMode } from "./Article";
 import { Story } from "./Story";
 
 // CONTEXT.md "EvidenceSet": the frozen, immutable list of Article snapshots one
@@ -33,10 +34,22 @@ export class EvidenceSet {
   articleCount!: number;
 
   // Counted at freeze time because it is a fact about this set, not about the
-  // Story: the ≤2-per-publisher bound (ADR-0010 §16.2) is what makes it meaningful,
-  // and #54's minimum-2 refusal and wire-copy collapse are what will read it.
+  // Story: the ≤2-per-publisher bound (ADR-0010 §16.2) and #54's wire-copy collapse
+  // are what make it meaningful, and the minimum-2 refusal is what reads it.
   @Column({ type: "integer" })
   distinctPublisherCount!: number;
+
+  // ADR-0027: the weakest Analysis Text Mode among this set's members, which is what
+  // decides whether the prompt carries v3 §16.6's constrained wording and whether an
+  // omission claim may stand at all (#54). Recorded on the set rather than derived at
+  // read time because it is a fact about what was analysed, and the members' modes
+  // move up underneath it.
+  //
+  // Nullable for the same reason the provenance snapshots are: sets frozen before #54
+  // never recorded one, and inventing it from today's Articles would be inventing
+  // history. Every set frozen from now on carries it.
+  @Column({ type: "varchar", nullable: true })
+  dataMode!: AnalysisTextMode | null;
 
   @CreateDateColumn({ type: "timestamptz" })
   createdAt!: Date;

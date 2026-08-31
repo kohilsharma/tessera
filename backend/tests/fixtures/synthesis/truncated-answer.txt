@@ -1,0 +1,5 @@
+{
+  "claims": [
+    {
+      "text": "The company stated that its pilot line will reach volume output in 2027.",
+      "claim_type": "consensus",

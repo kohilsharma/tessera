@@ -2,7 +2,7 @@ import type { EntityManager } from "typeorm";
 import { AppDataSource } from "../data-source";
 import { AnalysisClaim, type ClaimType } from "../entities/AnalysisClaim";
 import { ClaimEvidence } from "../entities/ClaimEvidence";
-import type { AnalysisTextMode } from "../entities/Article";
+import { carriesFullPermittedText, type AnalysisTextMode } from "../entities/Article";
 import {
   GenerationRun,
   type GenerationFailureCode,
@@ -12,15 +12,17 @@ import {
 import { mayServeText, type TermsClass } from "../entities/Publisher";
 import type { SelectionReason } from "../entities/EvidenceSetArticle";
 import type { SynthesisProvider } from "../synthesis";
-import { PROMPT_VERSION, SYNTHESIS_TIMEOUT_MS } from "./config";
+import { MAX_REPAIR_ATTEMPTS, MIN_DISTINCT_PUBLISHERS, MIN_REPAIR_BUDGET_MS, PROMPT_VERSION, SYNTHESIS_TIMEOUT_MS } from "./config";
 import {
+  distinctPublisherCount,
+  evidenceDataMode,
   freezeEvidence,
   frozenEvidenceChanged,
   evidenceContentHash,
   selectEvidence,
   type SelectedEvidence,
 } from "./evidence";
-import { analysisRequest } from "./prompt";
+import { analysisRequest, repairRequest } from "./prompt";
 import { validateAnalysis, type ParsedClaim } from "./validate";
 
 // The flagship, as one function: select evidence deterministically, freeze it, ask a
@@ -79,6 +81,10 @@ export type GenerationOutcome =
   // A Story with no accepted member carrying analysis text. Refused rather than
   // prompted over: there is nothing to cite, so nothing could be valid.
   | { status: "no_evidence" }
+  // v3 §16.2's minimum, refused for the same reason and at the same point: after the
+  // wire-copy collapse there is one newsroom here, and "how the outlets compared" is
+  // not a question one outlet can answer. Nothing is frozen and nothing is paid for.
+  | { status: "insufficient_publishers" }
   | { status: "produced" | "reused"; view: GenerationView };
 
 // ADR-0027's reuse key, whole: the Story, the Lens, the prompt version, the provider
@@ -178,6 +184,8 @@ async function generateOnce(
   const { storyId, lens, triggeredByUserId } = request;
   const selected = await selectEvidence(storyId);
   if (selected.length === 0) return { status: "no_evidence" };
+  if (distinctPublisherCount(selected) < MIN_DISTINCT_PUBLISHERS) return { status: "insufficient_publishers" };
+  const dataMode = evidenceDataMode(selected);
 
   // Reuse is checked before anything is written: an EvidenceSet is only frozen for a
   // run that is actually going to happen.
@@ -210,50 +218,87 @@ async function generateOnce(
     validationResult: null,
   };
 
-  let raw: string;
-  try {
-    raw = await deps.synth.complete({ ...analysisRequest(selected, lens), timeoutMs: SYNTHESIS_TIMEOUT_MS });
-  } catch (err) {
-    // Includes the timeout: an AbortError arrives here like any other. The message is
-    // recorded for an Admin and never returned — it can name hosts and models.
-    const run = await insertRun(AppDataSource.manager, base, {
-      status: "failed",
-      failureCode: "provider_error",
-      failureMessage: err instanceof Error ? err.message : String(err),
-    });
-    return { status: "produced", view: await loadGenerationView(run.id) };
-  }
+  // ADR-0027's repair loop: the first ask, then up to two more, each re-prompting with
+  // the *specific* validation error rather than climbing to a stronger model — there is
+  // no dependable stronger rung to climb to (ADR-0025).
+  //
+  // One deadline across all of them, not one per call: SYNTHESIS_TIMEOUT_MS is the
+  // promise made to a reader who is waiting, and three attempts at a minute each would
+  // make it a lie. A repair with no budget left is not attempted, and the run is stated
+  // as the validation failure it actually is rather than as a timeout.
+  const deadline = startedAt.getTime() + SYNTHESIS_TIMEOUT_MS;
+  const frozenEvidence = new Map(selected.map((row) => [row.evidenceId, row.publisherId]));
+  const fullPermittedText = carriesFullPermittedText(dataMode);
+  let raw = "";
+  let refusal: string | null = null;
+  // What the run knows so far, carried across attempts: a provider that throws on a
+  // repair must not erase the answer that provoked the repair. That answer and its
+  // measurement are the only record a claim was ever returned and dropped, and the
+  // input the eval harness reads (ADR-0027).
+  let recorded: RunFields = base;
 
-  const validated = validateAnalysis(raw, lens, new Set(selected.map((row) => row.evidenceId)));
-  const withAnswer: RunFields = { ...base, rawResponse: raw, validationResult: validated.result };
-  if (!validated.ok) {
-    const run = await insertRun(AppDataSource.manager, withAnswer, {
-      status: "failed",
-      failureCode: validated.failureCode,
-      failureMessage: validated.failureMessage,
-    });
-    return { status: "produced", view: await loadGenerationView(run.id) };
-  }
-
-  const runId = await AppDataSource.transaction(async (manager) => {
-    // v3 §16.5's last check, inside the transaction that would otherwise persist the
-    // claims: an Article whose text changed, or which is no longer a member of this
-    // Story, while the model was answering makes this analysis a description of
-    // something Tessera no longer holds.
-    if (await frozenEvidenceChanged(manager, storyId, selected)) {
-      const failed = await insertRun(manager, withAnswer, {
+  for (let repairAttempts = 0; ; repairAttempts += 1) {
+    const ask =
+      refusal === null
+        ? analysisRequest(selected, lens, dataMode)
+        : repairRequest(selected, lens, dataMode, raw, refusal);
+    try {
+      raw = await deps.synth.complete({ ...ask, timeoutMs: Math.max(1, deadline - Date.now()) });
+    } catch (err) {
+      // Includes the timeout: an AbortError arrives here like any other. The message is
+      // recorded for an Admin and never returned — it can name hosts and models. Not
+      // repaired: a provider that did not answer has said nothing to correct.
+      const run = await insertRun(AppDataSource.manager, recorded, {
         status: "failed",
-        failureCode: "content_changed",
-        failureMessage: "An Article's text changed, or it left this Story, after its evidence was frozen",
+        failureCode: "provider_error",
+        failureMessage: err instanceof Error ? err.message : String(err),
       });
-      return failed.id;
+      return { status: "produced", view: await loadGenerationView(run.id) };
     }
-    const run = await insertRun(manager, withAnswer, { status: "completed" });
-    await persistClaims(manager, run.id, validated.claims, selected);
-    return run.id;
-  });
 
-  return { status: "produced", view: await loadGenerationView(runId) };
+    const validated = validateAnalysis(raw, lens, frozenEvidence, { fullPermittedText });
+    // The persisted answer and measurement are the last attempt's: what a reader would
+    // have been shown, and what it cost to get there.
+    const withAnswer: RunFields = {
+      ...base,
+      rawResponse: raw,
+      validationResult: { ...validated.result, repairAttempts },
+    };
+
+    if (!validated.ok) {
+      if (repairAttempts < MAX_REPAIR_ATTEMPTS && deadline - Date.now() >= MIN_REPAIR_BUDGET_MS) {
+        refusal = validated.failureMessage;
+        recorded = withAnswer;
+        continue;
+      }
+      const run = await insertRun(AppDataSource.manager, withAnswer, {
+        status: "failed",
+        failureCode: validated.failureCode,
+        failureMessage: validated.failureMessage,
+      });
+      return { status: "produced", view: await loadGenerationView(run.id) };
+    }
+
+    const runId = await AppDataSource.transaction(async (manager) => {
+      // v3 §16.5's last check, inside the transaction that would otherwise persist the
+      // claims: an Article whose text changed, or which is no longer a member of this
+      // Story, while the model was answering makes this analysis a description of
+      // something Tessera no longer holds.
+      if (await frozenEvidenceChanged(manager, storyId, selected)) {
+        const failed = await insertRun(manager, withAnswer, {
+          status: "failed",
+          failureCode: "content_changed",
+          failureMessage: "An Article's text changed, or it left this Story, after its evidence was frozen",
+        });
+        return failed.id;
+      }
+      const run = await insertRun(manager, withAnswer, { status: "completed" });
+      await persistClaims(manager, run.id, validated.claims, selected);
+      return run.id;
+    });
+
+    return { status: "produced", view: await loadGenerationView(runId) };
+  }
 }
 
 export async function runGeneration(
@@ -264,7 +309,8 @@ export async function runGeneration(
   const inFlight = inFlightGenerations.get(key);
   if (inFlight) {
     const outcome = await inFlight;
-    return outcome.status === "no_evidence" ? outcome : { status: "reused", view: outcome.view };
+    // A refusal is the same refusal for both callers, and has no run to call reused.
+    return outcome.status === "produced" ? { status: "reused", view: outcome.view } : outcome;
   }
 
   const generation = generateOnce(deps, request);

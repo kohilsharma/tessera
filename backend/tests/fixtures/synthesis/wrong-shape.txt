@@ -1,0 +1,7 @@
+{
+  "analysis": "The company maintains its timeline for the pilot line to reach volume output by 2027, despite uncertainties surrounding the timing of a pending subsidy decision. While the company and officials have not clarified when the subsidy decision will be finalized, the 2027 production target remains officially unchanged.",
+  "sources": [
+    "A1",
+    "A2"
+  ]
+}

@@ -148,8 +148,23 @@ that does not exist — and a repeat request for the same evidence, Lens, prompt
 provider returns the existing run instead of paying twice, so a Mock-written analysis is never
 served after a key is configured. It is synchronous, so a failed run is a 200 carrying
 `status:"failed"` and a reader-safe `failureCode`; the provider's own message stays on the row.
-Partial acceptance, the two repair attempts, wire-copy collapse and the mixed-rung wording rule
-are #54's.
+**The validation contract** (#54) is what makes a cheap model publishable. A candidate too
+similar to an already-selected member is skipped after ranking, so five outlets running one wire
+report stop counting as five sources — the Articles stay, `distinctPublisherCount` counts
+newsrooms, and a Story that is *only* wire copy collapses to one publisher and is refused
+before anything is frozen (v3 §16.2's minimum of two). The EvidenceSet records its weakest
+rung (`evidence_sets.dataMode`; `manual_fixture` ranks as full text, being our own complete
+seed body), and below full text the prompt carries v3 §16.6's wording while validation rejects
+omission phrasing outright — with investment advice and price targets rejected under *every*
+Lens, and a `contradiction` rejected unless its citations resolve to two distinct Publishers.
+A failing claim is now **dropped and recorded**, not fatal: the run completes if at least two
+claims survive including one `consensus`, and fails otherwise (`invalid_citations` when claims
+were refused, `below_claim_floor` when the answer was merely thin). Structural failures still
+fail whole. Before any failure, the answer is re-prompted twice with the specific validation
+error and the rejected text (`repairAttempts` on the run, `SYNTHESIS_TIMEOUT_MS` now the budget
+for *all* the calls, so a reader's wait is unchanged). Every failure mode is driven by a
+transcript of the configured model's own bad answer in `tests/fixtures/synthesis/`, with one
+live check behind `SYNTHESIS_LIVE_SMOKE=1`.
 Phase 3.5 (graph/timeline) is not built yet.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
@@ -345,6 +360,9 @@ npm test          # vitest; spins up an ephemeral Postgres via Testcontainers, n
                   # GDELT_LIVE_SMOKE=1 additionally runs the two live GDELT checks — the GKG
                   # window (#41) and the DOC query (#46) — skipped by default so the suite
                   # stays offline
+                  # SYNTHESIS_LIVE_SMOKE=1 runs the one live synthesis check (#54), which reads
+                  # SYNTHESIS_* out of backend/.env by hand: vitest.config.ts pins those keys
+                  # empty so nothing else can reach a provider by accident
 ```
 
 No lint script exists yet. Do not claim it passes until implemented.

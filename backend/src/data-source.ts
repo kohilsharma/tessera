@@ -18,6 +18,7 @@ import { AddStoryCentroidAndClusteringRuns1755753000000 } from "./migrations/175
 import { AddPendingStoryAssignmentReview1755754000000 } from "./migrations/1755754000000-AddPendingStoryAssignmentReview";
 import { CreateGenerationRuns1755755000000 } from "./migrations/1755755000000-CreateGenerationRuns";
 import { FixGenerationSnapshotsAndReuse1755756000000 } from "./migrations/1755756000000-FixGenerationSnapshotsAndReuse";
+import { AddEvidenceDataModeAndClaimFloor1755757000000 } from "./migrations/1755757000000-AddEvidenceDataModeAndClaimFloor";
 import { User } from "./entities/User";
 import { Publisher } from "./entities/Publisher";
 import { Story } from "./entities/Story";
@@ -87,6 +88,7 @@ export const AppDataSource = new DataSource({
     AddPendingStoryAssignmentReview1755754000000,
     CreateGenerationRuns1755755000000,
     FixGenerationSnapshotsAndReuse1755756000000,
+    AddEvidenceDataModeAndClaimFloor1755757000000,
   ],
   synchronize: false,
   logging: false,

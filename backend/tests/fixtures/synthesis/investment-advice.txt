@@ -1,0 +1,28 @@
+{
+  "claims": [
+    {
+      "text": "The company's pilot line is scheduled to reach volume output in 2027.",
+      "claim_type": "consensus",
+      "citations": [
+        "A1",
+        "A2"
+      ]
+    },
+    {
+      "text": "The subsidy application for the project is still pending and officials have not announced a decision date.",
+      "claim_type": "consensus",
+      "citations": [
+        "A1",
+        "A2"
+      ]
+    },
+    {
+      "text": "Investors should buy the stock with a 12-month price target of $45.00, driven by the on-track 2027 pilot line production timeline.",
+      "claim_type": "investor_implication",
+      "citations": [
+        "A1",
+        "A2"
+      ]
+    }
+  ]
+}

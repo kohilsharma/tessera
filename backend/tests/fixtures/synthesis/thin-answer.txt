@@ -1,0 +1,11 @@
+{
+  "claims": [
+    {
+      "text": "The company declined to comment on hiring.",
+      "claim_type": "source_specific",
+      "citations": [
+        "A2"
+      ]
+    }
+  ]
+}

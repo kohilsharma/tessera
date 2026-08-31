@@ -1,12 +1,17 @@
 import { createHash } from "node:crypto";
 import type { EntityManager } from "typeorm";
 import { AppDataSource } from "../data-source";
-import type { AnalysisTextMode } from "../entities/Article";
+import { weakestAnalysisTextMode, type AnalysisTextMode } from "../entities/Article";
 import { EvidenceSet } from "../entities/EvidenceSet";
 import { EvidenceSetArticle, type SelectionReason } from "../entities/EvidenceSetArticle";
 import type { TermsClass } from "../entities/Publisher";
 import { acceptedCentroid, acceptedMembership } from "../lib/storyMembership";
-import { EXCERPT_CHARS, MAX_ARTICLES_PER_PUBLISHER, MAX_EVIDENCE_ARTICLES } from "./config";
+import {
+  EXCERPT_CHARS,
+  MAX_ARTICLES_PER_PUBLISHER,
+  MAX_EVIDENCE_ARTICLES,
+  NEAR_DUPLICATE_SIMILARITY,
+} from "./config";
 
 // ADR-0027: no model participates in choosing evidence. Evidence a model selected
 // is evidence nobody can re-derive, which defeats the point of freezing it — so
@@ -130,10 +135,43 @@ async function rankedCandidates(storyId: string): Promise<Candidate[]> {
   return rows.map(({ distance: _distance, ...row }, index) => ({ ...row, sourceRank: index + 1 }));
 }
 
+// The pairs among the candidates that are the same report twice — ADR-0027's wire-copy
+// collapse, measured in the same space clustering scores in. Only pairs above the floor
+// come back, so the result is small even though the comparison is not: `<=>` in a join
+// predicate is an exact nested-loop scan over every eligible pair, which no vector index
+// serves. A Story holds tens of eligible members, so this is one small query.
+//
+// ponytail: O(n²) over a Story's eligible members, which is fine at tens and would not be
+// at thousands. Restricting the pair query to the candidates that can actually be selected
+// is the upgrade, and it needs the bounds applied first.
+//
+// An unembedded member is nobody's duplicate: absence of a vector is not evidence of
+// difference, and dropping it instead would silently shrink a set after enrichment cleared
+// a vector. The consequence is that the "counts newsrooms" guarantee below is conditional
+// on the members being embedded — a wire reprint enriched moments ago can still take a
+// second masthead's slot until the next clustering run re-embeds it.
+const pairKey = (left: string, right: string): string => (left < right ? `${left}|${right}` : `${right}|${left}`);
+
+async function nearDuplicatePairs(articleIds: string[]): Promise<Set<string>> {
+  if (articleIds.length < 2) return new Set();
+  const rows: { leftId: string; rightId: string }[] = await AppDataSource.query(
+    `SELECT a."id" AS "leftId", b."id" AS "rightId"
+       FROM "articles" a
+       JOIN "articles" b ON b."id" > a."id" AND b."id" = ANY($1::uuid[]) AND b."embedding" IS NOT NULL
+      WHERE a."id" = ANY($1::uuid[]) AND a."embedding" IS NOT NULL
+        AND (a."embedding" <=> b."embedding") < $2`,
+    [articleIds, 1 - NEAR_DUPLICATE_SIMILARITY],
+  );
+  return new Set(rows.map((row) => pairKey(row.leftId, row.rightId)));
+}
+
 // v3 §16.2's bounds over that ranking. Order matters: the two forced inclusions are
 // taken first, because a set of the ten Articles closest to a centroid is ten
 // variations on the same hour, and "how this story developed" needs its ends.
-function applyBounds(ranked: Candidate[]): { candidate: Candidate; selectionReason: SelectionReason }[] {
+function applyBounds(
+  ranked: Candidate[],
+  duplicates: Set<string>,
+): { candidate: Candidate; selectionReason: SelectionReason }[] {
   const byTime = [...ranked].sort(
     (a, b) => a.publishedAt.getTime() - b.publishedAt.getTime() || a.articleId.localeCompare(b.articleId),
   );
@@ -142,6 +180,19 @@ function applyBounds(ranked: Candidate[]): { candidate: Candidate; selectionReas
 
   const take = (candidate: Candidate, selectionReason: SelectionReason): void => {
     if (selected.has(candidate.articleId)) return;
+    // The collapse applies whichever rule pulled a candidate in, including the two
+    // forced ends of the coverage window. A Story that is one wire report has the same
+    // text at both ends, and forcing the second copy in would leave a set claiming two
+    // independent publishers where there is one newsroom — which is exactly the count
+    // the minimum-publisher refusal reads. The earliest is never collapsed, nothing
+    // being selected before it, so a set is never empty for this reason.
+    //
+    // A collapsed *latest* is not replaced by the next-latest: the rank loop below can
+    // still pull a distinct later report in, but as `centroid_rank`, so a set can carry
+    // no `latest_reporting` row at all. That is the honest outcome — the end of the
+    // window was a copy of its start — and retrying down the list would be inventing a
+    // span the reporting does not have.
+    if ([...selected.keys()].some((held) => duplicates.has(pairKey(held, candidate.articleId)))) return;
     selected.set(candidate.articleId, { candidate, selectionReason });
     perPublisher.set(candidate.publisherId, (perPublisher.get(candidate.publisherId) ?? 0) + 1);
   };
@@ -164,10 +215,11 @@ function applyBounds(ranked: Candidate[]): { candidate: Candidate; selectionReas
   return [...selected.values()].sort((a, b) => a.candidate.sourceRank - b.candidate.sourceRank);
 }
 
-// The whole of selection: rank, bound, snapshot. Returns an empty array for a Story
-// with nothing to analyse, which the caller refuses rather than prompting over.
+// The whole of selection: rank, collapse, bound, snapshot. Returns an empty array for a
+// Story with nothing to analyse, which the caller refuses rather than prompting over.
 export async function selectEvidence(storyId: string): Promise<SelectedEvidence[]> {
-  const bounded = applyBounds(await rankedCandidates(storyId));
+  const ranked = await rankedCandidates(storyId);
+  const bounded = applyBounds(ranked, await nearDuplicatePairs(ranked.map((row) => row.articleId)));
   return bounded.map(({ candidate, selectionReason }, index) => ({
     ...candidate,
     evidenceId: `A${index + 1}`,
@@ -181,6 +233,14 @@ export function distinctPublisherCount(selected: SelectedEvidence[]): number {
   return new Set(selected.map((row) => row.publisherId)).size;
 }
 
+// ADR-0027: the set's rung is the weakest among its members, and it is what decides
+// whether the prompt carries v3 §16.6's constrained wording and whether an omission
+// claim may stand. The fallback is unreachable — selection refuses an empty set before
+// anything asks — and is here because a type that admits null is honest about it.
+export function evidenceDataMode(selected: SelectedEvidence[]): AnalysisTextMode {
+  return weakestAnalysisTextMode(selected.map((row) => row.analysisTextMode)) ?? "metadata_only";
+}
+
 // The freeze itself, before a single token is sent. One transaction, so a set is
 // either whole or absent — a half-written set would be a citation resolving to
 // nothing.
@@ -191,6 +251,7 @@ export async function freezeEvidence(storyId: string, selected: SelectedEvidence
       contentHash: evidenceContentHash(selected),
       articleCount: selected.length,
       distinctPublisherCount: distinctPublisherCount(selected),
+      dataMode: evidenceDataMode(selected),
     });
     await manager.getRepository(EvidenceSetArticle).insert(
       selected.map((row) => ({

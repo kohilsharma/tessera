@@ -31,11 +31,15 @@ Terms are canonical: use these words in code, docs, and conversation.
 
 - **EvidenceSet** — The frozen, immutable list of exact Article snapshots (with stable
   evidence IDs like `A1`) used for one generation. "Frozen" means later Article edits do
-  not change what a past generation was based on.
+  not change what a past generation was based on. It records its own weakest **Analysis Text
+  Mode**, which is what decides whether an omission may be claimed at all. (ADR-0027)
 
 - **AnalysisClaim** — A single evidence-bearing statement produced by generation
   (consensus / source-specific / contradiction / caveat / lens-specific). A claim with no
-  valid supporting evidence ID is invalid and must be rejected.
+  valid supporting evidence ID is invalid and must be rejected. Rejecting one claim does not
+  reject its generation — the invariant is about what is *displayed* — but a run that cannot
+  produce two surviving claims including one consensus claim fails as a whole, and the reader
+  is shown a stated unavailable state rather than whatever survived. (ADR-0027)
 
 - **Citation / ClaimEvidence** — The link from a Claim to the specific Article(s) that
   support or contradict it. The invariant: *no displayed factual claim without a valid

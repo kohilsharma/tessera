@@ -40,6 +40,38 @@ export function isStrongerAnalysisTextMode(candidate: AnalysisTextMode, held: An
   return ANALYSIS_TEXT_MODE_RANK[candidate] > ANALYSIS_TEXT_MODE_RANK[held];
 }
 
+// The same ladder with `manual_fixture` given a rung, which the enrichment ladder
+// above deliberately refuses it. Two different questions: "may this sighting replace
+// what we hold" (no — a fixture is not something a publisher sent) versus "how much
+// of the report did we analyse", which is what an EvidenceSet reports and what decides
+// whether an omission may be claimed (#54, ADR-0027). A seed fixture is our own
+// synthetic body, complete by construction, so it answers with full text — treating it
+// as thin would put the constrained wording on the whole demo corpus.
+const EVIDENCE_TEXT_MODE_RANK: Record<AnalysisTextMode, number> = {
+  ...ANALYSIS_TEXT_MODE_RANK,
+  manual_fixture: ANALYSIS_TEXT_MODE_RANK.licensed_full_text,
+};
+
+// ADR-0027: an EvidenceSet's rung is the weakest of its members, because a claim
+// comparing coverage is only as good as the thinnest text it rests on. The ladder's
+// own order breaks a tie, so two modes of equal rank always report the same one.
+export function weakestAnalysisTextMode(modes: AnalysisTextMode[]): AnalysisTextMode | null {
+  return (
+    [...modes].sort(
+      (a, b) =>
+        EVIDENCE_TEXT_MODE_RANK[a] - EVIDENCE_TEXT_MODE_RANK[b] ||
+        ANALYSIS_TEXT_MODES.indexOf(a) - ANALYSIS_TEXT_MODES.indexOf(b),
+    )[0] ?? null
+  );
+}
+
+// v3 §16.6: "publisher X omitted Y" is only sayable when the full permitted report is
+// what was analysed. Anything below that is an excerpt, and absence from an excerpt is
+// not absence from the reporting.
+export function carriesFullPermittedText(mode: AnalysisTextMode): boolean {
+  return EVIDENCE_TEXT_MODE_RANK[mode] >= EVIDENCE_TEXT_MODE_RANK.licensed_full_text;
+}
+
 // CONTEXT.md "Story Assignment": the state that decides whether anyone can see an
 // Article's membership. `auto_accepted` scored above the similarity threshold;
 // `pending_review` fell into the band beneath it and is a proposal awaiting an
