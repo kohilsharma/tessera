@@ -84,6 +84,9 @@ describe("npm run seed", () => {
     expect(rss.length).toBeGreaterThanOrEqual(8);
     expect(rss.length).toBeLessThanOrEqual(12);
     expect(rss.every((connector) => connector.enabled)).toBe(true);
+    expect(rss.every((connector) => typeof connector.feedProvidesFullText === "boolean")).toBe(true);
+    expect(rss.some((connector) => connector.feedProvidesFullText)).toBe(true);
+    expect(rss.some((connector) => !connector.feedProvidesFullText)).toBe(true);
     expect(rss.every((connector) => /^https:\/\//.test(connector.endpoint))).toBe(true);
     expect(rss.some((connector) => connector.endpoint.includes(".example"))).toBe(false);
 
@@ -147,27 +150,34 @@ describe("npm run seed", () => {
   });
 
   // #46: a database seeded before the DOC connector had a query would hold an
-  // endpoint no run can succeed against, and there is no API for editing one.
-  // `enabled` deliberately does not converge — an Admin who turned a connector off
-  // must not have a re-seed turn it back on.
-  it("converges a stale connector endpoint without overriding an Admin's enabled flag", async () => {
+  // endpoint no run can succeed against. #47 likewise has to classify RSS rows
+  // created before the extraction policy existed. `enabled` deliberately does
+  // not converge — an Admin who turned a connector off must not have a re-seed
+  // turn it back on.
+  it("converges stale connector configuration without overriding an Admin's enabled flag", async () => {
     const repo = AppDataSource.getRepository(IngestionConnector);
-    const seeded = SEED_CONNECTORS.find((connector) => connector.kind === "gdelt_doc")!;
-    // Restored either way: a failure here must not leave the connector disabled for
+    const docSeed = SEED_CONNECTORS.find((connector) => connector.kind === "gdelt_doc")!;
+    const rssSeed = SEED_CONNECTORS.find((connector) => connector.kind === "rss")!;
+    // Restored either way: a failure here must not leave connectors disabled for
     // whatever test runs next.
     try {
       await repo.update(
-        { name: seeded.name },
+        { name: docSeed.name },
         { endpoint: "https://api.gdeltproject.org/api/v2/doc/doc", enabled: false },
       );
+      await repo.update({ name: rssSeed.name }, { feedProvidesFullText: null, enabled: false });
 
       await seedAll();
 
-      const converged = await repo.findOneByOrFail({ name: seeded.name });
-      expect(converged.endpoint).toBe(seeded.endpoint);
-      expect(converged.enabled).toBe(false);
+      const doc = await repo.findOneByOrFail({ name: docSeed.name });
+      expect(doc.endpoint).toBe(docSeed.endpoint);
+      expect(doc.enabled).toBe(false);
+      const rss = await repo.findOneByOrFail({ name: rssSeed.name });
+      expect(rss.feedProvidesFullText).toBe(rssSeed.feedProvidesFullText);
+      expect(rss.enabled).toBe(false);
     } finally {
-      await repo.update({ name: seeded.name }, { enabled: seeded.enabled });
+      await repo.update({ name: docSeed.name }, { enabled: docSeed.enabled });
+      await repo.update({ name: rssSeed.name }, { enabled: rssSeed.enabled });
     }
   });
 });

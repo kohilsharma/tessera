@@ -30,29 +30,38 @@ export type SeedConnector = {
   kind: ConnectorKind;
   endpoint: string;
   enabled: boolean;
+  feedProvidesFullText: boolean | null;
 };
 
 // The curated RSS list. ADR-0018 makes feed curation the cheapest lever on text
-// quality, so the five that emit `content:encoded` (a full article body rather
-// than a one-line teaser) lead the list, and the five that emit only
-// `description` follow. Which is which was measured against the live feeds on
-// 2026-08-30, not assumed from the publisher. Deliberately spread across world
-// news, technology, science and security so the ingested corpus has more than one
-// subject in it.
+// quality, so each feed records the measured policy extraction needs: whether it
+// supplies article bodies or only excerpts. This is connector configuration, not
+// a text-length guess — NPR's content:encoded, for example, carries its excerpt
+// plus image credit rather than the article body. Measurements are from
+// 2026-08-30. Deliberately spread across world news, technology, science and
+// security so the ingested corpus has more than one subject in it.
 //
 // These replace the `meridianwire.example` placeholder, which pointed at a domain
 // that cannot resolve and was the only RSS connector.
-const SEED_RSS_FEEDS: { name: string; endpoint: string }[] = [
-  { name: "NPR World (RSS)", endpoint: "https://feeds.npr.org/1004/rss.xml" },
-  { name: "Ars Technica (RSS)", endpoint: "https://feeds.arstechnica.com/arstechnica/index" },
-  { name: "NASA news releases (RSS)", endpoint: "https://www.nasa.gov/news-release/feed/" },
-  { name: "WSJ World News (RSS)", endpoint: "https://feeds.a.dj.com/rss/RSSWorldNews.xml" },
-  { name: "Krebs on Security (RSS)", endpoint: "https://krebsonsecurity.com/feed/" },
-  { name: "BBC News World (RSS)", endpoint: "https://feeds.bbci.co.uk/news/world/rss.xml" },
-  { name: "The Guardian World (RSS)", endpoint: "https://www.theguardian.com/world/rss" },
-  { name: "Al Jazeera (RSS)", endpoint: "https://www.aljazeera.com/xml/rss/all.xml" },
-  { name: "ScienceDaily Top Science (RSS)", endpoint: "https://www.sciencedaily.com/rss/top/science.xml" },
-  { name: "TechCrunch (RSS)", endpoint: "https://techcrunch.com/feed/" },
+const SEED_RSS_FEEDS: { name: string; endpoint: string; feedProvidesFullText: boolean }[] = [
+  { name: "NPR World (RSS)", endpoint: "https://feeds.npr.org/1004/rss.xml", feedProvidesFullText: false },
+  {
+    name: "Ars Technica (RSS)",
+    endpoint: "https://feeds.arstechnica.com/arstechnica/index",
+    feedProvidesFullText: true,
+  },
+  { name: "NASA news releases (RSS)", endpoint: "https://www.nasa.gov/news-release/feed/", feedProvidesFullText: true },
+  { name: "WSJ World News (RSS)", endpoint: "https://feeds.a.dj.com/rss/RSSWorldNews.xml", feedProvidesFullText: true },
+  { name: "Krebs on Security (RSS)", endpoint: "https://krebsonsecurity.com/feed/", feedProvidesFullText: true },
+  { name: "BBC News World (RSS)", endpoint: "https://feeds.bbci.co.uk/news/world/rss.xml", feedProvidesFullText: false },
+  { name: "The Guardian World (RSS)", endpoint: "https://www.theguardian.com/world/rss", feedProvidesFullText: false },
+  { name: "Al Jazeera (RSS)", endpoint: "https://www.aljazeera.com/xml/rss/all.xml", feedProvidesFullText: false },
+  {
+    name: "ScienceDaily Top Science (RSS)",
+    endpoint: "https://www.sciencedaily.com/rss/top/science.xml",
+    feedProvidesFullText: false,
+  },
+  { name: "TechCrunch (RSS)", endpoint: "https://techcrunch.com/feed/", feedProvidesFullText: false },
 ];
 
 export const SEED_CONNECTORS: SeedConnector[] = [
@@ -65,6 +74,7 @@ export const SEED_CONNECTORS: SeedConnector[] = [
     // body of this file decides what the connector downloads next.
     endpoint: "https://data.gdeltproject.org/gdeltv2/lastupdate.txt",
     enabled: true,
+    feedProvidesFullText: null,
   },
   {
     // #46: DOC answers a question rather than streaming a window, so the question
@@ -88,8 +98,17 @@ export const SEED_CONNECTORS: SeedConnector[] = [
       "?query=%28%22artificial%20intelligence%22%20OR%20semiconductor%29%20sourcelang%3Aenglish" +
       "&sort=datedesc&timespan=1h",
     enabled: true,
+    feedProvidesFullText: null,
   },
-  ...SEED_RSS_FEEDS.map(({ name, endpoint }): SeedConnector => ({ name, kind: "rss", endpoint, enabled: true })),
+  ...SEED_RSS_FEEDS.map(
+    ({ name, endpoint, feedProvidesFullText }): SeedConnector => ({
+      name,
+      kind: "rss",
+      endpoint,
+      enabled: true,
+      feedProvidesFullText,
+    }),
+  ),
   {
     // #47. Readability extraction, which reads Articles the feeds above already
     // stored rather than an address of its own — so the endpoint names the pass.
@@ -99,6 +118,7 @@ export const SEED_CONNECTORS: SeedConnector[] = [
     kind: "readability",
     endpoint: "internal:readability",
     enabled: true,
+    feedProvidesFullText: null,
   },
 ];
 

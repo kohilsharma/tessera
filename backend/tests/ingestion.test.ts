@@ -96,13 +96,18 @@ const DOC_ENDPOINT = SEED_CONNECTORS.find((connector) => connector.kind === "gde
 
 let nextConnector = 0;
 
-async function createRssConnector(endpoint: string, enabled = true): Promise<IngestionConnector> {
+async function createRssConnector(
+  endpoint: string,
+  enabled = true,
+  feedProvidesFullText = false,
+): Promise<IngestionConnector> {
   nextConnector += 1;
   return AppDataSource.getRepository(IngestionConnector).save({
     name: `Test RSS ${nextConnector}`,
     kind: "rss",
     endpoint,
     enabled,
+    feedProvidesFullText,
   });
 }
 
@@ -1545,6 +1550,7 @@ describe("runConnector over Readability extraction", () => {
 
   it("leaves alone the Articles whose page it has no business reading", async () => {
     const rss = await createRssConnector("https://example.test/feed.xml");
+    const fullTextRss = await createRssConnector("https://example.test/full-feed.xml", true, true);
     const publishers = AppDataSource.getRepository(Publisher);
     const [internal, syndicated, open] = await Promise.all([
       publishers.save({ name: "Internal", domain: "internal.test", termsClass: "internal_only" as const }),
@@ -1557,7 +1563,7 @@ describe("runConnector over Readability extraction", () => {
       // would risk replacing that body with a shorter extraction.
       {
         publisherId: internal.id,
-        discoveredByConnectorId: rss.id,
+        discoveredByConnectorId: fullTextRss.id,
         title: "Feed carried the body",
         url: "https://internal.test/full",
         analysisText: "Real reporting. ".repeat(200),
@@ -1638,6 +1644,132 @@ describe("runConnector over Readability extraction", () => {
     const after = await AppDataSource.getRepository(Article).findOneByOrFail({ url: "https://example.test/teased" });
     expect(after.analysisTextMode).toBe("feed_excerpt");
     expect(after.analysisText).toBe(excerpt);
+  });
+
+  it("uses RSS feed policy rather than text length to choose extraction candidates", async () => {
+    const teaserFeed = await createRssConnector("https://feeds.example.test/teasers.xml");
+    const fullTextFeed = await createRssConnector("https://feeds.example.test/full.xml", true, true);
+    const feed = (title: string, path: string, text: string) => `<?xml version="1.0"?>
+      <rss version="2.0"><channel><title>Example News</title><item>
+        <title>${title}</title>
+        <link>https://example.test/${path}</link>
+        <pubDate>Sun, 30 Aug 2026 12:00:00 GMT</pubDate>
+        <description>${text}</description>
+      </item></channel></rss>`;
+
+    await runConnector(teaserFeed, { fetchText: async () => feed("Long teaser", "long-teaser", "Teaser. ".repeat(300)) });
+    await runConnector(fullTextFeed, { fetchText: async () => feed("Short complete", "short-complete", "Complete.") });
+
+    const fetched: string[] = [];
+    const connector = await createExtractionConnector();
+    const run = await runConnector(connector, {
+      fetchText: noFeed,
+      fetchPage: (url) => {
+        fetched.push(url);
+        return Promise.reject(new Error("responded 403"));
+      },
+    });
+
+    expect(run!.discovered).toBe(1);
+    expect(fetched).toEqual(["https://example.test/long-teaser"]);
+  });
+
+  it("refuses private page addresses before fetching, including redirect destinations", async () => {
+    const { httpFetchPage } = await import("../src/ingestion/runConnector");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await expect(httpFetchPage("http://127.0.0.1/private")).rejects.toThrow(/public/);
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      fetchMock.mockResolvedValueOnce(
+        new Response(null, { status: 302, headers: { location: "http://169.254.169.254/latest/meta-data" } }),
+      );
+      await expect(httpFetchPage("http://93.184.216.34/start")).rejects.toThrow(/public/);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("refuses non-global IPv6 page addresses", async () => {
+    const { httpFetchPage } = await import("../src/ingestion/runConnector");
+    for (const address of ["fec0::1", "100:0:0:1::1", "2001:2::1"]) {
+      const resolve = vi.fn(async () => [{ address, family: 6 }]) as unknown as typeof import("node:dns/promises").lookup;
+      await expect(
+        httpFetchPage("http://ipv6.example/story", {
+          resolve,
+          createDispatcher: () => {
+            throw new Error("a non-global address must not reach the dispatcher");
+          },
+        }),
+      ).rejects.toThrow(/public/);
+    }
+  });
+
+  it("pins the vetted DNS answer so a rebinding lookup cannot change the connection", async () => {
+    const { httpFetchPage } = await import("../src/ingestion/runConnector");
+    const { Agent } = await import("undici");
+    const resolve = vi.fn(async () => [{ address: "93.184.216.36", family: 4 }]) as unknown as typeof import("node:dns/promises").lookup;
+    const createDispatcher = vi.fn(
+      (address: string, family: 4 | 6) =>
+        new Agent({ connect: { lookup: (_hostname, _options, callback) => callback(null, address, family) } }),
+    );
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("<html><body>safe</body></html>", { headers: { "content-type": "text/html" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await expect(httpFetchPage("http://rebind.example/story", { resolve, createDispatcher })).resolves.toContain(
+        "safe",
+      );
+      expect(resolve).toHaveBeenCalledTimes(1);
+      expect(createDispatcher).toHaveBeenCalledWith("93.184.216.36", 4);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("rejects an oversized chunked page while consuming its body", async () => {
+    const { httpFetchPage } = await import("../src/ingestion/runConnector");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(new Uint8Array(4 * 1024 * 1024 + 1), { headers: { "content-type": "text/html" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await expect(httpFetchPage("http://93.184.216.37/chunked")).rejects.toThrow(/exceeded 4194304 bytes/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("paces every redirect hop on the destination publisher domain", async () => {
+    const { httpFetchPage } = await import("../src/ingestion/runConnector");
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, { status: 302, headers: { location: "http://93.184.216.35/final" } }),
+      )
+      .mockResolvedValueOnce(
+        new Response("<html><body>done</body></html>", { headers: { "content-type": "text/html" } }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const page = httpFetchPage("http://93.184.216.35/start");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(EXTRACTION_MIN_DOMAIN_INTERVAL_MS - 1);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+
+      await expect(page).resolves.toContain("done");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
   });
 
   it("spaces requests to one publisher without holding up another", async () => {

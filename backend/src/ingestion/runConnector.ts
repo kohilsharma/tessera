@@ -1,3 +1,6 @@
+import { lookup } from "node:dns/promises";
+import { BlockList } from "node:net";
+import { Agent, type Dispatcher } from "undici";
 import { IsNull, type EntityManager } from "typeorm";
 import { AppDataSource } from "../data-source";
 import { Article, isStrongerAnalysisTextMode } from "../entities/Article";
@@ -132,16 +135,6 @@ export const EXTRACTION_MIN_DOMAIN_INTERVAL_MS = 2_000;
 // more than they publish, while a backlog of paywalled failures can never turn
 // into a burst.
 export const MAX_EXTRACTION_ATTEMPTS = 20;
-// The length above which an RSS item's text is a body rather than a teaser, and
-// the Article is therefore not one that "arrived without full text" (#47).
-// Measured against the committed captures: NPR's item text is ~230 characters,
-// while the feeds curated for `content:encoded` run to thousands.
-// ponytail: a single threshold, so a long teaser is never read and a very short
-// syndicated article is re-read for nothing — one wasted request either way, and
-// no data is lost, since a body that fails to beat what is held is declined below.
-// The upgrade path is recording the ratio of item text to extracted body per
-// publisher and letting that decide.
-export const FEED_TEASER_MAX_LENGTH = 1_200;
 
 // A candidate's Publisher must let Tessera store the body at all, and must not
 // already have cleared its excerpt for serving: no Terms Class clears text
@@ -151,12 +144,106 @@ export const FEED_TEASER_MAX_LENGTH = 1_200;
 const EXTRACTABLE_TERMS_CLASSES = TERMS_CLASSES.filter(
   (termsClass) => mayStoreText(termsClass) && !mayServeText(termsClass, "feed_excerpt"),
 );
-// A body large enough to be a download rather than an article. Rejected before
-// reading, so a mis-linked archive costs one HEAD-shaped round trip.
-// ponytail: `Content-Length` only, so a chunked response is bounded by the
-// timeout instead — a streaming reader with a byte budget is the upgrade if a
-// feed ever points at one.
+// A body large enough to be a download rather than an article. Enforced both by
+// the HTTP dispatcher and while consuming the stream, including chunked bodies.
 const MAX_PAGE_BYTES = 4 * 1024 * 1024;
+const MAX_PAGE_REDIRECTS = 5;
+const PAGE_REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+// RSS links are untrusted input. Reject every address that is not globally
+// routable before a publisher-page request can reach localhost, a private LAN or
+// a cloud metadata service. Every DNS answer must be public because fetch may
+// choose any of them.
+const NON_PUBLIC_IPV4 = new BlockList();
+const GLOBAL_UNICAST_IPV6 = new BlockList();
+const NON_PUBLIC_GLOBAL_IPV6 = new BlockList();
+for (const [network, prefix] of [
+  ["0.0.0.0", 8],
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10],
+  ["127.0.0.0", 8],
+  ["169.254.0.0", 16],
+  ["172.16.0.0", 12],
+  ["192.0.0.0", 24],
+  ["192.0.2.0", 24],
+  ["192.168.0.0", 16],
+  ["198.18.0.0", 15],
+  ["198.51.100.0", 24],
+  ["203.0.113.0", 24],
+  ["224.0.0.0", 4],
+  ["240.0.0.0", 4],
+] as const) {
+  NON_PUBLIC_IPV4.addSubnet(network, prefix, "ipv4");
+}
+// Public publisher IPv6 addresses must be global unicast. The exclusions are
+// special-purpose ranges inside 2000::/3: IETF assignments/benchmarking/docs,
+// deprecated 6to4, and the dedicated documentation prefix.
+GLOBAL_UNICAST_IPV6.addSubnet("2000::", 3, "ipv6");
+NON_PUBLIC_GLOBAL_IPV6.addSubnet("2001::", 23, "ipv6");
+NON_PUBLIC_GLOBAL_IPV6.addSubnet("2002::", 16, "ipv6");
+NON_PUBLIC_GLOBAL_IPV6.addSubnet("3fff::", 20, "ipv6");
+
+type PublicPageTarget = { url: URL; address: string; family: 4 | 6 };
+type PageFetchDeps = {
+  resolve: typeof lookup;
+  createDispatcher: (address: string, family: 4 | 6) => Dispatcher;
+};
+
+const pageFetchDeps: PageFetchDeps = {
+  resolve: lookup,
+  createDispatcher: (address, family) =>
+    new Agent({
+      connect: { lookup: (_hostname, _options, callback) => callback(null, address, family) },
+      maxResponseSize: MAX_PAGE_BYTES,
+    }),
+};
+
+async function lookupWithSignal(hostname: string, signal: AbortSignal, resolve: typeof lookup) {
+  let rejectAbort!: (reason: unknown) => void;
+  const aborted = new Promise<never>((_, reject) => {
+    rejectAbort = reject;
+  });
+  const onAbort = () => rejectAbort(signal.reason);
+  signal.addEventListener("abort", onAbort, { once: true });
+  try {
+    return await Promise.race([resolve(hostname, { all: true, verbatim: true }), aborted]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+
+async function publicPageTarget(
+  raw: string | URL,
+  signal: AbortSignal,
+  resolve: typeof lookup,
+): Promise<PublicPageTarget> {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`${raw} is not a public http(s) page URL`);
+  }
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) {
+    throw new Error(`${url} is not a public http(s) page URL`);
+  }
+
+  const hostname = url.hostname.replace(/^\[|\]$/g, "");
+  const addresses = await lookupWithSignal(hostname, signal, resolve);
+  if (
+    addresses.length === 0 ||
+    addresses.some(
+      ({ address, family }) =>
+        (family !== 4 && family !== 6) ||
+        (family === 4
+          ? NON_PUBLIC_IPV4.check(address, "ipv4")
+          : !GLOBAL_UNICAST_IPV6.check(address, "ipv6") || NON_PUBLIC_GLOBAL_IPV6.check(address, "ipv6")),
+    )
+  ) {
+    throw new Error(`${url} is not a public http(s) page URL`);
+  }
+  const selected = addresses[0] as { address: string; family: 4 | 6 };
+  return { url, ...selected };
+}
 
 // Exported for the same reason spaceDocRequest is: the pacing is the requirement,
 // so it is assertable without a real fetch.
@@ -164,23 +251,81 @@ export async function spaceExtractionRequest(url: string): Promise<void> {
   await pace(publisherDomain(url), EXTRACTION_MIN_DOMAIN_INTERVAL_MS);
 }
 
-export async function httpFetchPage(url: string): Promise<string> {
-  await spaceExtractionRequest(url);
-  const res = await fetch(url, {
-    headers: { "User-Agent": USER_AGENT, Accept: "text/html, application/xhtml+xml" },
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    redirect: "follow",
-  });
-  if (!res.ok) throw new Error(`${url} responded ${res.status}`);
-  // A PDF or a video is not something Readability can read, and reading it to
-  // find that out is the waste this avoids.
-  const contentType = res.headers.get("content-type") ?? "";
-  if (!/^\s*(text\/html|application\/xhtml\+xml)/i.test(contentType)) {
-    throw new Error(`${url} served ${contentType || "no content type"}, not HTML`);
+type DispatcherRequestInit = RequestInit & { dispatcher: Dispatcher };
+
+async function readBoundedPage(res: Response, url: URL): Promise<string> {
+  if (!res.body) return "";
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_PAGE_BYTES) {
+        await reader.cancel();
+        throw new Error(`${url} exceeded ${MAX_PAGE_BYTES} bytes`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
   }
-  const declaredBytes = Number(res.headers.get("content-length") ?? 0);
-  if (declaredBytes > MAX_PAGE_BYTES) throw new Error(`${url} declared ${declaredBytes} bytes`);
-  return res.text();
+
+  const body = new Uint8Array(bytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(body);
+}
+
+export async function httpFetchPage(rawUrl: string, deps: PageFetchDeps = pageFetchDeps): Promise<string> {
+  let url = new URL(rawUrl);
+  for (let redirects = 0; ; redirects += 1) {
+    const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    const target = await publicPageTarget(url, signal, deps.resolve);
+    url = target.url;
+    await spaceExtractionRequest(url.toString());
+    // A one-request Agent pins the DNS answer vetted above while preserving the
+    // URL hostname for Host and TLS SNI. maxResponseSize enforces the byte ceiling
+    // even when a hostile server omits Content-Length or streams chunked data.
+    const dispatcher = deps.createDispatcher(target.address, target.family);
+    try {
+      const res = await fetch(
+        url,
+        {
+          headers: { "User-Agent": USER_AGENT, Accept: "text/html, application/xhtml+xml" },
+          signal,
+          redirect: "manual",
+          dispatcher,
+        } as DispatcherRequestInit,
+      );
+
+      if (PAGE_REDIRECT_STATUSES.has(res.status)) {
+        if (redirects >= MAX_PAGE_REDIRECTS) throw new Error(`${rawUrl} exceeded ${MAX_PAGE_REDIRECTS} redirects`);
+        const location = res.headers.get("location");
+        if (!location) throw new Error(`${url} redirected without a location`);
+        await res.body?.cancel();
+        url = new URL(location, url);
+        continue;
+      }
+      if (!res.ok) throw new Error(`${url} responded ${res.status}`);
+      // A PDF or a video is not something Readability can read, and reading it to
+      // find that out is the waste this avoids.
+      const contentType = res.headers.get("content-type") ?? "";
+      if (!/^\s*(text\/html|application\/xhtml\+xml)/i.test(contentType)) {
+        throw new Error(`${url} served ${contentType || "no content type"}, not HTML`);
+      }
+      const declaredBytes = Number(res.headers.get("content-length") ?? 0);
+      if (declaredBytes > MAX_PAGE_BYTES) throw new Error(`${url} declared ${declaredBytes} bytes`);
+      return await readBoundedPage(res, url);
+    } finally {
+      await dispatcher.close();
+    }
+  }
 }
 
 // The five terminal outcomes for one discovered item. Every item ends in exactly
@@ -603,11 +748,11 @@ async function discoverDoc(connector: IngestionConnector, deps: RunConnectorDeps
 // worked, failed where it did not.
 //
 // The candidate rule is the whole restriction ADR-0018 and #47 exist to impose:
-// RSS-discovered, still on the excerpt rung, holding no more than a teaser, never
-// yet attempted, and from a Publisher whose rights leave room for the swap. GKG and
-// DOC rows are excluded twice over — by connector kind and by their `metadata_only`
-// rung — because 63k firehose rows a day across 163+ unknown domains would make
-// this a general-purpose crawler nobody asked for.
+// RSS-discovered, still on the excerpt rung, from a feed explicitly classified
+// as lacking bodies, never yet attempted, and from a Publisher whose rights leave
+// room for the swap. GKG and DOC rows are excluded twice over — by connector kind
+// and by their `metadata_only` rung — because 63k firehose rows a day across 163+
+// unknown domains would make this a general-purpose crawler nobody asked for.
 async function discoverExtraction(deps: RunConnectorDeps): Promise<Discovery> {
   const fetchPage = deps.fetchPage ?? httpFetchPage;
   const articles = AppDataSource.getRepository(Article);
@@ -617,16 +762,14 @@ async function discoverExtraction(deps: RunConnectorDeps): Promise<Discovery> {
     .select(["article.id", "article.title", "article.url", "article.publishedAt", "article.analysisText"])
     .where(`article."extractionAttemptedAt" IS NULL`)
     .andWhere(`article."analysisTextMode" = :mode`, { mode: "feed_excerpt" satisfies AnalysisTextMode })
-    // "Arrived without full text" (#47). The rung cannot answer that on its own:
-    // rss.ts reads `content:encoded ?? description` into one field, and a feed that
-    // emits `content:encoded` may put a whole article there or — as NPR's does — a
-    // teaser and an image. So the held text's own length is the question, and a
-    // feed that already supplied a body is left alone rather than re-fetched.
-    .andWhere(`length(article."analysisText") < :teaser`, { teaser: FEED_TEASER_MAX_LENGTH })
+    .andWhere(
+      `article."discoveredByConnectorId" IN (
+        SELECT id FROM ingestion_connectors
+        WHERE kind = :kind AND "feedProvidesFullText" IS FALSE
+      )`,
+      { kind: "rss" satisfies ConnectorKind },
+    )
     .andWhere(`publisher."termsClass" IN (:...termsClasses)`, { termsClasses: EXTRACTABLE_TERMS_CLASSES })
-    .andWhere(`article."discoveredByConnectorId" IN (SELECT id FROM ingestion_connectors WHERE kind = :kind)`, {
-      kind: "rss" satisfies ConnectorKind,
-    })
     // Freshest first: a run is capped, so what it spends its attempts on should be
     // the reporting most likely to matter. The attempt mark is what stops a
     // backlog older than the cap from being starved forever.

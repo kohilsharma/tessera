@@ -27,6 +27,12 @@ export class IngestionConnector {
   @Column({ type: "varchar" })
   endpoint!: string;
 
+  // RSS feed policy measured during curation: true when the feed supplies article
+  // bodies, false when it supplies excerpts that Readability may raise. Null for
+  // non-RSS and older unknown connectors, which extraction must leave alone.
+  @Column({ type: "boolean", nullable: true })
+  feedProvidesFullText!: boolean | null;
+
   @Column({ type: "boolean", default: true })
   enabled!: boolean;
 
