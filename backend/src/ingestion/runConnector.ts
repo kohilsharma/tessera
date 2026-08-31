@@ -10,6 +10,7 @@ import type { ConnectorKind } from "../entities/IngestionConnector";
 import { IngestionRun } from "../entities/IngestionRun";
 import { GkgAnnotation } from "../entities/GkgAnnotation";
 import { Publisher, TERMS_CLASSES, mayServeText, mayStoreText } from "../entities/Publisher";
+import { PENDING_ASSIGNMENT } from "../lib/storyMembership";
 import { canonicalizeUrl, normalizeTitle, publisherDomain } from "./canonicalUrl";
 import { DOC_MAX_RECORDS, docRequestUrl, parseDocArtList } from "./doc";
 import {
@@ -497,11 +498,18 @@ async function reconcileWithHeld(
       })
       .execute();
     if (updated.affected === 1) {
-      // ADR-0026: the vector was made from the text this update just replaced, so
-      // it now describes reporting Tessera no longer holds. Nulled rather than
-      // recomputed here — ingestion does not embed, and a null vector means one
-      // thing to the clustering job: needs embedding, next run.
-      await manager.query(`UPDATE "articles" SET "embedding" = NULL WHERE "id" = $1`, [current.id]);
+      // The vector and any pending proposal were both judgements about the text
+      // this update replaced. Clear them together before an Admin can accept a
+      // score for reporting Tessera no longer holds.
+      await manager.query(
+        `UPDATE "articles"
+         SET "embedding" = NULL,
+             "storyId" = CASE WHEN "storyAssignmentStatus" = $2 THEN NULL ELSE "storyId" END,
+             "storyAssignmentStatus" = CASE WHEN "storyAssignmentStatus" = $2 THEN NULL ELSE "storyAssignmentStatus" END,
+             "storyAssignmentScore" = CASE WHEN "storyAssignmentStatus" = $2 THEN NULL ELSE "storyAssignmentScore" END
+         WHERE "id" = $1`,
+        [current.id, PENDING_ASSIGNMENT],
+      );
       await improvePublisherName(current.publisherId);
       return "enriched";
     }

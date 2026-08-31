@@ -880,7 +880,7 @@ describe("enrichment and the clustering job together", () => {
   const nprFeed: FetchText = () => readFile(join(__dirname, "fixtures", "rss", "npr-world.xml"), "utf-8");
   const noFeed: FetchText = () => Promise.reject(new Error("extraction must not fetch a feed"));
 
-  it("re-embeds an Article whose text extraction replaced", async () => {
+  it("clears a pending proposal when extraction replaces its text, then re-embeds", async () => {
     const connectors = AppDataSource.getRepository(IngestionConnector);
     const rss = await connectors.save({
       name: "Test RSS",
@@ -903,6 +903,12 @@ describe("enrichment and the clustering job together", () => {
     expect(first.embedded).toBe(3);
     expect(await vectorOf(teaser.id)).not.toBeNull();
 
+    const proposedStory = await createStory({ title: "Lake Ontario proposal", lastSeenAt: hoursAgo(1) });
+    await articles.update(
+      { id: teaser.id },
+      { storyId: proposedStory.id, storyAssignmentStatus: "pending_review", storyAssignmentScore: 0.8 },
+    );
+
     const extraction = await connectors.save({
       name: "Test extraction",
       kind: "readability",
@@ -918,9 +924,16 @@ describe("enrichment and the clustering job together", () => {
     });
     expect(extracted!.enriched).toBe(1);
 
-    // The enriched Article's vector described text Tessera no longer holds, so it
-    // is gone; the two that only failed extraction keep theirs.
+    // The proposal scored the excerpt that extraction replaced, so enrichment
+    // invalidates the assignment together with its vector. It must not remain
+    // available for an Admin to accept before the next clustering run.
+    const invalidated = await articles.findOneByOrFail({ id: teaser.id });
     expect(await vectorOf(teaser.id)).toBeNull();
+    expect(invalidated.storyId).toBeNull();
+    expect(invalidated.storyAssignmentStatus).toBeNull();
+    expect(invalidated.storyAssignmentScore).toBeNull();
+    expect(await decidePendingAssignment(teaser.id, "accept", (await createAdmin("stale-reviewer@example.com")).id)).toBeNull();
+
     const untouched = await articles.findBy({ analysisTextMode: "feed_excerpt" });
     expect(untouched).toHaveLength(2);
     for (const article of untouched) expect(await vectorOf(article.id)).not.toBeNull();
@@ -1170,22 +1183,6 @@ describe("the Admin review queue", () => {
       .send({ decision: "reject" });
     expect(again.status).toBe(404);
     expect(await AppDataSource.getRepository(RejectedStoryAssignment).count()).toBe(0);
-  });
-});
-
-// The band is two numbers that have to be read together, so the pair itself is
-// checkable: a floor above the ceiling is not a tighter configuration, it is a
-// configuration neither number can be honoured in.
-describe("the review band's configuration", () => {
-  it("refuses a review floor above the auto-accept threshold", async () => {
-    vi.stubEnv("CLUSTERING_REVIEW_THRESHOLD", "0.95");
-    vi.stubEnv("CLUSTERING_SIMILARITY_THRESHOLD", "0.85");
-    vi.resetModules();
-
-    await expect(import("../src/clustering/config")).rejects.toThrow(/review band/);
-
-    vi.unstubAllEnvs();
-    vi.resetModules();
   });
 });
 

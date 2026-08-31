@@ -15,24 +15,9 @@ function envNumber(key: string, fallback: number, { min, max }: { min: number; m
 // synthesis while misses remain Unclustered for the next run.
 export const SIMILARITY_THRESHOLD = envNumber("CLUSTERING_SIMILARITY_THRESHOLD", 0.85, { min: 0, max: 1 });
 
-// The floor of the review band (#50). An assignment scoring between this and the
-// threshold above is a *proposal* held for an Admin (CONTEXT.md "Story
-// Assignment"); below it the Article stays Unclustered and is reconsidered next
-// run. Not a second calibration knob in the sense the threshold is: erring wide
-// here costs an Admin some reading, not a corrupted Story, because a held
-// assignment reaches no reader and grounds no claim until someone accepts it.
-export const REVIEW_THRESHOLD = envNumber("CLUSTERING_REVIEW_THRESHOLD", 0.75, { min: 0, max: 1 });
-
-// A band with its floor above its ceiling is not a tighter configuration, it is a
-// pair of numbers that cannot both be honoured — refuse it at load rather than
-// silently making every proposal auto-accepted. Equal is legal: it closes the
-// band, which is the pre-#50 behaviour.
-if (REVIEW_THRESHOLD > SIMILARITY_THRESHOLD) {
-  throw new Error(
-    `CLUSTERING_REVIEW_THRESHOLD (${REVIEW_THRESHOLD}) must not exceed ` +
-      `CLUSTERING_SIMILARITY_THRESHOLD (${SIMILARITY_THRESHOLD}) — the review band sits beneath the auto-accept threshold`,
-  );
-}
+// Fixed policy beneath the one calibration knob: borderline assignments are
+// proposals for an Admin, not another operator-tuned clustering decision.
+export const REVIEW_THRESHOLD = Math.max(0, SIMILARITY_THRESHOLD - 0.1);
 
 // Time is a hard gate rather than a weighted score component.
 export const RECENCY_WINDOW_HOURS = envNumber("CLUSTERING_RECENCY_WINDOW_HOURS", 72, { min: 1, max: 24 * 365 });

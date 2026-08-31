@@ -103,8 +103,8 @@ model call names it. Enrichment nulls `articles.embedding` when it writes new te
 vector means one thing. Operationally it is a second BullMQ queue on the same worker process,
 ticking hourly at :05, with an Admin-only `POST /api/v1/clustering/runs` that answers
 `202 {status:"accepted"}` and a `clustering_runs` history table.
-**Pending review** (#50) opens the band beneath the threshold: a score between
-`CLUSTERING_REVIEW_THRESHOLD` and the auto-accept threshold is held as a *proposal* —
+**Pending review** (#50) opens the band beneath the threshold: a score between the fixed
+review floor (0.10 below the auto-accept threshold) and the auto-accept threshold is held as a *proposal* —
 `articles.storyAssignmentStatus = 'pending_review'`, carrying the Story's id so a reviewer can
 see what is proposed, but changing neither the Story's centroid nor its span. So `storyId IS NOT
 NULL` no longer means membership: `lib/storyMembership.ts` holds the one predicate every reader
