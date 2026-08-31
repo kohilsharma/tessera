@@ -12,7 +12,7 @@ import {
 import { mayServeText, type TermsClass } from "../entities/Publisher";
 import type { SelectionReason } from "../entities/EvidenceSetArticle";
 import type { SynthesisProvider } from "../synthesis";
-import { MAX_REPAIR_ATTEMPTS, MIN_DISTINCT_PUBLISHERS, PROMPT_VERSION, SYNTHESIS_TIMEOUT_MS } from "./config";
+import { MAX_REPAIR_ATTEMPTS, MIN_DISTINCT_PUBLISHERS, SYNTHESIS_TIMEOUT_MS } from "./config";
 import {
   distinctPublisherCount,
   evidenceDataMode,
@@ -23,6 +23,7 @@ import {
   type SelectedEvidence,
 } from "./evidence";
 import { analysisRequest, repairRequest } from "./prompt";
+import { loadCurrentTemplate, type CurrentTemplate } from "./template";
 import { validateAnalysis, type ParsedClaim } from "./validate";
 
 // The flagship, as one function: select evidence deterministically, freeze it, ask a
@@ -103,9 +104,18 @@ export type GenerationOutcome =
 // The provider is in the key because otherwise the first thing a demo does is cache
 // itself: a clone with no key persists `[mock synthesis]` claims as a completed run,
 // and adding SYNTHESIS_API_KEY would change nothing anybody can see.
+//
+// The prompt version is the *current PromptTemplate's* since #57, which is how an Admin
+// activating a tuned version invalidates every cached analysis: the version they
+// activated has produced no runs yet, so nothing matches and the next request
+// regenerates. Note what that means for going back — re-activating an earlier version
+// serves the runs written under it, because a run under exactly this version, provider
+// and evidence *is* the analysis this configuration produces. Paying again for a
+// byte-identical answer would be the defect.
 async function reusableRunId(
   storyId: string,
   lens: GenerationLens,
+  promptVersion: string,
   provider: string,
   model: string,
   evidenceHash: string,
@@ -122,7 +132,7 @@ async function reusableRunId(
         )
       ORDER BY r."completedAt" DESC
       LIMIT 1`,
-    [storyId, lens, PROMPT_VERSION, provider, model, evidenceHash],
+    [storyId, lens, promptVersion, provider, model, evidenceHash],
   );
   return rows[0]?.id ?? null;
 }
@@ -131,6 +141,7 @@ type RunFields = {
   storyId: string;
   evidenceSetId: string;
   lens: GenerationLens;
+  promptVersion: string;
   provider: string;
   model: string;
   triggeredByUserId: string | null;
@@ -148,7 +159,6 @@ async function insertRun(
 ): Promise<GenerationRun> {
   return manager.getRepository(GenerationRun).save({
     ...fields,
-    promptVersion: PROMPT_VERSION,
     completedAt: new Date(),
     ...outcome,
     ...(outcome.status === "completed" ? { failureCode: null, failureMessage: null } : {}),
@@ -190,6 +200,7 @@ const inFlightGenerations = new Map<string, Promise<GenerationOutcome>>();
 async function generateOnce(
   deps: GenerationDeps,
   request: { storyId: string; lens: GenerationLens; triggeredByUserId: string | null },
+  template: CurrentTemplate,
 ): Promise<GenerationOutcome> {
   const { storyId, lens, triggeredByUserId } = request;
   const selected = await selectEvidence(storyId);
@@ -208,6 +219,7 @@ async function generateOnce(
   const reused = await reusableRunId(
     storyId,
     lens,
+    template.version,
     deps.provider,
     deps.model,
     evidenceContentHash(selected),
@@ -220,6 +232,9 @@ async function generateOnce(
     storyId,
     evidenceSetId: evidenceSet.id,
     lens,
+    // The version that produced this run, whatever is current later: a past analysis
+    // stays traceable to the parameters it was written under (ADR-0021).
+    promptVersion: template.version,
     provider: deps.provider,
     model: deps.model,
     triggeredByUserId,
@@ -250,8 +265,8 @@ async function generateOnce(
   for (let repairAttempts = 0; ; repairAttempts += 1) {
     const ask =
       refusal === null
-        ? analysisRequest(selected, lens, dataMode)
-        : repairRequest(selected, lens, dataMode, raw, refusal);
+        ? analysisRequest(selected, lens, dataMode, template.params)
+        : repairRequest(selected, lens, dataMode, template.params, raw, refusal);
     try {
       const attemptsLeft = 1 + MAX_REPAIR_ATTEMPTS - repairAttempts;
       raw = await deps.synth.complete({
@@ -329,7 +344,11 @@ export async function runGeneration(
   deps: GenerationDeps,
   request: { storyId: string; lens: GenerationLens; triggeredByUserId: string | null },
 ): Promise<GenerationOutcome> {
-  const key = JSON.stringify([request.storyId, request.lens, PROMPT_VERSION, deps.provider, deps.model]);
+  // Read once per request, and carried through the whole run: an Admin activating a
+  // different version mid-flight must not leave one attempt asking under one prompt and
+  // its repair under another.
+  const template = await loadCurrentTemplate();
+  const key = JSON.stringify([request.storyId, request.lens, template.version, deps.provider, deps.model]);
   const inFlight = inFlightGenerations.get(key);
   if (inFlight) {
     const outcome = await inFlight;
@@ -337,7 +356,7 @@ export async function runGeneration(
     return outcome.status === "produced" ? { status: "reused", view: outcome.view } : outcome;
   }
 
-  const generation = generateOnce(deps, request);
+  const generation = generateOnce(deps, request, template);
   inFlightGenerations.set(key, generation);
   try {
     return await generation;

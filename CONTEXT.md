@@ -59,7 +59,12 @@ Terms are canonical: use these words in code, docs, and conversation.
 
 - **PromptTemplate** — A versioned prompt + generation-params record that Admin tunes to shape
   responses for everyone (tone, verbosity, lens emphasis, which claim types surface). Tunes the
-  prompt only — never the citation-validation layer, which lives below it. (ADR-0021)
+  prompt only — never the citation-validation layer, which lives below it. Immutable and never
+  deleted: tuning is *creating* a version, and activating one is the only change — which is what
+  makes a past GenerationRun's prompt version resolve to the parameters that wrote it. Parameters
+  that could not produce a publishable answer (a claim count under the floor, a surfaced set
+  without `consensus`) are refused at the boundary rather than accepted and failed below the
+  prompt. (ADR-0021)
 
 - **Flashcard** — A Student-owned Q/A study card generated from a Story/Brief. Its answer must
   cite evidence from a frozen EvidenceSet like any other claim; scheduled via spaced repetition

@@ -187,6 +187,21 @@ generation applies (accepted membership, analysis text, an embedding, ADR-0027's
 Publishers after near-duplicate collapse), so a row an Investor opens is a Story an analysis can
 be written about. It carries no article count, deliberately: the members eligible here are a
 subset of the accepted members `/stories` counts, and one word for two numbers would be a defect.
+**Admin prompt tuning** (#57) makes the prompt data: a `prompt_templates` row carries a version
+label and four parameters — register, claim count, Lens emphasis, which core claim types are
+asked for — and `src/generation/template.ts` is the whole surface, reading the current one and
+deciding whether a proposed one may exist. Rows are immutable and never deleted, so tuning is
+*creating* a version (`POST /api/v1/prompt-templates`) and activation is the only mutation
+(`PATCH .../:id {isCurrent: true}`, at most one current by partial unique index) — which is what
+keeps `generation_runs.promptVersion` resolving to the parameters that wrote a past run.
+Invalidation is free: the version is already in the reuse key, so the version just activated has
+no runs and the next request regenerates. ADR-0021's guardrail is enforced by what the boundary
+refuses, not by a note — a claim count below validation's own floor, or a surfaced set without
+`consensus`, is refused at the API because every run under it would fail below the prompt, and
+tuned text is flattened to one bracket-free line so it cannot pose as further instructions. There
+is deliberately no field for the citation check. The shipped version is inserted by the
+migration, not the seed (the flagship reads it on every request), and carries exactly the prompt
+this pipeline asked for before it was tunable, so applying #57 changed no output.
 Phase 3.5 (graph/timeline) is not built yet.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
@@ -230,7 +245,11 @@ with its own request, so it owns all four UI states, with Accept/Reject on each 
 seventh is **Story merge** (#52), the console's one command *form*: two selects over the 50 most
 recent Stories (its own request, refetched after a merge since one of the pair is gone), a Merge
 command refused client-side for a Story named twice, and a stated note reporting what the merge
-did rather than what it queued. The
+did rather than what it queued. An eighth is **Prompt versions** (#57), a register and a second
+command form: each version states its own parameters in the note line so two can be told apart
+without opening either, a Make-current command on every row but the current one, and a form whose
+fields are the whole tuning surface — there is no control for the citation check, because it is
+not configuration. The
 **design prototype** for the Phase-3 flagship (`src/versions/BureauPrototype.tsx` +
 `bureau.tsx` over hardcoded `src/data.ts`, styled by `src/styles.css`) sits at
 `/design-prototype`, out of the Phase-1 path.

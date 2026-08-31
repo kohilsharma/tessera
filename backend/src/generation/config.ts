@@ -43,10 +43,30 @@ export const MAX_REPAIR_ATTEMPTS = 2;
 // qualifications, short enough that ten of them fit a cheap model's context.
 export const EXCERPT_CHARS = 1500;
 
-// ADR-0027: a versioned code constant, recorded on every run, and the third part of
-// the reuse key — so bumping it invalidates every cached analysis by design. Bump
-// it whenever prompt.ts changes what it asks for.
+// The version label of the *shipped* PromptTemplate — the row CreatePromptTemplates
+// inserts as current, and the fallback if no row is current at all (#57). Recorded on
+// every run and part of the reuse key, so activating a different version invalidates
+// every cached analysis by design.
+//
+// Since #57 the prompt is data, so its version is data too: changing what prompt.ts
+// asks for means bumping this *and* shipping a migration that inserts and activates a
+// row carrying the new label. The template test in tests/generation.test.ts asserts a
+// migrated database's current version is this constant, so bumping one without the
+// other fails the suite rather than silently serving cached analyses from the old
+// prompt.
 export const PROMPT_VERSION = "2026-09-03";
+
+// The ceiling on a tuned claim count. Not calibration: one response carries the
+// answer, and an Admin asking for forty claims would get output truncated at
+// maxTokens — a structural failure on every run rather than a more thorough analysis.
+// The floor is MIN_SURVIVING_CLAIMS above, which is validation's, so a tuned prompt
+// can never ask for fewer claims than a publishable run needs.
+export const MAX_REQUESTED_CLAIMS = 8;
+
+// How much tuned free text a PromptTemplate may carry per field. A clause, not an
+// essay: these sit among the contract's own instructions, and the evidence has to fit
+// the same context window.
+export const TUNED_TEXT_MAX_LENGTH = 240;
 
 // The whole request's budget for model calls, repairs included — not per attempt.
 // Generation is synchronous, so this is how long a reader's request can hang before

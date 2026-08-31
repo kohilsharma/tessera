@@ -6,6 +6,7 @@ import { ClusteringRun } from "../entities/ClusteringRun";
 import { IngestionConnector } from "../entities/IngestionConnector";
 import { IngestionRun } from "../entities/IngestionRun";
 import { Publisher } from "../entities/Publisher";
+import { PromptTemplate } from "../entities/PromptTemplate";
 import { Story } from "../entities/Story";
 import type { StoryCategory } from "../entities/Story";
 import { asyncHandler } from "../middleware/asyncHandler";
@@ -26,6 +27,12 @@ const RECENT_INGESTION_RUNS = 20;
 // own constant because the two registers are read differently: a feed's runs are
 // diagnosed per connector, a clustering pass is one series.
 const RECENT_CLUSTERING_RUNS = 20;
+
+// #57: prompt versions are not capped the way the run histories beside them are — a
+// version exists only because an operator created it, so the list grows at human rate,
+// not corpus rate. And it has to be whole: a past run's promptVersion is traceable only
+// while the label it names is still readable somewhere, and this is the only surface
+// that reads them.
 
 // #56: how many Stories the Investor surface offers a comparative reading of. A
 // landing page, not an index — /stories is where a reader goes for all of them.
@@ -178,12 +185,25 @@ dashboardRouter.get(
       .orderBy("publisher.name", "ASC")
       .getMany();
 
+    // #57: newest first, and the current one marked. Prior versions are retained, so an
+    // Admin reading a past run's promptVersion can find the parameters that wrote it.
+    const promptTemplates = await AppDataSource.getRepository(PromptTemplate).find({
+      order: { createdAt: "DESC" },
+    });
+
     res.json({
       role: "admin",
       userCounts,
       connectors,
       ingestionRuns: ingestionRuns.map((run) => toPublicIngestionRun(run, run.connector.name)),
       clusteringRuns,
+      promptTemplates: promptTemplates.map((template) => ({
+        id: template.id,
+        version: template.version,
+        params: template.params,
+        isCurrent: template.isCurrent,
+        createdAt: template.createdAt,
+      })),
       publishers: (publishers as (Publisher & { articleCount?: number })[]).map((publisher) => ({
         id: publisher.id,
         name: publisher.name,

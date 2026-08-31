@@ -5,6 +5,8 @@ import { User, USER_ROLES } from "../src/entities/User";
 import { Story } from "../src/entities/Story";
 import { BriefArticle } from "../src/entities/BriefArticle";
 import { IngestionConnector } from "../src/entities/IngestionConnector";
+import { DEFAULT_PROMPT_PARAMS, PromptTemplate } from "../src/entities/PromptTemplate";
+import { PROMPT_VERSION } from "../src/generation/config";
 import { LocalDiskFileStorageProvider } from "../src/storage/LocalDiskFileStorageProvider";
 import { SEED_CONNECTORS } from "../src/seedData/corpus";
 import { seedAll } from "../src/seed";
@@ -62,6 +64,25 @@ describe("npm run seed", () => {
     );
     expect(compared).toBeGreaterThan(0);
     expect(differing).toBe(0);
+  });
+
+  // #57: the flagship reads a current PromptTemplate on every request, so this row is
+  // what makes a migrated database work rather than demo content — which is why the
+  // migration inserts it and the seed does not. Asserted here because this is the file
+  // about a fresh clone reaching a working demo.
+  //
+  // The version is asserted against the code constant deliberately: since #57 the prompt
+  // is data, so changing what prompt.ts asks for means bumping PROMPT_VERSION *and*
+  // shipping a migration that inserts and activates a row carrying the new label. Doing
+  // one without the other fails here rather than quietly serving cached analyses written
+  // under the old prompt.
+  it("ships one current PromptTemplate, carrying the prompt the code asks for", async () => {
+    const templates = await AppDataSource.getRepository(PromptTemplate).find({ where: { isCurrent: true } });
+    expect(templates).toHaveLength(1);
+    expect(templates[0].version).toBe(PROMPT_VERSION);
+    expect(templates[0].params).toEqual(DEFAULT_PROMPT_PARAMS);
+    // No person behind the shipped version, and nothing it was tuned from.
+    expect(templates[0].createdByUserId).toBeNull();
   });
 
   it("seeds the IngestionConnectors the Admin dashboard inspects", async () => {

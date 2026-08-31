@@ -118,6 +118,20 @@ describe("Admin dashboard", () => {
     ],
     ingestionRuns: [],
     clusteringRuns: [],
+    promptTemplates: [
+      {
+        id: "t1",
+        version: "2026-09-03",
+        params: {
+          tone: "",
+          claimCount: { min: 3, max: 6 },
+          lensEmphasis: "",
+          surfacedClaimTypes: ["consensus", "source_specific", "contradiction"],
+        },
+        isCurrent: true,
+        createdAt: "2026-08-29T09:00:00.000Z",
+      },
+    ],
     publishers: [
       { id: "p1", name: "The Ledger", domain: "ledger.example", termsClass: "internal_only", articleCount: 7 },
     ],
@@ -567,6 +581,103 @@ describe("Admin dashboard", () => {
 
     const alone = await screen.findByRole("region", { name: "Story merge" });
     expect(within(alone).getByText(/Fewer than two Stories/)).toBeInTheDocument();
+  });
+
+  // #57, ADR-0021: an Admin shapes what every reader gets by writing a version and
+  // making it current. What the register must not offer is the citation check, so the
+  // form's fields are the whole of the tuning surface.
+  it("creates a prompt version from the tuning form, and says it is not live yet", async () => {
+    mockConsole({
+      command: jsonResponse({ id: "t2", version: "2026-10-01-plainer", isCurrent: false }, 201),
+    });
+
+    renderWithProviders(<AdminDashboard />);
+
+    const register = await screen.findByRole("region", { name: "Prompt versions" });
+    await userEvent.type(within(register).getByLabelText(/Version label/), "2026-10-01-plainer");
+    await userEvent.type(within(register).getByLabelText(/Tone/), "plain, unhurried sentences");
+    await userEvent.click(within(register).getByRole("checkbox", { name: "contradiction" }));
+    await userEvent.click(within(register).getByRole("button", { name: "Create version" }));
+
+    expect(callTo("/api/v1/prompt-templates")?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        version: "2026-10-01-plainer",
+        params: {
+          tone: "plain, unhurried sentences",
+          lensEmphasis: "",
+          claimCount: { min: 3, max: 6 },
+          surfacedClaimTypes: ["consensus", "source_specific"],
+        },
+      }),
+    });
+    // Created is not live: an operator has to activate it, and the note says so
+    // rather than implying every reader is already being served under it.
+    expect(within(register).getByRole("status")).toHaveTextContent(/Make it current to serve it/);
+  });
+
+  it("makes a retained version current and states what that does to cached analyses", async () => {
+    mockConsole({
+      payload: adminPayload({
+        promptTemplates: [
+          {
+            id: "t2",
+            version: "2026-10-01-plainer",
+            params: {
+              tone: "plain, unhurried sentences",
+              claimCount: { min: 2, max: 4 },
+              lensEmphasis: "Explain the terms first.",
+              surfacedClaimTypes: ["consensus", "source_specific"],
+            },
+            isCurrent: false,
+            createdAt: "2026-09-04T09:00:00.000Z",
+          },
+          ...adminPayload().promptTemplates,
+        ],
+      }),
+      command: jsonResponse({ id: "t2", version: "2026-10-01-plainer", isCurrent: true }),
+    });
+
+    renderWithProviders(<AdminDashboard />);
+
+    const register = await screen.findByRole("region", { name: "Prompt versions" });
+    // The parameters are readable on the row, so two versions can be told apart
+    // without opening either.
+    expect(within(register).getByText(/2–4 claims · consensus, source_specific/)).toBeInTheDocument();
+    expect(within(register).getByText("Current")).toBeInTheDocument();
+    // One command, on the version that is not current: activating the current one
+    // would be a command with nothing to do.
+    const activate = within(register).getAllByRole("button", { name: "Make current" });
+    expect(activate).toHaveLength(1);
+
+    await userEvent.click(activate[0]);
+
+    expect(callTo("/api/v1/prompt-templates/t2")?.[1]).toMatchObject({
+      method: "PATCH",
+      body: JSON.stringify({ isCurrent: true }),
+    });
+    expect(within(register).getByRole("status")).toHaveTextContent(/next request for each Story regenerates/);
+  });
+
+  it("states a refused prompt version where it was fired", async () => {
+    mockConsole({
+      command: jsonResponse(
+        { error: "surfacedClaimTypes must include consensus: an analysis is refused below the prompt without one" },
+        422,
+      ),
+    });
+
+    renderWithProviders(<AdminDashboard />);
+
+    const register = await screen.findByRole("region", { name: "Prompt versions" });
+    await userEvent.type(within(register).getByLabelText(/Version label/), "2026-10-02-broken");
+    await userEvent.click(within(register).getByRole("checkbox", { name: "consensus" }));
+    await userEvent.click(within(register).getByRole("button", { name: "Create version" }));
+
+    // The refusal names the invariant it protects rather than the field it rejected:
+    // tuning that cannot produce a publishable analysis is refused above the prompt,
+    // not silently accepted and failed below it.
+    expect(within(register).getByRole("alert")).toHaveTextContent(/must include consensus/);
   });
 });
 

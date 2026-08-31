@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { parse } from "dotenv";
 import { describe, expect, it } from "vitest";
 import { SYNTHESIS_TIMEOUT_MS } from "../src/generation/config";
+import { DEFAULT_PROMPT_PARAMS } from "../src/entities/PromptTemplate";
 import type { SelectedEvidence } from "../src/generation/evidence";
 import { analysisRequest } from "../src/generation/prompt";
 import { validateAnalysis } from "../src/generation/validate";
@@ -76,7 +77,7 @@ describe.runIf(process.env.SYNTHESIS_LIVE_SMOKE === "1")("synthesis live smoke",
     const frozen = new Map(evidence.map((row) => [row.evidenceId, row.publisherId]));
 
     const raw = await configuredProvider().complete({
-      ...analysisRequest(evidence, "student_context", "feed_excerpt"),
+      ...analysisRequest(evidence, "student_context", "feed_excerpt", DEFAULT_PROMPT_PARAMS),
       timeoutMs: SYNTHESIS_TIMEOUT_MS,
     });
     const validated = validateAnalysis(raw, "student_context", frozen, { fullPermittedText: false });

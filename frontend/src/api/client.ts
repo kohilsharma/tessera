@@ -181,12 +181,41 @@ export type ClusteringRunSummary = {
   errorSummary: string | null;
 };
 
+// #57: mirrors backend/src/entities/PromptTemplate.ts. CONTEXT.md "PromptTemplate" —
+// the versioned prompt + generation params an Admin tunes to shape what every reader
+// gets. Four knobs, and deliberately no fifth: the citation validation layer lives
+// below the prompt in backend code and is not addressable from this surface (ADR-0021).
+// `surfacedClaimTypes` is drawn from CORE_CLAIM_TYPES below, which the analysis register
+// already reads — the run's own Lens claim is never optional, so it is not listed.
+export type PromptParams = {
+  tone: string;
+  claimCount: { min: number; max: number };
+  lensEmphasis: string;
+  surfacedClaimTypes: CoreClaimType[];
+};
+
+export type PromptTemplateSummary = {
+  id: string;
+  version: string;
+  params: PromptParams;
+  isCurrent: boolean;
+  createdAt: string;
+};
+
+// The bounds the API enforces (backend/src/generation/config.ts): the floor is
+// validation's own claim floor, so a tuned prompt can never ask for fewer claims than a
+// publishable run needs. Mirrored here so the form states them rather than only being
+// refused by them.
+export const MIN_TUNABLE_CLAIMS = 2;
+export const MAX_TUNABLE_CLAIMS = 8;
+
 export type AdminDashboardData = {
   role: "admin";
   userCounts: Record<UserRole, number>;
   connectors: ConnectorSummary[];
   ingestionRuns: IngestionRunSummary[];
   clusteringRuns: ClusteringRunSummary[];
+  promptTemplates: PromptTemplateSummary[];
   publishers: PublisherSummary[];
 };
 
@@ -510,7 +539,8 @@ export const GENERATION_LENSES = ["student_context", "investor_implication"] as 
 export type GenerationLens = (typeof GENERATION_LENSES)[number];
 
 export const CORE_CLAIM_TYPES = ["consensus", "source_specific", "contradiction"] as const;
-export type ClaimType = (typeof CORE_CLAIM_TYPES)[number] | GenerationLens;
+export type CoreClaimType = (typeof CORE_CLAIM_TYPES)[number];
+export type ClaimType = CoreClaimType | GenerationLens;
 
 // A row of the frozen EvidenceSet: the stable id a claim cites and the Article it
 // resolves to. `excerpt` is null where the Publisher's Terms Class does not clear
@@ -596,5 +626,26 @@ export function mergeStories(survivorStoryId: string, mergedStoryId: string): Pr
     "/api/v1/clustering/merges",
     { survivorStoryId, mergedStoryId },
     "Could not merge these Stories",
+  );
+}
+
+
+// #57: create, then activate — two operations, because a version can be staged and read
+// before every reader is served under it. Creating one changes nothing about what is
+// being generated; making it current is what invalidates the cached analyses, which the
+// API does by way of the reuse key rather than by clearing anything.
+export function createPromptTemplate(input: {
+  version: string;
+  params: PromptParams;
+}): Promise<PromptTemplateSummary> {
+  return sendJson("POST", "/api/v1/prompt-templates", input, "Could not create this prompt version");
+}
+
+export function makePromptTemplateCurrent(id: string): Promise<PromptTemplateSummary> {
+  return sendJson(
+    "PATCH",
+    `/api/v1/prompt-templates/${id}`,
+    { isCurrent: true },
+    "Could not make this prompt version current",
   );
 }

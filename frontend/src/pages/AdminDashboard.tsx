@@ -3,17 +3,24 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
   decidePendingAssignment,
+  createPromptTemplate,
   getAdminDashboard,
   getPendingAssignments,
   getStories,
+  makePromptTemplateCurrent,
   mergeStories,
   runClustering,
   runIngestionConnector,
   setConnectorEnabled,
+  MAX_TUNABLE_CLAIMS,
+  MIN_TUNABLE_CLAIMS,
+  CORE_CLAIM_TYPES,
   USER_ROLES,
   type AssignmentDecision,
   type ClusteringRunSummary,
   type IngestionRunSummary,
+  type PromptTemplateSummary,
+  type CoreClaimType,
   type TermsClass,
 } from "../api/client";
 import DashboardShell from "./DashboardShell";
@@ -61,11 +68,25 @@ const TERMS_CLASS_LABEL: Record<TermsClass, string> = {
 // misses.
 const MERGE_PICKER_STORIES = 50;
 
-// The Admin surface (#36, #39, #49, #50, #52): seven operator registers, in four
+// #57: what a tuned version asks for, read as an operator reads it — the register's own
+// summary of the parameters, so the difference between two versions is visible without
+// opening anything. An empty tone or emphasis is stated as the default rather than as a
+// blank cell.
+function tuningSummary(template: PromptTemplateSummary): string {
+  const { tone, lensEmphasis, claimCount, surfacedClaimTypes } = template.params;
+  return [
+    `${claimCount.min}–${claimCount.max} claims`,
+    surfacedClaimTypes.join(", "),
+    tone ? `tone: ${tone}` : "no tone set",
+    lensEmphasis ? `emphasis: ${lensEmphasis}` : "no Lens emphasis",
+  ].join(" · ");
+}
+
+// The Admin surface (#36, #39, #49, #50, #52, #57): eight operator registers, in four
 // shapes, so they are told apart before they are read — standing totals as plates,
 // the connector fleet and the clustering review queue as registers an operator acts
-// on, ingestion and clustering history as ledgers of runs, the Story merge as a
-// command form, publishers as a coverage register.
+// on, ingestion and clustering history as ledgers of runs, the Story merge and prompt
+// tuning as command forms, publishers as a coverage register.
 export default function AdminDashboard() {
   const query = useQuery({ queryKey: ["dashboard", "admin"], queryFn: getAdminDashboard });
   // The review queue is its own request, unlike every other register here: it is a
@@ -83,6 +104,21 @@ export default function AdminDashboard() {
   const queryClient = useQueryClient();
   const [survivorStoryId, setSurvivorStoryId] = useState("");
   const [mergedStoryId, setMergedStoryId] = useState("");
+  // #57: the tuning form's own state. It starts at the shipped defaults rather than at
+  // whatever is current, because a version is created, never edited — so this is a new
+  // version being written, not a form over an existing row.
+  //
+  // ponytail: an Admin tuning away from an already-tuned version retypes it. Prefilling
+  // from the current row is the upgrade, and it wants the form to live below the query
+  // rather than beside it.
+  const [version, setVersion] = useState("");
+  const [tone, setTone] = useState("");
+  const [lensEmphasis, setLensEmphasis] = useState("");
+  const [claimMin, setClaimMin] = useState(3);
+  const [claimMax, setClaimMax] = useState(6);
+  const [surfacedClaimTypes, setSurfacedClaimTypes] = useState<CoreClaimType[]>([
+    ...CORE_CLAIM_TYPES,
+  ]);
 
   // Both mutations change what this same payload says, so both refetch it — the
   // run counts, the new IngestionRun, and the publishers it may have created all
@@ -122,6 +158,22 @@ export default function AdminDashboard() {
     },
   });
 
+  // #57: creating a version and making one current both change the register this payload
+  // carries, so both refetch it. Neither touches a Story, an Article or a run — a
+  // prompt version is configuration, and what it changes is the *next* analysis.
+  const tune = useMutation({
+    mutationFn: () =>
+      createPromptTemplate({
+        version,
+        params: { tone, lensEmphasis, claimCount: { min: claimMin, max: claimMax }, surfacedClaimTypes },
+      }),
+    onSuccess: () => {
+      setVersion("");
+      invalidate();
+    },
+  });
+  const activate = useMutation({ mutationFn: makePromptTemplateCurrent, onSuccess: invalidate });
+
   // Firing any command clears the others' refusals first: a mutation keeps its
   // error until it is reset, so a failed Run would otherwise stay stated above the
   // register through a later successful Disable, describing something that is no
@@ -132,6 +184,8 @@ export default function AdminDashboard() {
     cluster.reset();
     decide.reset();
     merge.reset();
+    tune.reset();
+    activate.reset();
     fire();
   }
 
@@ -477,6 +531,164 @@ export default function AdminDashboard() {
                     </div>
                   </form>
                 ))}
+            </DashboardRegister>
+
+            <DashboardRegister
+              heading="Prompt versions"
+              folio={
+                data.promptTemplates.find((template) => template.isCurrent)?.version ?? "none current"
+              }
+            >
+              {(tune.error || activate.error) && (
+                <ErrorState>{tune.error?.message ?? activate.error?.message}</ErrorState>
+              )}
+              {/* Created, not live: an operator has to make it current, and until they
+                  do every reader is still served under the version above. Saying which
+                  it is, is the difference between a staged version and a change nobody
+                  asked for. */}
+              {tune.isSuccess && (
+                <PendingState>
+                  Version {tune.data.version} created. Make it current to serve it — the next analysis of each
+                  Story is generated again under it, rather than reused.
+                </PendingState>
+              )}
+              {activate.isSuccess && (
+                <PendingState>
+                  Version {activate.data.version} is current. Cached analyses under earlier versions are not served
+                  again; the next request for each Story regenerates.
+                </PendingState>
+              )}
+              {data.promptTemplates.length === 0 ? (
+                <EmptyState>
+                  <p>
+                    No prompt versions — run <code>npm run migrate</code> in <code>backend/</code>. The pipeline
+                    falls back to the shipped prompt until one exists.
+                  </p>
+                </EmptyState>
+              ) : (
+                <EntryList>
+                  {data.promptTemplates.map((template) => (
+                    <RegisterRow
+                      key={template.id}
+                      name={template.version}
+                      note={tuningSummary(template)}
+                      meta={[
+                        { term: "Status", value: template.isCurrent ? "Current" : "Retained" },
+                        { term: "Created", value: new Date(template.createdAt).toLocaleString() },
+                      ]}
+                      action={
+                        // The current version is not offered: making it current again is
+                        // a command with nothing to do, and the server would honour it.
+                        template.isCurrent ? null : (
+                          <button
+                            type="button"
+                            disabled={activate.isPending && activate.variables === template.id}
+                            onClick={() => command(() => activate.mutate(template.id))}
+                          >
+                            {activate.isPending && activate.variables === template.id
+                              ? "Activating…"
+                              : "Make current"}
+                          </button>
+                        )
+                      }
+                    />
+                  ))}
+                </EntryList>
+              )}
+
+              {/* Tuning is writing a version, so this is a form rather than controls on
+                  a row. What it cannot offer is the point (ADR-0021): there is no field
+                  here for the citation check, because that check is not configuration —
+                  it is code below the prompt, and a claim that fails it is dropped
+                  whatever this form says. */}
+              <form
+                className="filter-register"
+                aria-label="Create a prompt version"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  command(() => tune.mutate());
+                }}
+              >
+                <label className="filter-field">
+                  Version label{" "}
+                  <input
+                    value={version}
+                    onChange={(e) => setVersion(e.target.value)}
+                    placeholder="2026-10-01-plainer"
+                  />
+                </label>{" "}
+                <label className="filter-field">
+                  Tone{" "}
+                  <input
+                    value={tone}
+                    onChange={(e) => setTone(e.target.value)}
+                    placeholder="plainer sentences"
+                  />
+                </label>{" "}
+                <label className="filter-field">
+                  Lens emphasis{" "}
+                  <input
+                    value={lensEmphasis}
+                    onChange={(e) => setLensEmphasis(e.target.value)}
+                    placeholder="what to weigh"
+                  />
+                </label>{" "}
+                {/* The floor is validation's own claim floor, so the form states it
+                    rather than only being refused by it. */}
+                <label className="filter-field">
+                  Fewest claims{" "}
+                  <input
+                    type="number"
+                    min={MIN_TUNABLE_CLAIMS}
+                    max={MAX_TUNABLE_CLAIMS}
+                    value={claimMin}
+                    onChange={(e) => setClaimMin(Number(e.target.value))}
+                  />
+                </label>{" "}
+                <label className="filter-field">
+                  Most claims{" "}
+                  <input
+                    type="number"
+                    min={MIN_TUNABLE_CLAIMS}
+                    max={MAX_TUNABLE_CLAIMS}
+                    value={claimMax}
+                    onChange={(e) => setClaimMax(Number(e.target.value))}
+                  />
+                </label>{" "}
+                {/* A group rather than a fieldset: the pill treatment these controls
+                    share is an inline-flex row, which a legend does not sit inside.
+                    role="group" + aria-label carries the same grouping to a screen
+                    reader without a second layout to maintain. */}
+                <div className="filter-field" role="group" aria-label="Claim types surfaced">
+                  Surfaced{" "}
+                  {CORE_CLAIM_TYPES.map((claimType) => (
+                    <label key={claimType}>
+                      <input
+                        type="checkbox"
+                        checked={surfacedClaimTypes.includes(claimType)}
+                        onChange={(e) =>
+                          setSurfacedClaimTypes((held) =>
+                            e.target.checked
+                              ? // Rebuilt from the canonical order rather than appended
+                                // to, so the same three boxes always produce the same
+                                // list — and therefore the same prompt.
+                                CORE_CLAIM_TYPES.filter(
+                                  (candidate) => candidate === claimType || held.includes(candidate),
+                                )
+                              : held.filter((candidate) => candidate !== claimType),
+                          )
+                        }
+                      />{" "}
+                      {claimType}
+                    </label>
+                  ))}
+                </div>{" "}
+                <div className="entry-action">
+                  <button type="submit" disabled={tune.isPending || version.trim() === ""}>
+                    {tune.isPending ? "Creating…" : "Create version"}
+                  </button>
+                </div>
+              </form>
             </DashboardRegister>
 
             <DashboardRegister heading="Publishers" folio={`${data.publishers.length} registered`}>
