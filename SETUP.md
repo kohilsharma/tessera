@@ -34,29 +34,35 @@ npm run dev       # http://localhost:4000
 npm run build     # type-check + compile to dist/ (`npm start` runs the build)
 ```
 
-### The ingestion worker
+### The worker
 
-Ingestion runs in its own process, natively rather than in Compose (ADR-0015). Start it
-in a second terminal:
+Ingestion and clustering run in their own process, natively rather than in Compose
+(ADR-0015). Start it in a second terminal:
 
 ```bash
 cd backend
 npm run worker    # tsx watch src/worker.ts (`npm run start:worker` runs the build)
 ```
 
-It drains the `ingestion` queue and, on every quarter hour, enqueues one run for each
-enabled connector. The Admin console's Run button enqueues onto that same queue, so the
-scheduled path and the on-demand path are the same execution path — pressing Run with the
-worker stopped queues a run that happens when the worker next starts.
+It drains two queues. On every quarter hour it enqueues one `ingestion` run for each enabled
+connector; at five past every hour it enqueues one `clustering` run over the whole corpus. Both
+Admin commands — the Run button on a connector row, and Run clustering on the register — enqueue
+onto those same queues, so the scheduled path and the on-demand path are the same execution
+path: pressing either with the worker stopped queues work that happens when the worker next
+starts.
 
 Nothing else needs the worker: run history is read from Postgres, so
 `/dashboard/admin` renders correctly with the worker down. `REDIS_URL` must be set (it is
-in `.env.example`) for either the worker or the Run button to work.
+in `.env.example`) for either the worker or the Run buttons to work.
 
 A tick runs the whole enabled fleet one connector at a time, and the GKG firehose alone is
 ~700 rows per 15-minute window, so expect a minute of work per tick and the corpus to grow
-steadily while the worker is up. Everything it ingests is an **Unclustered Article** —
-invisible to browse and search until clustering lands.
+steadily while the worker is up. Everything it ingests arrives as an **Unclustered Article** —
+invisible to browse and search — and stays that way until the clustering pass places it. Most
+firehose rows never leave that state by design: only Articles carrying text (`feed_excerpt` or
+above — RSS and Readability, not GKG or DOC) are eligible, and a Story is seeded only where two
+Publishers corroborate each other, so a first hour of ingestion may cluster nothing. The
+clustering thresholds are env-overridable with documented defaults (see `.env.example`).
 
 ### Demo logins
 

@@ -1,0 +1,629 @@
+import "reflect-metadata";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import bcrypt from "bcryptjs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import request from "supertest";
+import { createApp } from "../src/app";
+import { AppDataSource } from "../src/data-source";
+import { signToken } from "../src/auth/jwt";
+import { runClusteringJob } from "../src/clustering/jobs";
+import { CLUSTERING_RUN_JOB, CLUSTERING_TICK_JOB } from "../src/clustering/queue";
+import { runClustering } from "../src/clustering/runClustering";
+import {
+  DEFAULT_STORY_CATEGORY,
+  EMBED_BATCH_SIZE,
+  RECENCY_WINDOW_HOURS,
+  SIMILARITY_THRESHOLD,
+} from "../src/clustering/config";
+import { EMBEDDING_DIMENSIONS, type EmbeddingKind, type EmbeddingProvider } from "../src/embeddings/EmbeddingProvider";
+import { toVectorLiteral } from "../src/embeddings/pgvector";
+import { Article, type AnalysisTextMode } from "../src/entities/Article";
+import { ClusteringRun } from "../src/entities/ClusteringRun";
+import { IngestionConnector } from "../src/entities/IngestionConnector";
+import { Publisher } from "../src/entities/Publisher";
+import { Story } from "../src/entities/Story";
+import { User } from "../src/entities/User";
+import { runConnector, type FetchText } from "../src/ingestion/runConnector";
+import { setupTestDb } from "./setupTestDb";
+
+// Redis is not in the test stack (#42), so the one enqueue call is recorded here.
+// What that leaves untested is bullmq's own guarantee that a job id already in
+// flight is not added twice; what it does test is everything either execution path
+// does either side of the queue.
+const { enqueued } = vi.hoisted(() => ({ enqueued: [] as string[] }));
+vi.mock("../src/clustering/queue", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/clustering/queue")>()),
+  enqueueClusteringRun: async () => void enqueued.push("run"),
+}));
+
+setupTestDb();
+
+const app = () => createApp();
+
+// Similarity is the behaviour under test, so the vectors are the fixture. An axis
+// vector rotated by `offAxis` radians within its own two-dimensional plane has
+// cosine similarity exactly cos(offAxis) with the plane's axis vector, and 0 with
+// every other plane — so a test can state "this pair is a match" or "this pair sits
+// just under the threshold" as an angle rather than hoping a real model agrees.
+// Planes are spaced so no two share a dimension.
+function axisVector(plane: number, offAxis = 0): number[] {
+  const vector = new Array<number>(EMBEDDING_DIMENSIONS).fill(0);
+  vector[plane * 2] = Math.cos(offAxis);
+  vector[plane * 2 + 1] = Math.sin(offAxis);
+  return vector;
+}
+
+// An angle whose cosine is comfortably under the auto-accept threshold: related
+// reporting that is not the same event.
+const BELOW_THRESHOLD = Math.acos(SIMILARITY_THRESHOLD - 0.1);
+
+// The embedder as an injected fixture: it answers from a token in the text, and
+// refuses anything it was not told about — so an unexpected embedding request is a
+// failed test rather than a silent zero vector. It also records the size of every
+// request, which is how "in batches rather than one request per Article" is checked.
+class StubEmbedder implements EmbeddingProvider {
+  readonly requests: number[] = [];
+
+  constructor(private readonly byToken: Record<string, number[]>) {}
+
+  async embed(text: string): Promise<number[]> {
+    const token = Object.keys(this.byToken).find((key) => text.includes(key));
+    if (!token) throw new Error(`StubEmbedder was asked to embed unexpected text: ${text.slice(0, 80)}`);
+    return this.byToken[token];
+  }
+
+  async embedBatch(texts: string[], kind?: EmbeddingKind): Promise<number[][]> {
+    expect(kind).toBe("passage");
+    this.requests.push(texts.length);
+    return Promise.all(texts.map((text) => this.embed(text)));
+  }
+}
+
+const failingEmbedder: EmbeddingProvider = {
+  embed: () => Promise.reject(new Error("429 rate limited")),
+  embedBatch: () => Promise.reject(new Error("429 rate limited")),
+};
+
+let nextArticle = 0;
+
+async function createPublisher(domain: string): Promise<Publisher> {
+  return AppDataSource.getRepository(Publisher).save({ domain, name: domain });
+}
+
+async function createArticle(fields: {
+  publisherId: string;
+  title: string;
+  mode?: AnalysisTextMode;
+  storyId?: string;
+  publishedAt?: Date;
+  vector?: number[];
+}): Promise<Article> {
+  nextArticle += 1;
+  const mode = fields.mode ?? "feed_excerpt";
+  const article = await AppDataSource.getRepository(Article).save({
+    publisherId: fields.publisherId,
+    storyId: fields.storyId ?? null,
+    title: fields.title,
+    url: `https://${nextArticle}.example/story`,
+    // `metadata_only` is the one rung that may hold no text (ADR-0024).
+    analysisText: mode === "metadata_only" ? null : `${fields.title} body text`,
+    analysisTextMode: mode,
+    publishedAt: fields.publishedAt ?? new Date("2026-08-31T09:00:00Z"),
+  });
+  if (fields.vector) await setVector(article.id, fields.vector);
+  return article;
+}
+
+async function createStory(fields: { title: string; lastSeenAt: Date }): Promise<Story> {
+  return AppDataSource.getRepository(Story).save({
+    slug: `${fields.title.toLowerCase().replace(/\W+/g, "-")}-${(nextArticle += 1)}`,
+    title: fields.title,
+    summary: null,
+    category: "world",
+    firstSeenAt: fields.lastSeenAt,
+    lastSeenAt: fields.lastSeenAt,
+  });
+}
+
+async function setVector(articleId: string, vector: number[]): Promise<void> {
+  await AppDataSource.query(`UPDATE "articles" SET "embedding" = $1::vector WHERE "id" = $2`, [
+    toVectorLiteral(vector),
+    articleId,
+  ]);
+}
+
+async function vectorOf(articleId: string): Promise<number[] | null> {
+  const rows: { vector: string | null }[] = await AppDataSource.query(
+    `SELECT "embedding"::text AS vector FROM "articles" WHERE "id" = $1`,
+    [articleId],
+  );
+  return rows[0].vector === null ? null : (JSON.parse(rows[0].vector) as number[]);
+}
+
+async function storyCentroid(storyId: string): Promise<number[] | null> {
+  const rows: { vector: string | null }[] = await AppDataSource.query(
+    `SELECT "embedding"::text AS vector FROM "stories" WHERE "id" = $1`,
+    [storyId],
+  );
+  return rows[0].vector === null ? null : (JSON.parse(rows[0].vector) as number[]);
+}
+
+async function createAdminToken(email: string): Promise<string> {
+  const passwordHash = await bcrypt.hash("correct-horse", 10);
+  const user = await AppDataSource.getRepository(User).save({ email, passwordHash, role: "admin" });
+  return signToken({ sub: user.id, role: user.role });
+}
+
+async function registerAndLogin(email: string, role: "student" | "investor"): Promise<string> {
+  const res = await request(app()).post("/api/v1/auth/register").send({ email, password: "correct-horse", role });
+  return res.body.token as string;
+}
+
+const hoursAgo = (hours: number) => new Date(Date.now() - hours * 60 * 60 * 1000);
+
+beforeEach(async () => {
+  await AppDataSource.query(
+    `TRUNCATE "articles", "publishers", "stories", "clustering_runs", "ingestion_runs", "ingestion_connectors" CASCADE`,
+  );
+  enqueued.length = 0;
+});
+
+// Every Article a run considered ends in exactly one of the three outcomes, or an
+// operator reading a run is reading a number that means nothing. Asserted for every
+// run the suite persists, not only the ones a test thought to check.
+afterEach(async () => {
+  const offenders = await AppDataSource.query(
+    `SELECT id, status, considered, assigned, seeded, unclustered
+       FROM clustering_runs
+      WHERE assigned + seeded + unclustered <> considered`,
+  );
+  expect(offenders).toEqual([]);
+});
+
+// Seam 1: the clustering pass itself, driven as a function with an injected
+// embedder — the same shape ingestion's runConnector is driven in.
+describe("runClustering", () => {
+  it("embeds every eligible Article without a vector in batches, and never an ineligible one", async () => {
+    const publisher = await createPublisher("one.example");
+    const excerpt = await createArticle({ publisherId: publisher.id, title: "alpha excerpt" });
+    const extracted = await createArticle({ publisherId: publisher.id, title: "alpha body", mode: "api_content" });
+    const licensed = await createArticle({
+      publisherId: publisher.id,
+      title: "alpha licensed",
+      mode: "licensed_full_text",
+    });
+    // The two rungs clustering must never consider: firehose metadata, which is
+    // what the Retention Window deletes, and the Curated Corpus (ADR-0026).
+    const firehose = await createArticle({ publisherId: publisher.id, title: "alpha metadata", mode: "metadata_only" });
+    const fixture = await createArticle({ publisherId: publisher.id, title: "alpha fixture", mode: "manual_fixture" });
+
+    const embedder = new StubEmbedder({
+      "alpha excerpt": axisVector(0),
+      "alpha body": axisVector(1),
+      "alpha licensed": axisVector(2),
+    });
+    const run = await runClustering({ embedder });
+
+    expect(run.status).toBe("succeeded");
+    expect(run.embedded).toBe(3);
+    // One request for the three of them, not three requests: hosted limits count
+    // requests (ADR-0025), so this is what decides whether a backlog drains.
+    expect(embedder.requests).toEqual([3]);
+    expect(EMBED_BATCH_SIZE).toBeGreaterThanOrEqual(3);
+    for (const article of [excerpt, extracted, licensed]) {
+      expect(await vectorOf(article.id)).not.toBeNull();
+    }
+    for (const article of [firehose, fixture]) {
+      expect(await vectorOf(article.id)).toBeNull();
+    }
+    // A second run has nothing left to embed: a vector is written once and only
+    // enrichment clears it.
+    const second = await runClustering({ embedder: new StubEmbedder({}) });
+    expect(second.embedded).toBe(0);
+  });
+
+  it("joins an Article to the nearest live Story above the threshold and widens the Story's span", async () => {
+    const publisher = await createPublisher("one.example");
+    const other = await createPublisher("two.example");
+    const story = await createStory({ title: "Ceasefire talks", lastSeenAt: hoursAgo(2) });
+    await createArticle({
+      publisherId: publisher.id,
+      title: "member one",
+      storyId: story.id,
+      vector: axisVector(0),
+      publishedAt: hoursAgo(2),
+    });
+    await createArticle({
+      publisherId: other.id,
+      title: "member two",
+      storyId: story.id,
+      vector: axisVector(0),
+      publishedAt: hoursAgo(2),
+    });
+    const publishedAt = new Date();
+    const candidate = await createArticle({
+      publisherId: other.id,
+      title: "same event, third outlet",
+      vector: axisVector(0),
+      publishedAt,
+    });
+
+    const run = await runClustering({ embedder: new StubEmbedder({}) });
+
+    expect(run.considered).toBe(1);
+    expect(run.assigned).toBe(1);
+    expect(run.seeded).toBe(0);
+    expect(run.unclustered).toBe(0);
+    expect((await AppDataSource.getRepository(Article).findOneByOrFail({ id: candidate.id })).storyId).toBe(story.id);
+    // The Story now spans the reporting it holds — which is both what browse sorts
+    // by and what the recency gate reads on the next run.
+    const grown = await AppDataSource.getRepository(Story).findOneByOrFail({ id: story.id });
+    expect(grown.lastSeenAt.getTime()).toBe(publishedAt.getTime());
+    // ADR-0026: every Story carries a centroid recomputed from its members.
+    expect(await storyCentroid(story.id)).not.toBeNull();
+  });
+
+  it("refuses a dormant Story at any similarity, and a live one below the threshold", async () => {
+    const publisher = await createPublisher("one.example");
+    const dormant = await createStory({ title: "Old event", lastSeenAt: hoursAgo(RECENCY_WINDOW_HOURS + 1) });
+    await createArticle({ publisherId: publisher.id, title: "old member", storyId: dormant.id, vector: axisVector(0) });
+    const live = await createStory({ title: "Live event", lastSeenAt: hoursAgo(1) });
+    await createArticle({ publisherId: publisher.id, title: "live member", storyId: live.id, vector: axisVector(1) });
+
+    // An exact match for the dormant Story's centroid, and a near-match for the
+    // live one's — neither may be assigned.
+    const exactButDormant = await createArticle({
+      publisherId: publisher.id,
+      title: "anniversary piece",
+      vector: axisVector(0),
+    });
+    const liveButWeak = await createArticle({
+      publisherId: publisher.id,
+      title: "related but different",
+      vector: axisVector(1, BELOW_THRESHOLD),
+    });
+
+    const run = await runClustering({ embedder: new StubEmbedder({}) });
+
+    expect(run.considered).toBe(2);
+    expect(run.assigned).toBe(0);
+    expect(run.storiesCreated).toBe(0);
+    expect(run.unclustered).toBe(2);
+    const articles = AppDataSource.getRepository(Article);
+    expect((await articles.findOneByOrFail({ id: exactButDormant.id })).storyId).toBeNull();
+    expect((await articles.findOneByOrFail({ id: liveButWeak.id })).storyId).toBeNull();
+  });
+
+  it("will not seed a Story from one Publisher repeating itself", async () => {
+    const publisher = await createPublisher("one.example");
+    await createArticle({ publisherId: publisher.id, title: "first edition", vector: axisVector(0) });
+    await createArticle({ publisherId: publisher.id, title: "second edition", vector: axisVector(0) });
+
+    const run = await runClustering({ embedder: new StubEmbedder({}) });
+
+    expect(run.storiesCreated).toBe(0);
+    expect(run.seeded).toBe(0);
+    expect(run.unclustered).toBe(2);
+    expect(await AppDataSource.getRepository(Story).count()).toBe(0);
+  });
+
+  it("seeds a Story from two corroborating Publishers, named after its medoid", async () => {
+    const first = await createPublisher("one.example");
+    const second = await createPublisher("two.example");
+    const third = await createPublisher("three.example");
+    // The middle member is the medoid: it is the one both others match closely.
+    const early = await createArticle({
+      publisherId: first.id,
+      title: "Regional talks reopen",
+      vector: axisVector(0, 0.2),
+      publishedAt: hoursAgo(5),
+    });
+    const medoid = await createArticle({
+      publisherId: second.id,
+      title: "Regional ceasefire talks resume",
+      vector: axisVector(0),
+      publishedAt: hoursAgo(3),
+    });
+    const late = await createArticle({
+      publisherId: third.id,
+      title: "Talks resume, mediators say",
+      vector: axisVector(0, -0.2),
+      publishedAt: hoursAgo(1),
+    });
+    // A fourth, unrelated Article: it matches nobody and must stay Unclustered.
+    const unrelated = await createArticle({ publisherId: first.id, title: "Cup final venue", vector: axisVector(9) });
+
+    const run = await runClustering({ embedder: new StubEmbedder({}) });
+
+    expect(run.storiesCreated).toBe(1);
+    expect(run.seeded).toBe(3);
+    expect(run.assigned).toBe(0);
+    expect(run.unclustered).toBe(1);
+
+    const story = await AppDataSource.getRepository(Story).findOneByOrFail({});
+    expect(story.title).toBe(medoid.title);
+    expect(story.slug).toContain("regional-ceasefire-talks-resume");
+    // The documented default until #51's model call names it.
+    expect(story.category).toBe(DEFAULT_STORY_CATEGORY);
+    // Nothing has synthesised this Story, so it claims no summary.
+    expect(story.summary).toBeNull();
+    expect(story.firstSeenAt.getTime()).toBe(early.publishedAt.getTime());
+    expect(story.lastSeenAt.getTime()).toBe(late.publishedAt.getTime());
+    // A Story is only complete once it carries the centroid of its members.
+    expect(await storyCentroid(story.id)).not.toBeNull();
+
+    const articles = AppDataSource.getRepository(Article);
+    expect(await articles.countBy({ storyId: story.id })).toBe(3);
+    expect((await articles.findOneByOrFail({ id: unrelated.id })).storyId).toBeNull();
+  });
+
+  it("makes newly clustered reporting visible in browse and search", async () => {
+    const first = await createPublisher("one.example");
+    const second = await createPublisher("two.example");
+    await createArticle({ publisherId: first.id, title: "Harbour dredging contract awarded", vector: axisVector(0) });
+    await createArticle({ publisherId: second.id, title: "Harbour dredging deal signed", vector: axisVector(0) });
+
+    // Unclustered Articles are invisible by construction — every read path joins
+    // through Story — so this is the before/after that matters.
+    const token = await registerAndLogin("clustering-reader@example.com", "student");
+    const before = await request(app()).get("/api/v1/search?q=dredging").set("Authorization", `Bearer ${token}`);
+    expect(before.body.items).toEqual([]);
+
+    await runClustering({ embedder: new StubEmbedder({}) });
+
+    const stories = await request(app()).get("/api/v1/stories").set("Authorization", `Bearer ${token}`);
+    expect(stories.status).toBe(200);
+    expect(stories.body.items).toHaveLength(1);
+    expect(stories.body.items[0].articleCount).toBe(2);
+
+    const after = await request(app()).get("/api/v1/search?q=dredging").set("Authorization", `Bearer ${token}`);
+    expect(after.status).toBe(200);
+    expect(after.body.items).toHaveLength(2);
+  });
+
+  it("gives a curated Story a centroid but never lets a live Article into it", async () => {
+    const fixturePublisher = await createPublisher("curated.example");
+    const livePublisher = await createPublisher("live.example");
+    const curated = await createStory({ title: "Rehearsed demo Story", lastSeenAt: hoursAgo(1) });
+    await createArticle({
+      publisherId: fixturePublisher.id,
+      title: "fixture one",
+      mode: "manual_fixture",
+      storyId: curated.id,
+      vector: axisVector(0),
+    });
+    await createArticle({
+      publisherId: fixturePublisher.id,
+      title: "fixture two",
+      mode: "manual_fixture",
+      storyId: curated.id,
+      vector: axisVector(0),
+    });
+    const live = await createArticle({ publisherId: livePublisher.id, title: "live report", vector: axisVector(0) });
+
+    const run = await runClustering({ embedder: new StubEmbedder({}) });
+
+    // An exact match on the centroid, and still refused: the Curated Corpus is
+    // closed to changes in membership (ADR-0026), which is what keeps a demo Story
+    // from turning out half real and half invented.
+    expect((await AppDataSource.getRepository(Article).findOneByOrFail({ id: live.id })).storyId).toBeNull();
+    expect(run.unclustered).toBe(1);
+    // Closed to membership, not to having a centroid.
+    expect(await storyCentroid(curated.id)).not.toBeNull();
+  });
+
+  it("joins the nearest of two live Stories, not merely one above the threshold", async () => {
+    const first = await createPublisher("one.example");
+    const second = await createPublisher("two.example");
+    const near = await createStory({ title: "Nearer event", lastSeenAt: hoursAgo(2) });
+    await createArticle({ publisherId: first.id, title: "near member", storyId: near.id, vector: axisVector(0) });
+    const far = await createStory({ title: "Farther event", lastSeenAt: hoursAgo(2) });
+    // Both centroids sit in the same plane, so both clear the threshold against the
+    // candidate below — only their distance to it differs.
+    await createArticle({ publisherId: first.id, title: "far member", storyId: far.id, vector: axisVector(0, 0.3) });
+    const candidate = await createArticle({
+      publisherId: second.id,
+      title: "same event again",
+      vector: axisVector(0, 0.05),
+    });
+
+    const run = await runClustering({ embedder: new StubEmbedder({}) });
+
+    expect(run.assigned).toBe(1);
+    expect((await AppDataSource.getRepository(Article).findOneByOrFail({ id: candidate.id })).storyId).toBe(near.id);
+  });
+
+  it("drops a Story's centroid once enrichment has cleared its members' vectors", async () => {
+    const publisher = await createPublisher("one.example");
+    const story = await createStory({ title: "Stale event", lastSeenAt: hoursAgo(1) });
+    const member = await createArticle({
+      publisherId: publisher.id,
+      title: "member awaiting re-embedding",
+      storyId: story.id,
+      vector: axisVector(0),
+    });
+    await runClustering({ embedder: new StubEmbedder({}) });
+    expect(await storyCentroid(story.id)).not.toBeNull();
+
+    // What enrichment leaves behind: new text, and no vector describing it.
+    await AppDataSource.query(`UPDATE "articles" SET "embedding" = NULL WHERE "id" = $1`, [member.id]);
+    const candidate = await createArticle({
+      publisherId: publisher.id,
+      title: "matches the centroid that was",
+      vector: axisVector(0),
+    });
+
+    // The member is re-embedded by this run, but only after the centroid pass — so
+    // the Story is centroid-less while the candidate is scored, which is the point:
+    // a Story must not match text Tessera no longer holds.
+    const run = await runClustering({ embedder: new StubEmbedder({ "member awaiting": axisVector(9) }) });
+
+    expect(run.embedded).toBe(1);
+    expect(run.assigned).toBe(0);
+    expect((await AppDataSource.getRepository(Article).findOneByOrFail({ id: candidate.id })).storyId).toBeNull();
+    // Recomputed from the re-embedded member at the end of the run, so the Story is
+    // a complete row again — around its *new* text.
+    expect(await storyCentroid(story.id)).not.toBeNull();
+  });
+
+  it("records a run that could not embed as failed, with the reason on the row", async () => {
+    const publisher = await createPublisher("one.example");
+    await createArticle({ publisherId: publisher.id, title: "needs a vector" });
+
+    const run = await runClustering({ embedder: failingEmbedder });
+
+    expect(run.status).toBe("failed");
+    expect(run.errorSummary).toContain("429 rate limited");
+    expect(run.embedded).toBe(0);
+    expect(run.completedAt).not.toBeNull();
+  });
+});
+
+// The other half of ADR-0026's embedding rule: a vector must not outlive the text
+// it was made from. Driven through ingestion's real enrichment path rather than by
+// writing NULL by hand, because the requirement is that *enrichment* clears it.
+describe("enrichment and the clustering job together", () => {
+  const nprUrl = "https://www.npr.org/2026/08/30/nx-s1-5949254/lake-ontario-america-doug-ford-trump-sign-google";
+  const nprFeed: FetchText = () => readFile(join(__dirname, "fixtures", "rss", "npr-world.xml"), "utf-8");
+  const noFeed: FetchText = () => Promise.reject(new Error("extraction must not fetch a feed"));
+
+  it("re-embeds an Article whose text extraction replaced", async () => {
+    const connectors = AppDataSource.getRepository(IngestionConnector);
+    const rss = await connectors.save({
+      name: "Test RSS",
+      kind: "rss",
+      endpoint: "https://feeds.npr.org/1004/rss.xml",
+      enabled: true,
+      feedProvidesFullText: false,
+    });
+    expect((await runConnector(rss, { fetchText: nprFeed }))!.inserted).toBe(3);
+
+    const articles = AppDataSource.getRepository(Article);
+    const teaser = await articles.findOneByOrFail({ url: nprUrl });
+    // Three excerpts, one request, three vectors.
+    const embedder = new StubEmbedder({
+      "Lake Ontario": axisVector(0),
+      Venezuela: axisVector(1),
+      "Dolly Parton": axisVector(2),
+    });
+    const first = await runClustering({ embedder });
+    expect(first.embedded).toBe(3);
+    expect(await vectorOf(teaser.id)).not.toBeNull();
+
+    const extraction = await connectors.save({
+      name: "Test extraction",
+      kind: "readability",
+      endpoint: "internal:readability",
+      enabled: true,
+    });
+    const extracted = await runConnector(extraction, {
+      fetchText: noFeed,
+      fetchPage: (url) =>
+        url === nprUrl
+          ? readFile(join(__dirname, "fixtures", "readability", "npr-lake-ontario.html"), "utf-8")
+          : readFile(join(__dirname, "fixtures", "readability", "bot-challenge.html"), "utf-8"),
+    });
+    expect(extracted!.enriched).toBe(1);
+
+    // The enriched Article's vector described text Tessera no longer holds, so it
+    // is gone; the two that only failed extraction keep theirs.
+    expect(await vectorOf(teaser.id)).toBeNull();
+    const untouched = await articles.findBy({ analysisTextMode: "feed_excerpt" });
+    expect(untouched).toHaveLength(2);
+    for (const article of untouched) expect(await vectorOf(article.id)).not.toBeNull();
+
+    const second = await runClustering({ embedder });
+    expect(second.embedded).toBe(1);
+    expect(await vectorOf(teaser.id)).not.toBeNull();
+  });
+});
+
+// Seam 2: only what is HTTP-visible — the trigger's RBAC, that it enqueues rather
+// than running in the request, and that history reaches the Admin console.
+describe("POST /api/v1/clustering/runs", () => {
+  it("is Admin-only, and no refusal reaches the queue", async () => {
+    const anonymous = await request(app()).post("/api/v1/clustering/runs");
+    expect(anonymous.status).toBe(401);
+
+    const studentToken = await registerAndLogin("clustering-student@example.com", "student");
+    const student = await request(app())
+      .post("/api/v1/clustering/runs")
+      .set("Authorization", `Bearer ${studentToken}`);
+    expect(student.status).toBe(403);
+
+    const investorToken = await registerAndLogin("clustering-investor@example.com", "investor");
+    const investor = await request(app())
+      .post("/api/v1/clustering/runs")
+      .set("Authorization", `Bearer ${investorToken}`);
+    expect(investor.status).toBe(403);
+
+    expect(enqueued).toEqual([]);
+    expect(await AppDataSource.getRepository(ClusteringRun).count()).toBe(0);
+  });
+
+  it("accepts the command by enqueueing it, and clusters nothing in the request", async () => {
+    const token = await createAdminToken("clustering-admin@example.com");
+
+    const res = await request(app()).post("/api/v1/clustering/runs").set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(202);
+    expect(res.body).toEqual({ status: "accepted" });
+    expect(enqueued).toEqual(["run"]);
+    // The worker is what runs it, so the request itself persisted no run.
+    expect(await AppDataSource.getRepository(ClusteringRun).count()).toBe(0);
+  });
+
+  it("carries clustering run history on the Admin dashboard, with no worker running", async () => {
+    const token = await createAdminToken("clustering-history@example.com");
+    await AppDataSource.getRepository(ClusteringRun).save({
+      status: "succeeded",
+      startedAt: new Date("2026-08-31T10:00:00Z"),
+      completedAt: new Date("2026-08-31T10:00:20Z"),
+      embedded: 12,
+      considered: 12,
+      assigned: 4,
+      seeded: 6,
+      unclustered: 2,
+      storiesCreated: 3,
+      errorSummary: null,
+    });
+
+    const res = await request(app()).get("/api/v1/dashboard/admin").set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.clusteringRuns).toHaveLength(1);
+    expect(res.body.clusteringRuns[0]).toMatchObject({
+      status: "succeeded",
+      embedded: 12,
+      considered: 12,
+      assigned: 4,
+      seeded: 6,
+      unclustered: 2,
+      storiesCreated: 3,
+      errorSummary: null,
+    });
+  });
+});
+
+// The worker's side of the same queue, driven as a function rather than as a
+// process: the tick only fans out, and a run job is the one thing that clusters.
+describe("the clustering worker job", () => {
+  it("enqueues a run on the tick and clusters on the run job", async () => {
+    await runClusteringJob({ name: CLUSTERING_TICK_JOB });
+    expect(enqueued).toEqual(["run"]);
+    expect(await AppDataSource.getRepository(ClusteringRun).count()).toBe(0);
+
+    // The run job goes through the same runClustering the Admin trigger reaches
+    // through the queue — with the Mock provider, since no key is configured in
+    // tests (ADR-0023).
+    await runClusteringJob({ name: CLUSTERING_RUN_JOB });
+    const runs = await AppDataSource.getRepository(ClusteringRun).find();
+    expect(runs).toHaveLength(1);
+    expect(runs[0].status).toBe("succeeded");
+  });
+
+  it("refuses a job name it does not know", async () => {
+    await expect(runClusteringJob({ name: "sweep" })).rejects.toThrow(/Unknown clustering job/);
+  });
+});

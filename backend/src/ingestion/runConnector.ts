@@ -497,6 +497,11 @@ async function reconcileWithHeld(
       })
       .execute();
     if (updated.affected === 1) {
+      // ADR-0026: the vector was made from the text this update just replaced, so
+      // it now describes reporting Tessera no longer holds. Nulled rather than
+      // recomputed here — ingestion does not embed, and a null vector means one
+      // thing to the clustering job: needs embedding, next run.
+      await manager.query(`UPDATE "articles" SET "embedding" = NULL WHERE "id" = $1`, [current.id]);
       await improvePublisherName(current.publisherId);
       return "enriched";
     }

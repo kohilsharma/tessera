@@ -76,6 +76,7 @@ describe("Admin dashboard", () => {
       },
     ],
     ingestionRuns: [],
+    clusteringRuns: [],
     publishers: [
       { id: "p1", name: "The Ledger", domain: "ledger.example", termsClass: "internal_only", articleCount: 7 },
     ],
@@ -237,8 +238,74 @@ describe("Admin dashboard", () => {
     expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
   });
 
-  it("states a refused command in the connector register rather than blanking the console", async () => {
+  // #49: the clustering register, in the same three shapes as ingestion's — empty
+  // until a pass has run, a ledger once one has, and a queued acknowledgement when
+  // an operator presses the command.
+  it("distinguishes 'clustering has not run yet' from a broken register", async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(adminPayload()));
+
+    renderWithProviders(<AdminDashboard />);
+
+    const runs = await screen.findByRole("region", { name: "Clustering runs" });
+    expect(within(runs).getByText(/Clustering has not run yet/)).toBeInTheDocument();
+  });
+
+  it("registers a ClusteringRun with the counts an operator reads it for", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse(
+        adminPayload({
+          clusteringRuns: [
+            {
+              id: "k1",
+              status: "succeeded",
+              startedAt: "2026-08-31T10:00:00.000Z",
+              completedAt: "2026-08-31T10:00:20.000Z",
+              embedded: 12,
+              considered: 12,
+              assigned: 4,
+              seeded: 6,
+              unclustered: 2,
+              storiesCreated: 3,
+              errorSummary: null,
+            },
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AdminDashboard />);
+
+    const runs = await screen.findByRole("region", { name: "Clustering runs" });
+    const row = within(runs).getByRole("listitem");
+    // considered 12 = assigned 4 + seeded 6 + unclustered 2, which is the ledger
+    // ADR-0026 makes the run answerable by.
+    expect(within(row).getByText("Considered").closest("div")).toHaveTextContent("12");
+    expect(within(row).getByText("Assigned").closest("div")).toHaveTextContent("4");
+    expect(within(row).getByText("Seeded").closest("div")).toHaveTextContent("6");
+    expect(within(row).getByText("Unclustered").closest("div")).toHaveTextContent("2");
+    expect(within(row).getByText("New Stories").closest("div")).toHaveTextContent("3");
+    expect(within(row).getByText("Embedded").closest("div")).toHaveTextContent("12");
+  });
+
+  it("queues the clustering pass and says so, rather than claiming it clustered", async () => {
     vi.mocked(fetch)
+      .mockResolvedValueOnce(jsonResponse(adminPayload()))
+      .mockResolvedValueOnce(jsonResponse({ status: "accepted" }, 202))
+      .mockResolvedValue(jsonResponse(adminPayload()));
+
+    renderWithProviders(<AdminDashboard />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Run clustering" }));
+
+    expect(vi.mocked(fetch).mock.calls[1][0]).toBe("/api/v1/clustering/runs");
+    expect(vi.mocked(fetch).mock.calls[1][1]).toMatchObject({ method: "POST" });
+    expect(await screen.findByRole("status")).toHaveTextContent("Clustering queued");
+    // No run has happened, so the ledger is still empty rather than optimistic.
+    const runs = screen.getByRole("region", { name: "Clustering runs" });
+    expect(within(runs).getByText(/Clustering has not run yet/)).toBeInTheDocument();
+  });
+
+  it("states a refused command in the connector register rather than blanking the console", async () => {    vi.mocked(fetch)
       .mockResolvedValueOnce(jsonResponse(adminPayload()))
       .mockResolvedValue(jsonResponse({ error: "Connector is disabled" }, 409));
 

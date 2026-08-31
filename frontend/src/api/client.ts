@@ -144,11 +144,31 @@ export type IngestionRunSummary = {
   errorSummary: string | null;
 };
 
+// #49: mirrors backend/src/entities/ClusteringRun.ts. CONTEXT.md "Clustering Run"
+// — one invocation of the clustering pass, read from Postgres rather than the
+// queue, so this register renders with the worker down (ADR-0026).
+export type ClusteringRunSummary = {
+  id: string;
+  // The same three-value vocabulary as an IngestionRun's, deliberately shared
+  // rather than restated: both are "a pass that is in flight, finished, or failed".
+  status: IngestionRunStatus;
+  startedAt: string;
+  completedAt: string | null;
+  embedded: number;
+  considered: number;
+  assigned: number;
+  seeded: number;
+  unclustered: number;
+  storiesCreated: number;
+  errorSummary: string | null;
+};
+
 export type AdminDashboardData = {
   role: "admin";
   userCounts: Record<UserRole, number>;
   connectors: ConnectorSummary[];
   ingestionRuns: IngestionRunSummary[];
+  clusteringRuns: ClusteringRunSummary[];
   publishers: PublisherSummary[];
 };
 
@@ -414,4 +434,14 @@ export function runIngestionConnector(connectorId: string): Promise<IngestionRun
 
 export function setConnectorEnabled(connectorId: string, enabled: boolean): Promise<ConnectorSummary> {
   return sendJson("PATCH", `/api/v1/ingestion/connectors/${connectorId}`, { enabled }, "Could not update this connector");
+}
+
+// #49: the Admin clustering trigger, an enqueue for the same reason the ingestion
+// one is — the worker executes the pass, and the ClusteringRun appears in the
+// dashboard payload once it has. No id in the path: clustering is one pass over the
+// whole corpus, so there is nothing to name.
+export type ClusteringRunAccepted = { status: "accepted" };
+
+export function runClustering(): Promise<ClusteringRunAccepted> {
+  return sendJson("POST", "/api/v1/clustering/runs", undefined, "Could not run clustering");
 }

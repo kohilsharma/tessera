@@ -43,6 +43,12 @@ export class Story {
   @OneToMany(() => Article, (article) => article.story)
   articles!: Article[];
 
+  // Deliberately not mapped, for the same reason Article.embedding is not: the
+  // `vector` type is not one TypeORM's postgres driver recognises. The column and
+  // its HNSW index exist (migration 1755753000000) and clustering reads and writes
+  // it with raw SQL — ADR-0026's centroid, recomputed from the Story's members on
+  // every run.
+
   @CreateDateColumn({ type: "timestamptz" })
   createdAt!: Date;
 }

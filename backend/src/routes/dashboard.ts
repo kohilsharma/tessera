@@ -2,6 +2,7 @@ import { Router } from "express";
 import { AppDataSource } from "../data-source";
 import { User, USER_ROLES, UserRole } from "../entities/User";
 import { IntelligenceBrief } from "../entities/IntelligenceBrief";
+import { ClusteringRun } from "../entities/ClusteringRun";
 import { IngestionConnector } from "../entities/IngestionConnector";
 import { IngestionRun } from "../entities/IngestionRun";
 import { Publisher } from "../entities/Publisher";
@@ -17,6 +18,11 @@ export const dashboardRouter = Router();
 // Deep enough to tell a feed that has been failing all morning from one that
 // failed once; shallow enough that the Admin payload has a fixed ceiling.
 const RECENT_INGESTION_RUNS = 20;
+
+// The clustering history is read the same way and capped for the same reason. Its
+// own constant because the two registers are read differently: a feed's runs are
+// diagnosed per connector, a clustering pass is one series.
+const RECENT_CLUSTERING_RUNS = 20;
 
 // ADR-0004: Student and Investor are genuinely distinct endpoints/data, not one
 // shared shape with a role flag — each route below returns its own field set.
@@ -103,6 +109,15 @@ dashboardRouter.get(
       take: RECENT_INGESTION_RUNS,
     });
 
+    // ADR-0026: the same rule as ingestion history — read from Postgres, never the
+    // queue, so this register renders with the worker stopped. Served whole: every
+    // column on a ClusteringRun is a count an operator reads, so there is nothing
+    // to project away.
+    const clusteringRuns = await AppDataSource.getRepository(ClusteringRun).find({
+      order: { startedAt: "DESC" },
+      take: RECENT_CLUSTERING_RUNS,
+    });
+
     const publishers = await AppDataSource.getRepository(Publisher)
       .createQueryBuilder("publisher")
       .loadRelationCountAndMap("publisher.articleCount", "publisher.articles")
@@ -114,6 +129,7 @@ dashboardRouter.get(
       userCounts,
       connectors,
       ingestionRuns: ingestionRuns.map((run) => toPublicIngestionRun(run, run.connector.name)),
+      clusteringRuns,
       publishers: (publishers as (Publisher & { articleCount?: number })[]).map((publisher) => ({
         id: publisher.id,
         name: publisher.name,

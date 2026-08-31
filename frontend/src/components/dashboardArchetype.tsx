@@ -47,13 +47,20 @@ export function DashboardPage({
 // tell three registers apart before reading a single row. Labelled by its own
 // heading, so the Admin console's three registers are three named landmarks to
 // a screen-reader user rather than one undifferentiated run of rows.
+//
+// `command` is what an operator can do to the register's *subject* rather than to
+// any one row — running the clustering pass (#49), which is one pass over the whole
+// corpus and so has no row to hang a button on. In the row action's own treatment,
+// because it is the same thing at the register's scale.
 export function DashboardRegister({
   heading,
   folio,
+  command,
   children,
 }: {
   heading: string;
   folio: string;
+  command?: ReactNode;
   children: ReactNode;
 }) {
   const headingId = useId();
@@ -62,6 +69,7 @@ export function DashboardRegister({
       <div className="dash-register-head">
         <h2 id={headingId}>{heading}</h2>
         <p className="dash-register-folio">{folio}</p>
+        {command && <div className="entry-action">{command}</div>}
       </div>
       {children}
     </section>

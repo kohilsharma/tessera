@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getAdminDashboard,
+  runClustering,
   runIngestionConnector,
   setConnectorEnabled,
   USER_ROLES,
+  type ClusteringRunSummary,
   type IngestionRunSummary,
   type TermsClass,
 } from "../api/client";
@@ -20,7 +22,7 @@ import { EmptyState, EntryList, ErrorState, PendingState } from "../components/u
 // A run's own timing, in the note line rather than the ledger: a timestamp and a
 // duration are one fact about when, and two more ledger cells beside seven
 // counters would be the widest register on the surface holding the least.
-function runTiming(run: IngestionRunSummary): string {
+function runTiming(run: IngestionRunSummary | ClusteringRunSummary): string {
   const started = new Date(run.startedAt);
   if (!run.completedAt) return `${started.toLocaleString()} · in flight`;
   const seconds = (new Date(run.completedAt).getTime() - started.getTime()) / 1000;
@@ -42,10 +44,10 @@ const TERMS_CLASS_LABEL: Record<TermsClass, string> = {
   licensed: "Licensed",
 };
 
-// The Admin surface (#36, #39): four operator registers, in three shapes, so they
-// are told apart before they are read — standing totals as plates, the connector
-// fleet as a status register an operator can act on, ingestion history as a
-// ledger of runs, publishers as a coverage register.
+// The Admin surface (#36, #39, #49): five operator registers, in three shapes, so
+// they are told apart before they are read — standing totals as plates, the
+// connector fleet as a status register an operator can act on, ingestion and
+// clustering history as ledgers of runs, publishers as a coverage register.
 export default function AdminDashboard() {
   const query = useQuery({ queryKey: ["dashboard", "admin"], queryFn: getAdminDashboard });
   const queryClient = useQueryClient();
@@ -59,15 +61,19 @@ export default function AdminDashboard() {
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => setConnectorEnabled(id, enabled),
     onSuccess: invalidate,
   });
+  // Clustering is the same enqueue-and-wait shape as a connector run, and it too
+  // changes Stories, Articles and the run history this payload carries.
+  const cluster = useMutation({ mutationFn: runClustering, onSuccess: invalidate });
   const commandError = run.error?.message ?? toggle.error?.message ?? null;
 
-  // Firing either command clears both refusals first: a mutation keeps its error
-  // until it is reset, so a failed Run would otherwise stay stated above the
+  // Firing any command clears the others' refusals first: a mutation keeps its
+  // error until it is reset, so a failed Run would otherwise stay stated above the
   // register through a later successful Disable, describing something that is no
   // longer true.
   function command(fire: () => void): void {
     run.reset();
     toggle.reset();
+    cluster.reset();
     fire();
   }
 
@@ -187,6 +193,57 @@ export default function AdminDashboard() {
                         { term: "Duplicate", value: ingestionRun.duplicate },
                         { term: "Rejected", value: ingestionRun.rejectedByPolicy },
                         { term: "Failed", value: ingestionRun.failed },
+                      ]}
+                    />
+                  ))}
+                </EntryList>
+              )}
+            </DashboardRegister>
+
+            {/* #49: the clustering pass, which turns Unclustered Articles into
+                Stories. Its command sits on the register rather than on a row,
+                because there is one pass over the whole corpus and nothing to name.
+                ADR-0026: history is read from Postgres, so this register renders
+                whether or not the worker is running. */}
+            <DashboardRegister
+              heading="Clustering runs"
+              folio={`${data.clusteringRuns.length} most recent`}
+              command={
+                <button type="button" disabled={cluster.isPending} onClick={() => command(() => cluster.mutate())}>
+                  {cluster.isPending ? "Queueing…" : "Run clustering"}
+                </button>
+              }
+            >
+              {cluster.error && <ErrorState>{cluster.error.message}</ErrorState>}
+              {cluster.isSuccess && (
+                <PendingState>
+                  Clustering queued. The pass runs hourly; a queued run appears below once the worker has executed it —
+                  start it with <code>npm run worker</code> in <code>backend/</code>.
+                </PendingState>
+              )}
+              {data.clusteringRuns.length === 0 ? (
+                <EmptyState>
+                  <p>
+                    Clustering has not run yet. Until it does, ingested reporting stays Unclustered — held, but invisible
+                    to browse and search.
+                  </p>
+                </EmptyState>
+              ) : (
+                <EntryList>
+                  {data.clusteringRuns.map((clusteringRun) => (
+                    <RegisterRow
+                      key={clusteringRun.id}
+                      name={`Clustering pass · ${RUN_STATUS_LABEL[clusteringRun.status]}`}
+                      note={`${runTiming(clusteringRun)}${
+                        clusteringRun.errorSummary ? ` · ${clusteringRun.errorSummary}` : ""
+                      }`}
+                      meta={[
+                        { term: "Embedded", value: clusteringRun.embedded },
+                        { term: "Considered", value: clusteringRun.considered },
+                        { term: "Assigned", value: clusteringRun.assigned },
+                        { term: "Seeded", value: clusteringRun.seeded },
+                        { term: "New Stories", value: clusteringRun.storiesCreated },
+                        { term: "Unclustered", value: clusteringRun.unclustered },
                       ]}
                     />
                   ))}

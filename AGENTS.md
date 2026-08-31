@@ -90,7 +90,21 @@ that arrived without a body and have never been attempted (`articles.extractionA
 kind *and* by rung, and so is any Article whose Publisher already had its excerpt cleared for
 serving. A paywall, a bot block, or a body no longer than the excerpt it would replace is a
 counted failure that leaves the Article where it was, so a run's ledger still sums to
-`discovered`. Phase 3.5 (graph/timeline) is not built yet.
+`discovered`.
+Phase 3 has started with the **clustering tracer bullet** (#49): `src/clustering/`
+(`runClustering` is the one new seam, over `config.ts`'s two tunables) embeds eligible Articles
+in batches, recomputes every Story's centroid from its members, assigns an Article to the
+nearest live Story above the similarity threshold, and seeds a new Story from two
+mutually-matching Articles from two distinct Publishers — never one, and never into or out of
+the Curated Corpus, which `manual_fixture` closes in both directions. Eligibility is
+`feed_excerpt` or above, so the firehose's `metadata_only` rows are never clustered and keep
+aging out. A new Story takes the medoid Article's title and the `world` default until #51's
+model call names it. Enrichment nulls `articles.embedding` when it writes new text, so a null
+vector means one thing. Operationally it is a second BullMQ queue on the same worker process,
+ticking hourly at :05, with an Admin-only `POST /api/v1/clustering/runs` that answers
+`202 {status:"accepted"}` and a `clustering_runs` history table whose ledger sums
+`assigned + seeded + unclustered = considered`. Pending review and Story merge are #50 and #52;
+Phase 3.5 (graph/timeline) is not built yet.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
 `/register`, `/account`), role dashboards (`/dashboard/:role`), browsing the corpus
@@ -108,7 +122,9 @@ breakpoints sit in `docs/verification/bureau-rollout/`. `/` redirects to the cal
 dashboard. The Admin console gained a fourth register for **IngestionRun** history and Run /
 Enable-Disable commands on each connector row (#39 — Run states that it queued the run, since
 the worker is what executes it, #42), and each publisher row shows its Terms
-Class beside its article count (#40). The
+Class beside its article count (#40). A fifth register carries **ClusteringRun** history with a
+Run-clustering command on the register itself (#49 — one pass over the whole corpus, so there is
+no row to hang it on). The
 **design prototype** for the Phase-3 flagship (`src/versions/BureauPrototype.tsx` +
 `bureau.tsx` over hardcoded `src/data.ts`, styled by `src/styles.css`) sits at
 `/design-prototype`, out of the Phase-1 path.
@@ -151,6 +167,12 @@ pattern (supertest + an ephemeral Testcontainers Postgres) later Foundation tick
 - **ADR-0024** Analysis Text Mode is an ordered ladder (`metadata_only` < `feed_excerpt` <
   `api_content` < `licensed_full_text`); modes only move up. Same canonical URL across
   connectors is *enrichment*, not duplication.
+- **ADR-0025** Embeddings and synthesis share one OpenAI-compatible retry transport;
+  query/passage marking is load-bearing; rate limits count requests, so batch.
+- **ADR-0026** Clustering: one similarity knob with time as a hard gate, no singleton Stories,
+  membership on `articles`, centroid recomputed per run, Curated Corpus closed both ways.
+- **ADR-0027** Generation: deterministic evidence selection, partial claim acceptance with a
+  floor, repair rather than a model-escalation ladder; one Lens per GenerationRun.
 
 ## Build order (ADR-0022)
 
@@ -249,8 +271,9 @@ Backend commands (run from `backend/`, after `docker compose up -d` — see `SET
 
 ```bash
 npm run dev       # tsx watch, http://localhost:4000
-npm run worker    # tsx watch, the ingestion worker: drains the BullMQ queue and ticks
-                  # every 15 minutes (#42). Needs REDIS_URL; run it in a second terminal.
+npm run worker    # tsx watch, the worker: drains both BullMQ queues — ingestion, ticking every
+                  # 15 minutes (#42), and clustering, ticking hourly at :05 (#49). Needs
+                  # REDIS_URL; run it in a second terminal.
 npm run build     # tsc -> dist/
 npm run migrate   # apply TypeORM migrations
 npm run seed      # demo users for all three roles (only path to an Admin, ADR-0015) + the
@@ -262,7 +285,7 @@ npm run seed      # demo users for all three roles (only path to an Admin, ADR-0
                   # when GEMINI_API_KEY is set, else the Mock (ADR-0023 — switching providers
                   # needs a fresh volume, see SETUP.md)
 npm test          # vitest; spins up an ephemeral Postgres via Testcontainers, needs docker access
-                  # No Redis in the test stack: the enqueue is stubbed (#42)
+                  # No Redis in the test stack: the enqueue is stubbed (#42, #49)
                   # GDELT_LIVE_SMOKE=1 additionally runs the two live GDELT checks — the GKG
                   # window (#41) and the DOC query (#46) — skipped by default so the suite
                   # stays offline
