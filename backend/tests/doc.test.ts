@@ -25,12 +25,16 @@ describe("docRequestUrl", () => {
   it("keeps what the operator configured and forces the output shape and record cap", () => {
     const url = new URL(docRequestUrl(DOC_ENDPOINT));
 
-    expect(url.origin + url.pathname).toBe("https://api.gdeltproject.org/api/v2/doc/doc");
+    // Plaintext, and #60 measured why: TLS to this host is reset from the
+    // development network path while the identical plaintext request answers 200.
+    expect(url.origin + url.pathname).toBe("http://api.gdeltproject.org/api/v2/doc/doc");
     // The question is the operator's: DOC answers one rather than streaming a
     // window, which is why it lives in the endpoint and not in a column.
     expect(url.searchParams.get("query")).toBe('("artificial intelligence" OR semiconductor) sourcelang:english');
     expect(url.searchParams.get("sort")).toBe("datedesc");
-    expect(url.searchParams.get("timespan")).toBe("1h");
+    // Wide enough to clear GDELT's own indexing lag (#60): the newest hour of
+    // matches is not indexed yet, so a 1-hour window is empty by construction.
+    expect(url.searchParams.get("timespan")).toBe("6h");
     // The output shape is ours, because the parser reads exactly one; and the cap
     // is asked for at GDELT's maximum, because the truncation check only means
     // something there.
@@ -101,20 +105,30 @@ describe("parseDocArtList", () => {
     expect(unusable).toEqual({ url: null, title: null, seenAt: null });
   });
 
+  // Measured 2026-09-01 (#60): a query matching nothing is answered with exactly
+  // `{}` — proven by asking for a nonsense term over a day-wide window, and by the
+  // seeded query over the newest hour, which GDELT has not indexed yet. So the
+  // absent `articles` key is a normal zero-match answer, not the block signal the
+  // parser used to read it as.
   it("treats a matched-nothing result set as no records, not a fault", () => {
     expect(parseDocArtList(`{"articles": []}`)).toEqual([]);
+    expect(parseDocArtList("{}")).toEqual([]);
+    expect(parseDocArtList(" { } ")).toEqual([]);
   });
-  // ADR-0018's warning, as it actually arrives: a caller the DOC API has decided to
-  // block gets a 200 and a page, not a status code. So "is this an artlist response
-  // at all" is what separates a throttled run from an empty one, and the reason has
-  // to be legible on the IngestionRun an Admin then reads.
+  // Being refused does not arrive as a missing key: measured, GDELT answers a
+  // caller asking too often with a 200 and its own plain-text rate-limit notice,
+  // and a blocked one with a page. So "is this JSON at all" is what separates a
+  // throttled run from an empty one, and the reason has to be legible on the
+  // IngestionRun an Admin then reads.
   it("refuses a body that is not an artlist response, quoting enough of it to diagnose", () => {
     expect(() => parseDocArtList("")).toThrow(/empty body/);
+    expect(() =>
+      parseDocArtList("Please limit requests to one every 5 seconds or contact kalev.leetaru5@gmail.com"),
+    ).toThrow(/non-JSON body: Please limit requests to one every 5 seconds/);
     expect(() =>
       parseDocArtList("<html><head><title>429 Too Many Requests</title></head><body>Rate limited.</body></html>"),
     ).toThrow(/non-JSON body: <html><head><title>429 Too Many Requests/);
     expect(() => parseDocArtList("[]")).toThrow(/no artlist object/);
-    expect(() => parseDocArtList("{}")).toThrow(/no "articles"/);
     expect(() => parseDocArtList(`{"articles": "none"}`)).toThrow(/non-array "articles"/);
   });
 
@@ -132,9 +146,10 @@ describe("parseDocArtList", () => {
 });
 
 // ADR-0018: "Send a browser-like `User-Agent` and throttle (~1 req / few sec) or it
-// blocks." The pacing is proven at the runConnector seam (ingestion.test.ts); the
-// caller identity is proven here, without leaving the process. One request only, so
-// the interval floor imposes no wait on the suite.
+// blocks." The rate limit is real and the API states it in plain text (#60). The
+// pacing is proven at the runConnector seam (ingestion.test.ts); the caller identity
+// is proven here, without leaving the process. One request only, so the interval
+// floor imposes no wait on the suite.
 describe("httpFetchDocText", () => {
   it("identifies itself as a browser, and refuses a non-OK response", async () => {
     const seen: Record<string, string>[] = [];

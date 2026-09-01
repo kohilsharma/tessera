@@ -75,11 +75,22 @@ connector's `endpoint` query string (a seed constant an Admin cannot yet PATCH �
 is API-editable) while the connector forces `mode=artlist&format=json&maxrecords=250`; the API
 gets a
 browser-like User-Agent and a 5-second floor between requests, because it blocks a caller that
-looks like a bot or asks too often (measured: it drops the TLS connection rather than answering);
+looks like a bot or asks too often (measured: a rapid request is answered 200 with GDELT's own
+plain-text rate-limit notice);
 a full 250-record response is stated as **truncated** on the run rather than reported as
 complete; and artlist carries no body or snippet at all, so DOC rows land on the same
 `metadata_only` rung as GKG's and are pruned by the same retention pass (now
 `pruneExpiredGdeltArticles`, covering both GDELT kinds).
+Phase 3.5 opens with the DOC connector **restored** (#60), which had failed every run for two
+reasons measured on 2026-09-01, both now recorded where they bite: TLS to
+`api.gdeltproject.org` is reset from the development network path while the identical plaintext
+request answers 200 — a network path failure, not GDELT refusing a caller, so the seeded endpoint
+requests over plaintext — and GDELT indexes DOC with a ~2-hour lag (0 records over `1h`, 8 over
+`2h`, 36 over `3h`, 164 over `6h`, the full 250 over `12h`), so the seeded `timespan` is now `6h`,
+which clears the lag with a third of the record cap spare. A missing `articles` key is GDELT's
+zero-match answer, not the block signal the parser read it as; refusal still arrives as a
+non-JSON body and still fails the run loudly. The live run behind `GDELT_LIVE_SMOKE=1` now
+asserts a completed run that inserted Articles, since neither cause is expressible in a fixture.
 **Readability extraction** (#47) closes ADR-0018's fourth surface and is a connector kind of
 its own (`readability`, `src/ingestion/readability.ts` over `@mozilla/readability` + `linkedom`):
 it discovers nothing, it re-reads pages Tessera already holds an excerpt for and raises them to
@@ -430,9 +441,9 @@ npm run seed      # demo users for all three roles (only path to an Admin, ADR-0
                   # needs a fresh volume, see SETUP.md)
 npm test          # vitest; spins up an ephemeral Postgres via Testcontainers, needs docker access
                   # No Redis in the test stack: the enqueue is stubbed (#42, #49)
-                  # GDELT_LIVE_SMOKE=1 additionally runs the two live GDELT checks — the GKG
-                  # window (#41) and the DOC query (#46) — skipped by default so the suite
-                  # stays offline
+                  # GDELT_LIVE_SMOKE=1 additionally runs the three live GDELT checks — the GKG
+                  # window (#41), the DOC query (#46) and a whole DOC run that inserts
+                  # Articles (#60) — skipped by default so the suite stays offline
                   # SYNTHESIS_LIVE_SMOKE=1 runs the one live synthesis check (#54), which reads
                   # SYNTHESIS_* out of backend/.env by hand: vitest.config.ts pins those keys
                   # empty so nothing else can reach a provider by accident

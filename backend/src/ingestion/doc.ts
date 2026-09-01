@@ -82,12 +82,12 @@ function toDocArticle(raw: unknown): DocArticle {
   };
 }
 
-// Throws for a body that is not an artlist response at all, which is how a
-// throttled or blocked caller finds out: GDELT answers those with a 200 and a
-// plain-text or HTML body rather than a status code (measured 2026-08-31 — it also
-// simply drops the TLS connection, which surfaces as a fetch error instead). Every
-// record inside a well-formed response yields a DocArticle, including a mutilated
-// one, so a bad record fails *that item* exactly as a bad feed entry does.
+// Throws for a body that is not JSON at all, which is how a throttled or blocked
+// caller finds out: GDELT answers those with a 200 and its own plain-text notice
+// ("Please limit requests to one every 5 seconds…", measured 2026-09-01) or a block
+// page, rather than a status code. Every record inside a well-formed response yields
+// a DocArticle, including a mutilated one, so a bad record fails *that item* exactly
+// as a bad feed entry does.
 export function parseDocArtList(body: string): DocArticle[] {
   if (body.trim() === "") throw new Error("GDELT DOC API returned an empty body");
   let payload: unknown;
@@ -100,15 +100,13 @@ export function parseDocArtList(body: string): DocArticle[] {
     throw new Error(`GDELT DOC API returned no artlist object: ${snippet(body)}`);
   }
   const articles = (payload as { articles?: unknown }).articles;
-  // Strict about the key, permissive about its contents: `{"articles": []}` is a
-  // query that matched nothing, but an object with no `articles` at all is a shape
-  // nobody has seen from this endpoint. Failing loudly is the right side of that
-  // guess — the API signals a block with a 200 (above), a standing query matching
-  // literally nothing is near-impossible, and a run that reports "0 discovered"
-  // while actually being refused loses coverage silently.
-  if (articles === undefined) {
-    throw new Error(`GDELT DOC API returned no "articles": ${snippet(body)}`);
-  }
+  // A missing `articles` key is GDELT's way of saying nothing matched — measured
+  // 2026-09-01 (#60) both for a nonsense query over a day-wide window and for the
+  // seeded query over the newest hour, which GDELT has not finished indexing. It
+  // used to be read as a block signal; that was wrong, and reading it that way
+  // failed every DOC run whose window happened to be empty. Refusal arrives as a
+  // non-JSON body (above), which still fails loudly, so nothing is lost silently.
+  if (articles === undefined) return [];
   if (!Array.isArray(articles)) {
     throw new Error(`GDELT DOC API returned a non-array "articles": ${snippet(body)}`);
   }

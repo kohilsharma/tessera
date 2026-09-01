@@ -84,19 +84,29 @@ export const SEED_CONNECTORS: SeedConnector[] = [
     // `sourcelang:english` because everything downstream (Postgres FTS, the
     // embedding model, synthesis) is English. `sort=datedesc` so the 250-record cap
     // GDELT enforces drops the *oldest* matches rather than an arbitrary slice.
-    // `timespan=1h` to match the tick rather than exceed it: at four times the
-    // 15-minute interval a missed tick still heals, while a day-wide window on a
-    // quarter-hourly tick would re-read the same newest 250 records every run and
-    // leave anything past 250 matches/day permanently unreachable. `mode`, `format`
-    // and `maxrecords` are not here: the connector sets them, because the parser
-    // reads one output shape and the truncation check only means anything at the
-    // maximum.
+    // `mode`, `format` and `maxrecords` are not here: the connector sets them,
+    // because the parser reads one output shape and the truncation check only means
+    // anything at the maximum.
+    //
+    // Plaintext, and `timespan=6h` rather than the `1h` #46 shipped — both measured
+    // 2026-09-01 (#60), which is why this connector had failed every run:
+    //   * TLS to this host is reset from the development network path while the
+    //     identical plaintext request answers 200. It is the path, not GDELT
+    //     refusing a caller: a deliberately rapid plaintext request gets GDELT's own
+    //     rate-limit notice back. Nothing here is authenticated and nothing but
+    //     public metadata crosses, so plaintext costs no secret.
+    //   * GDELT indexes DOC with a lag of roughly two hours: the same query answered
+    //     0 records over `1h`, 8 over `2h`, 36 over `3h`, 164 over `6h` and the full
+    //     250 over `12h`. A 1-hour window is therefore empty by construction, and a
+    //     day-wide one is permanently truncated. 6h clears the lag with a third of
+    //     the cap still spare, and a quarter-hourly tick re-reading the window is
+    //     what dedup is for.
     name: "GDELT DOC API",
     kind: "gdelt_doc",
     endpoint:
-      "https://api.gdeltproject.org/api/v2/doc/doc" +
+      "http://api.gdeltproject.org/api/v2/doc/doc" +
       "?query=%28%22artificial%20intelligence%22%20OR%20semiconductor%29%20sourcelang%3Aenglish" +
-      "&sort=datedesc&timespan=1h",
+      "&sort=datedesc&timespan=6h",
     enabled: true,
     feedProvidesFullText: null,
   },

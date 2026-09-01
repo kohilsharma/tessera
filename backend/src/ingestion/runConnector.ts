@@ -83,10 +83,18 @@ export async function httpFetchBytes(url: string): Promise<Uint8Array> {
 }
 
 // ADR-0018 warns that the DOC API blocks a caller that identifies itself as a bot
-// or asks too often, and it does: measured 2026-08-31, consecutive requests get the
-// TLS connection dropped rather than a status code. So it gets a browser-like
-// User-Agent — the courtesy USER_AGENT above is what this endpoint refuses — and a
-// floor on the interval between requests.
+// or asks too often, so it gets a browser-like User-Agent and a floor on the
+// interval between requests. The rate limit is real and the API states it outright:
+// a rapid request is answered 200 with GDELT's own plain-text "Please limit requests
+// to one every 5 seconds" notice (measured 2026-09-01).
+//
+// What is *not* how a block arrives: a dropped connection. This comment used to say
+// consecutive requests get the TLS connection dropped instead of a status code.
+// That was wrong. Measured 2026-09-01, TLS to `api.gdeltproject.org` is reset from
+// the development network path whatever the pacing, while the identical plaintext
+// request answers 200 — the GKG host, on a different route, is unaffected. It is a
+// network-path failure, so the seeded DOC endpoint requests over plaintext (#60,
+// `seedData/corpus.ts`) and this fetcher follows whatever scheme the endpoint names.
 const DOC_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 export const DOC_MIN_INTERVAL_MS = 5_000;

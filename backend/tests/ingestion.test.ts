@@ -1334,33 +1334,36 @@ describe("runConnector over the GDELT DOC API", () => {
     expect(await AppDataSource.getRepository(Article).count()).toBe(0);
   });
 
-  it("fails the run gracefully when the API drops the connection instead of answering", async () => {
+  it("fails the run gracefully when the request never reaches the API", async () => {
     const connector = await createDocConnector();
 
-    // The other half of being blocked, measured against the live endpoint: the TLS
-    // connection is closed mid-handshake, so there is no body and no status at all.
+    // Measured 2026-09-01 (#60): TLS to the DOC host is reset from the development
+    // network path, so there is no body and no status at all — a network-path
+    // failure, not GDELT refusing a caller. The connector requests over plaintext
+    // for exactly that reason; this is what a run does when even that fails.
     const run = await runConnector(connector, {
       fetchText: unusedFetch,
-      fetchDoc: () => Promise.reject(new Error("write EPROTO ... SSL routines::unexpected eof while reading")),
+      fetchDoc: () => Promise.reject(new Error("fetch failed: read ECONNRESET")),
     });
 
     expect(run!.status).toBe("failed");
-    expect(run!.errorSummary).toMatch(/unexpected eof/);
+    expect(run!.errorSummary).toMatch(/ECONNRESET/);
     expect(run!.completedAt).not.toBeNull();
   });
 
   it("treats an empty result set as a run that discovered nothing", async () => {
     const connector = await createDocConnector();
 
-    // A well-formed response carrying no records is not a fault.
-    const run = await runConnector(connector, {
-      fetchText: unusedFetch,
-      fetchDoc: async () => `{"articles": []}`,
-    });
+    // A well-formed response carrying no records is not a fault — and GDELT writes
+    // one of those as bare `{}`, measured against the live API for both a nonsense
+    // query and the newest hour, which it has not indexed yet (#60).
+    for (const body of [`{"articles": []}`, "{}"]) {
+      const run = await runConnector(connector, { fetchText: unusedFetch, fetchDoc: async () => body });
 
-    expect(run!.status).toBe("succeeded");
-    expect(run!.discovered).toBe(0);
-    expect(run!.errorSummary).toBeNull();
+      expect(run!.status).toBe("succeeded");
+      expect(run!.discovered).toBe(0);
+      expect(run!.errorSummary).toBeNull();
+    }
   });
 
   // ADR-0018: the DOC API blocks a caller that asks too often, and one run is one
@@ -1386,6 +1389,28 @@ describe("runConnector over the GDELT DOC API", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // #60. The one check nothing offline could have made: this connector failed every
+  // run for two reasons a fixture cannot express — the request never reached the
+  // host, and the window it asked for was one GDELT had not indexed yet. Both are
+  // properties of the live request, so the live request is what asserts them.
+  // Opt-in with `GDELT_LIVE_SMOKE=1`, like the parser-shape check in doc.test.ts, so
+  // the ordinary suite stays offline and off this rate-limited endpoint.
+  describe.runIf(process.env.GDELT_LIVE_SMOKE === "1")("against the live API", () => {
+    it("completes a run and inserts Articles", async () => {
+      const connector = await createDocConnector();
+
+      // No injected fetcher: the real one, over the seeded endpoint, with its own
+      // pacing. `fetchText` is still required by the deps type and unreachable here.
+      const run = await runConnector(connector, { fetchText: unusedFetch });
+
+      expect(run!.status).toBe("succeeded");
+      expect(run!.discovered).toBeGreaterThan(0);
+      expect(run!.inserted).toBeGreaterThan(0);
+      expect(countersSumToDiscovered(run!)).toBe(true);
+      expect(await AppDataSource.getRepository(Article).count()).toBe(run!.inserted);
+    }, 120_000);
   });
 });
 
