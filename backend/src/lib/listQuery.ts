@@ -20,6 +20,11 @@ export type ListQueryOptions<TSort extends string> = {
   allowedSortBy: readonly TSort[];
   defaultSortBy: NoInfer<TSort>;
   allowedCategories?: readonly string[];
+  // Raised where an endpoint answers with a *set* rather than a page of one — the search
+  // timeline's axis holds up to its own cap (#65). Declared here, beside the other
+  // per-endpoint differences, so the bound a route validates against is the bound its own
+  // reads obey: a value written past the parse would put the ceiling in two places.
+  maxPageSize?: number;
 };
 
 export type ListEnvelope<T> = {
@@ -62,7 +67,10 @@ function parseDate(value: unknown, errors: string[], field: string, endOfDay = f
 
 // Shared filter+sort+pagination contract for every paginated list endpoint —
 // Stories here, IntelligenceBrief list (#20) and hybrid search (#22) reuse it —
-// so the query-param shape and validation stay identical across all three.
+// so the query-param shape and validation stay identical across all three. Where an
+// endpoint differs it says so in `options` and nowhere else, which is why the page-size
+// ceiling is one of them: a route that reads more than a page still validates the number
+// it reads with.
 // Param names are the parent spec's API contract: `category`, `dateFrom`,
 // `dateTo`, `sort` (as `field` or `field:asc|desc`), `page`, `pageSize`.
 export function parseListQuery<TSort extends string>(
@@ -73,7 +81,8 @@ export function parseListQuery<TSort extends string>(
 
   const page = parsePositiveInt(query.page, 1, errors, "page");
   const pageSize = parsePositiveInt(query.pageSize, DEFAULT_PAGE_SIZE, errors, "pageSize");
-  if (pageSize > MAX_PAGE_SIZE) errors.push(`pageSize must be at most ${MAX_PAGE_SIZE}`);
+  const maxPageSize = options.maxPageSize ?? MAX_PAGE_SIZE;
+  if (pageSize > maxPageSize) errors.push(`pageSize must be at most ${maxPageSize}`);
 
   const parts = (query.sort === undefined ? options.defaultSortBy : String(query.sort)).split(":");
   if (parts.length > 2) errors.push("sort must be 'field' or 'field:asc|desc'");

@@ -421,7 +421,9 @@ export type SearchTimelineResult = Timeline & {
   total: number;
 };
 
-// No page, no pageSize, no sort: a timeline is a set, and its order is time.
+// No page, no pageSize, no sort: a timeline is a set, and its order is time. The endpoint
+// accepts all three so a URL switched over from /search never dead-ends, and pins the axis
+// to relevance itself, so leaving them off here cannot read differently from carrying them.
 export type SearchTimelineParams = Pick<SearchParams, "q" | "category" | "dateFrom" | "dateTo">;
 
 export function searchTimeline(params: SearchTimelineParams): Promise<SearchTimelineResult> {

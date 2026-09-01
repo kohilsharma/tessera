@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { searchTimeline, type SearchTimelineLane, type TimelinePoint } from "../api/client";
 import { ArticleEntry, FilterRegister, IndexPage } from "../components/indexArchetype";
 import { CategoryFilter, DateRangeFilter, SearchTermFilter, useListQueryParams } from "../components/listControls";
-import { PERIOD_LABELS, TimelineAxis, TimelineVolume } from "../components/timelineRegister";
+import { PERIOD_LABELS, TimelineAxis, TimelineVolume, peakOf } from "../components/timelineRegister";
 import { EmptyState, EntryList, PendingState, RetryableError } from "../components/uiStates";
 
 // #65: search anything, read it as a timeline. The fourth Index-archetype surface — same
@@ -62,7 +62,8 @@ function Lane({
 export default function SearchTimeline() {
   // Same URL-as-state contract as /search, so the two readings of one query are one address
   // bar: "q" survives Clear filters here for the same reason it does there, and so does the
-  // sort — this page has no sort control, but it hands the query back to the reading that does.
+  // sort — this page has no sort control and the endpoint pins the axis to relevance, so the
+  // param is carried rather than used: it is the sibling reading's, held for the trip back.
   const list = useListQueryParams(["q", "sort"]);
   const q = list.get("q");
 
@@ -81,7 +82,7 @@ export default function SearchTimeline() {
   const timeline = query.data;
   // The lanes share the whole set's peak, so a tall bar means the same count in every
   // lane on the page.
-  const peak = Math.max(...(timeline?.volume.map((bucket) => bucket.count) ?? []), 1);
+  const peak = peakOf(timeline?.volume.map((bucket) => bucket.count) ?? []);
   const periodLabel = PERIOD_LABELS[timeline?.granularity ?? "day"];
 
   return (

@@ -547,6 +547,17 @@ describe("toLanes", () => {
   it("has no lanes for a set with nothing in it", () => {
     expect(toLanes(buildTimeline([], []))).toEqual([]);
   });
+
+  it("has no lanes for a set whose only marks are analytical events", () => {
+    // The axis exists but carries no reporting, so `volume` is empty and there is no origin
+    // to bucket against. The one shape where a fallback origin would have bucketed against
+    // the epoch instead of saying there is nothing to lay out.
+    const timeline = buildTimeline([], [
+      { kind: "evidence_frozen", id: "e1", at: new Date("2026-01-01T00:00:00Z"), articleCount: 3 },
+    ]);
+    expect(timeline.volume).toEqual([]);
+    expect(toLanes(timeline)).toEqual([]);
+  });
 });
 
 describe("GET /api/v1/search/timeline", () => {
@@ -581,9 +592,13 @@ describe("GET /api/v1/search/timeline", () => {
     expect(res.body.events).toEqual([]);
   });
 
-  it("returns the same Article set the search endpoint does for the same query", async () => {
-    // The acceptance criterion behind the reuse: one relevance implementation, so the
-    // two surfaces cannot disagree about what matched.
+  it("ranks with the search endpoint's relevance rather than a second implementation", async () => {
+    // The acceptance criterion behind the reuse: one relevance implementation, so the two
+    // surfaces cannot disagree about what matched. What they agree on is the match set and
+    // its ranking — `total` here is the same count over the same filters. The *rendered*
+    // sets coincide only up to a page: a list page holds at most MAX_PAGE_SIZE and the axis
+    // up to TIMELINE_MATCH_CAP, so a page of the list is a subset of the axis, never the
+    // other way round. This corpus is smaller than either, so here they are equal too.
     const list = await request(app())
       .get("/api/v1/search")
       .query({ q: SEMANTIC_QUERY, pageSize: 50 })
@@ -595,9 +610,10 @@ describe("GET /api/v1/search/timeline", () => {
 
     expect(timeline.status).toBe(200);
     expect(list.body.items).toHaveLength(3);
-    expect(timeline.body.points.map((p: { id: string }) => p.id).sort()).toEqual(
-      list.body.items.map((a: { id: string }) => a.id).sort(),
-    );
+    const onAxis = timeline.body.points.map((p: { id: string }) => p.id);
+    const listed = list.body.items.map((a: { id: string }) => a.id);
+    expect(listed.every((id: string) => onAxis.includes(id))).toBe(true);
+    expect(onAxis.slice().sort()).toEqual(listed.slice().sort());
     expect(timeline.body.total).toBe(list.body.total);
   });
 
@@ -690,19 +706,53 @@ describe("GET /api/v1/search/timeline", () => {
     expect(res.body).toMatchObject({ from: null, to: null, points: [], lanes: [], volume: [], total: 0 });
   });
 
-  it("accepts the list endpoint's sort vocabulary rather than dead-ending a switched URL", async () => {
+  it("accepts the list endpoint's whole vocabulary rather than dead-ending a switched URL", async () => {
+    // Everything /search puts in the address bar crosses when a reader switches readings,
+    // `page` and `pageSize` included — the page hands its query string over whole, so a 422
+    // here would be a reader losing their query for having turned a page first.
     const res = await request(app())
       .get("/api/v1/search/timeline")
-      .query({ q: SEMANTIC_QUERY, sort: "publishedAt:asc" })
+      .query({ q: SEMANTIC_QUERY, sort: "publishedAt:asc", page: 3, pageSize: 50 })
       .set("Authorization", `Bearer ${token}`);
 
     expect(res.status).toBe(200);
+    // Accepted and ignored: the axis is a set, so it has no page 3 to turn to, and it is
+    // pinned to relevance, so a carried `sort` cannot change which matches it holds.
+    const plain = await request(app())
+      .get("/api/v1/search/timeline")
+      .query({ q: SEMANTIC_QUERY })
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.body).toEqual(plain.body);
     // Still time-ordered: an axis has one order, whatever the sort asked for.
     expect(res.body.points.map((p: { id: string }) => p.id)).toEqual([
       quantumArticleId,
       internalTextArticleId,
       semanticOnlyArticleId,
     ]);
+  });
+
+  it("rejects a pageSize past its own cap, and the list's past the list's", async () => {
+    // The cap is the bound this route validates against, not a number written past the
+    // shared parse — so the ceiling is stated in one place per route rather than two.
+    const overCap = await request(app())
+      .get("/api/v1/search/timeline")
+      .query({ q: SEMANTIC_QUERY, pageSize: 201 })
+      .set("Authorization", `Bearer ${token}`);
+    expect(overCap.status).toBe(422);
+
+    const atCap = await request(app())
+      .get("/api/v1/search/timeline")
+      .query({ q: SEMANTIC_QUERY, pageSize: 200 })
+      .set("Authorization", `Bearer ${token}`);
+    expect(atCap.status).toBe(200);
+
+    // A paginated list keeps the smaller shared bound: the axis reads more because it
+    // cannot page, which is not licence for a page to.
+    const list = await request(app())
+      .get("/api/v1/search")
+      .query({ q: SEMANTIC_QUERY, pageSize: 200 })
+      .set("Authorization", `Bearer ${token}`);
+    expect(list.status).toBe(422);
   });
 
   it("serves no body text, exactly as the result list does not (ADR-0018)", async () => {

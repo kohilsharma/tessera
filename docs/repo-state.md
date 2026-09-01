@@ -286,7 +286,8 @@ one.
 reuses rather than any new machinery: `GET /api/v1/search/timeline` and `GET /api/v1/search` share
 one `matchesFor` — one accepted param vocabulary, one call into `hybridSearchArticleIds`' fused
 lexical⊕semantic ranking, one load of the Articles behind the hits — so the two readings of a
-query cannot disagree about what matched, and the axis is the one `buildTimeline` already draws.
+query cannot disagree about *what matched or how it ranked*, and the axis is the one
+`buildTimeline` already draws.
 It groups the matches into **one lane per Story** via `toLanes`, which buckets each Story against
 the *shared* axis' buckets, index for index (`bucketOf` is the one bucket-index definition both
 use): two Stories reported in the same week land in the same column and read as parallel, which
@@ -294,13 +295,20 @@ is precisely what a per-lane `buildTimeline` call would destroy. Lanes come back
 order, so the page reads down in the order the events themselves began, each naming its Story
 with the same `{id, slug, title}` projection a result row carries. Accepted membership is not
 re-implemented here either — search joins through it, so the firehose stays invisible for the
-reason it is invisible on `/search` (ADR-0028). One deliberate ceiling: an axis is a *set* and so
-cannot page, so the endpoint takes the most relevant matches up to `TIMELINE_MATCH_CAP` (200) and
-returns the true match count beside them, which the page states — span included — rather than
-hides. No analytical events ride this axis — they are facts about one Story's history, and a
-lane's heading routes into that Story to read them (#64). The endpoint accepts `/search`'s whole
-param vocabulary, `sort` included (where it only chooses which matches survive the cap), so a
-reader switching readings with their own URL never hits a 422.
+reason it is invisible on `/search` (ADR-0028). One deliberate ceiling, and it is the one thing
+the two readings do not share: an axis is a *set* and so cannot page, so the endpoint takes the
+most relevant matches up to `TIMELINE_MATCH_CAP` (200) and returns the true match count beside
+them, which the page states — span included — rather than hides. A list page is smaller again
+(`MAX_PAGE_SIZE`, 50), so a page of the list is a subset of the axis and never the reverse; the
+test asserts that containment rather than a set equality that only holds under 50 matches. The cap
+is passed to `parseListQuery` as that route's `maxPageSize` rather than written past it, so the
+number the route reads with is the number it validates against. The endpoint accepts `/search`'s
+whole param vocabulary — `sort`, `page` and `pageSize` included — so a reader switching readings
+with their own URL never hits a 422, and ignores all three: the axis pins its ranking to relevance
+itself, because the cap chooses *which* matches it carries and a route with no sort control should
+not have that decided by a param the reader cannot see. No analytical events ride this axis — they
+are facts about one Story's history, and a lane's heading routes into that Story to read them
+(#64).
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
 `/register`, `/account`), role dashboards (`/dashboard/:role`), browsing the corpus

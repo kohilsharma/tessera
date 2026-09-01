@@ -155,10 +155,13 @@ export function buildTimeline(articles: TimelineArticle[], events: TimelineEvent
 export type TimelineLane = { storyId: string; volume: number[] };
 
 export function toLanes(timeline: Timeline): TimelineLane[] {
+  // The axis' own origin, not a stand-in for one. A set with reporting in it always has
+  // volume (see above) and one without has no lanes, so an absent origin means there is
+  // nothing to lay out — where a fallback origin would instead bucket every point against
+  // the epoch and write NaN into the lane it landed outside of.
+  const origin = timeline.volume[0]?.periodStart.getTime();
+  if (origin === undefined) return [];
   const size = periodMs(timeline.granularity);
-  // Non-empty wherever this loop has work to do: a set with reporting in it always has
-  // volume (see above), and one without has no lanes.
-  const origin = timeline.volume[0]?.periodStart.getTime() ?? 0;
   const lanes = new Map<string, TimelineLane>();
   for (const point of timeline.points) {
     // An Article in no Story has no lane to be in. Unreachable from search, which joins
