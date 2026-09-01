@@ -134,6 +134,15 @@ Terms are canonical: use these words in code, docs, and conversation.
   are permanent. Bounded per Entity, strongest co-occurrences first — bounded nodes do not
   imply a bounded picture. (ADR-0019, ADR-0028)
 
+- **Entity Resolution Run** — One invocation of the entity-resolution pass, and the record of
+  what it did: how many *GKG Annotations* and Articles it read, how many candidate names it
+  considered, how many it *promoted*, how many fell below the *Entity Promotion Floor*, how many
+  Entities it demoted out of the working set, and how many *EntityEdges* the graph now carries.
+  Its ledger is `promoted + belowFloor = considered`. The counterpart of a *Clustering Run*, and
+  read from Postgres for the same reason — the Admin view must render with the worker down. A
+  pass rebuilds the whole graph in one transaction, so a failed run changed nothing and says so.
+  (ADR-0019, ADR-0028)
+
 - **Refused merge** — Two surface names an Admin declined to resolve into one Entity,
   remembered so later runs never re-propose the pair. Keyed on the *names*, not on Entity ids,
   because an Entity is a working-set row that may roll away and come back while the judgement

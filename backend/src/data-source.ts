@@ -24,6 +24,7 @@ import { AddClaimEvidenceRelationship1755759000000 } from "./migrations/17557590
 import { CreatePromptTemplates1755760000000 } from "./migrations/1755760000000-CreatePromptTemplates";
 import { CreateFlashcards1755761000000 } from "./migrations/1755761000000-CreateFlashcards";
 import { RecordFlashcardReviewsAndCacheQuestions1755762000000 } from "./migrations/1755762000000-RecordFlashcardReviewsAndCacheQuestions";
+import { CreateEntityResolution1755763000000 } from "./migrations/1755763000000-CreateEntityResolution";
 import { User } from "./entities/User";
 import { Publisher } from "./entities/Publisher";
 import { Story } from "./entities/Story";
@@ -42,6 +43,9 @@ import { AnalysisClaim } from "./entities/AnalysisClaim";
 import { ClaimEvidence } from "./entities/ClaimEvidence";
 import { PromptTemplate } from "./entities/PromptTemplate";
 import { Flashcard } from "./entities/Flashcard";
+import { Entity } from "./entities/Entity";
+import { EntityEdge } from "./entities/EntityEdge";
+import { EntityResolutionRun } from "./entities/EntityResolutionRun";
 
 const url = process.env.DATABASE_URL;
 
@@ -78,6 +82,9 @@ export const AppDataSource = new DataSource({
     ClaimEvidence,
     PromptTemplate,
     Flashcard,
+    Entity,
+    EntityEdge,
+    EntityResolutionRun,
   ],
   migrations: [
     InitPgvector1755740000000,
@@ -103,6 +110,7 @@ export const AppDataSource = new DataSource({
     CreatePromptTemplates1755760000000,
     CreateFlashcards1755761000000,
     RecordFlashcardReviewsAndCacheQuestions1755762000000,
+    CreateEntityResolution1755763000000,
   ],
   synchronize: false,
   logging: false,

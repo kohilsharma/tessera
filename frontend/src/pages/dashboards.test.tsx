@@ -128,6 +128,7 @@ describe("Admin dashboard", () => {
     ],
     ingestionRuns: [],
     clusteringRuns: [],
+    entityResolutionRuns: [],
     promptClaimCountRange: { min: 2, max: 8 },
     promptTemplates: [
       {
@@ -425,6 +426,60 @@ describe("Admin dashboard", () => {
     // No run has happened, so the ledger is still empty rather than optimistic.
     const runs = screen.getByRole("region", { name: "Clustering runs" });
     expect(within(runs).getByText(/Clustering has not run yet/)).toBeInTheDocument();
+  });
+
+  it("registers an EntityResolutionRun with the counters the pass is answerable by", async () => {
+    mockConsole({
+      payload: adminPayload({
+        entityResolutionRuns: [
+          {
+            id: "g1",
+            status: "succeeded",
+            startedAt: "2026-08-31T10:20:00.000Z",
+            completedAt: "2026-08-31T10:20:30.000Z",
+            annotationsRead: 19442,
+            articlesRead: 968,
+            considered: 40,
+            promoted: 12,
+            belowFloor: 28,
+            demoted: 3,
+            edgesBuilt: 57,
+            errorSummary: null,
+          },
+        ],
+      }),
+    });
+
+    renderWithProviders(<AdminDashboard />);
+
+    const runs = await screen.findByRole("region", { name: "Entity resolution runs" });
+    const row = within(runs).getByRole("listitem");
+    // considered 40 = promoted 12 + below floor 28: the floor is the whole decision this
+    // pass makes, so the two outcomes summing to the input is what the register states.
+    expect(within(row).getByText("Considered").closest("div")).toHaveTextContent("40");
+    expect(within(row).getByText("Promoted").closest("div")).toHaveTextContent("12");
+    expect(within(row).getByText("Below floor").closest("div")).toHaveTextContent("28");
+    // Read, demoted and built sit outside that sum, each answering a different question:
+    // what the pass looked at, what left the working set, and how big the graph now is.
+    // 19,442 and not the 66,229 a measured window stages: a Theme is never read here.
+    expect(within(row).getByText("Annotations").closest("div")).toHaveTextContent("19442");
+    expect(within(row).getByText("Articles").closest("div")).toHaveTextContent("968");
+    expect(within(row).getByText("Demoted").closest("div")).toHaveTextContent("3");
+    expect(within(row).getByText("Edges").closest("div")).toHaveTextContent("57");
+  });
+
+  it("queues the resolution pass and says so, rather than claiming it resolved", async () => {
+    mockConsole({ command: jsonResponse({ status: "accepted" }, 202) });
+
+    renderWithProviders(<AdminDashboard />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Run resolution" }));
+
+    expect(callTo("/api/v1/graph/resolution-runs")?.[1]).toMatchObject({ method: "POST" });
+    expect(await screen.findByRole("status")).toHaveTextContent("Entity resolution queued");
+    // The worker is what promotes and connects, so the ledger below is still empty.
+    const runs = screen.getByRole("region", { name: "Entity resolution runs" });
+    expect(within(runs).getByText(/Entity resolution has not run yet/)).toBeInTheDocument();
   });
 
   it("states a refused command in the connector register rather than blanking the console", async () => {

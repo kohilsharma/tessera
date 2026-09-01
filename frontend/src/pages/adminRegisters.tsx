@@ -8,11 +8,13 @@ import {
   getStories,
   mergeStories,
   runClustering,
+  runEntityResolution,
   setPromptTemplateCurrent,
   CORE_CLAIM_TYPES,
   type AssignmentDecision,
   type ClusteringRunSummary,
   type CoreClaimType,
+  type EntityResolutionRunSummary,
   type IngestionRunSummary,
   type PromptTemplateSummary,
 } from "../api/client";
@@ -33,9 +35,10 @@ import { EmptyState, EntryList, ErrorState, PendingState, RetryableError } from 
 
 // A run's own timing, in the note line rather than the ledger: a timestamp and a
 // duration are one fact about when, and two more ledger cells beside seven counters
-// would be the widest register on the surface holding the least. Shared with the
-// ingestion ledger, which reads the same way.
-export function runTiming(run: IngestionRunSummary | ClusteringRunSummary): string {
+// would be the widest register on the surface holding the least. Shared by all three
+// run registers, which read the same way — hence the two fields it uses rather than a
+// union of the three run types, which would have to be widened for a fourth.
+export function runTiming(run: { startedAt: string; completedAt: string | null }): string {
   const started = new Date(run.startedAt);
   if (!run.completedAt) return `${started.toLocaleString()} · in flight`;
   const seconds = (new Date(run.completedAt).getTime() - started.getTime()) / 1000;
@@ -103,6 +106,65 @@ export function ClusteringRunsRegister({ runs }: { runs: ClusteringRunSummary[] 
                 { term: "Seeded", value: clusteringRun.seeded },
                 { term: "New Stories", value: clusteringRun.storiesCreated },
                 { term: "Unclustered", value: clusteringRun.unclustered },
+              ]}
+            />
+          ))}
+        </EntryList>
+      )}
+    </DashboardRegister>
+  );
+}
+
+// #66: the entity resolution pass, which promotes the surface names GKG staged into
+// Entities and rebuilds their cited co-occurrence edges. Its command sits on the
+// register for the reason clustering's does — one pass over everything, so there is no
+// row to hang it on — and its history is read from Postgres, so this renders with the
+// worker stopped.
+export function EntityResolutionRunsRegister({ runs }: { runs: EntityResolutionRunSummary[] }) {
+  const refresh = useConsoleRefresh();
+  const resolve = useMutation({ mutationFn: runEntityResolution, onSuccess: refresh });
+
+  return (
+    <DashboardRegister
+      heading="Entity resolution runs"
+      folio={`${runs.length} most recent`}
+      command={
+        <button type="button" disabled={resolve.isPending} onClick={() => resolve.mutate()}>
+          {resolve.isPending ? "Queueing…" : "Run resolution"}
+        </button>
+      }
+    >
+      {resolve.error && <ErrorState>{resolve.error.message}</ErrorState>}
+      {resolve.isSuccess && (
+        <PendingState>
+          Entity resolution queued. The pass runs hourly; a queued run appears below once the worker has executed it —
+          start it with <code>npm run worker</code> in <code>backend/</code>.
+        </PendingState>
+      )}
+      {runs.length === 0 ? (
+        <EmptyState>
+          <p>
+            Entity resolution has not run yet. The GKG Annotations behind the graph are staged against their Articles,
+            but no name has been promoted, so there is nothing to read yet.
+          </p>
+        </EmptyState>
+      ) : (
+        <EntryList>
+          {runs.map((resolutionRun) => (
+            <RegisterRow
+              key={resolutionRun.id}
+              name={`Resolution pass · ${RUN_STATUS_LABEL[resolutionRun.status]}`}
+              note={`${runTiming(resolutionRun)}${
+                resolutionRun.errorSummary ? ` · ${resolutionRun.errorSummary}` : ""
+              }`}
+              meta={[
+                { term: "Annotations", value: resolutionRun.annotationsRead },
+                { term: "Articles", value: resolutionRun.articlesRead },
+                { term: "Considered", value: resolutionRun.considered },
+                { term: "Promoted", value: resolutionRun.promoted },
+                { term: "Below floor", value: resolutionRun.belowFloor },
+                { term: "Demoted", value: resolutionRun.demoted },
+                { term: "Edges", value: resolutionRun.edgesBuilt },
               ]}
             />
           ))}

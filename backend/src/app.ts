@@ -8,6 +8,7 @@ import { briefsRouter } from "./routes/briefs";
 import { searchRouter } from "./routes/search";
 import { ingestionRouter } from "./routes/ingestion";
 import { clusteringRouter } from "./routes/clustering";
+import { graphRouter } from "./routes/graph";
 import { generationRouter } from "./routes/generation";
 import { promptsRouter } from "./routes/prompts";
 import { flashcardsRouter } from "./routes/flashcards";
@@ -31,6 +32,7 @@ export function createApp() {
   app.use("/api/v1", searchRouter);
   app.use("/api/v1", ingestionRouter);
   app.use("/api/v1", clusteringRouter);
+  app.use("/api/v1", graphRouter);
   app.use("/api/v1", generationRouter);
   app.use("/api/v1", promptsRouter);
   app.use("/api/v1", flashcardsRouter);

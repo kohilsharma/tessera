@@ -18,6 +18,7 @@ import { EmptyState, EntryList, ErrorState, PendingState } from "../components/u
 import {
   ClusteringReviewRegister,
   ClusteringRunsRegister,
+  EntityResolutionRunsRegister,
   PromptVersionsRegister,
   RUN_STATUS_LABEL,
   StoryMergeRegister,
@@ -40,7 +41,7 @@ const TERMS_CLASS_LABEL: Record<TermsClass, string> = {
 // tuning as command forms, publishers as a coverage register.
 //
 // This page lays them out and owns the two that read the console payload it fetches;
-// the four Phase-3 registers own their own requests and commands (./adminRegisters).
+// the five Phase-3 registers own their own requests and commands (./adminRegisters).
 export default function AdminDashboard() {
   const query = useQuery({ queryKey: ["dashboard", "admin"], queryFn: getAdminDashboard });
   const queryClient = useQueryClient();
@@ -190,6 +191,10 @@ export default function AdminDashboard() {
             </DashboardRegister>
 
             <ClusteringRunsRegister runs={data.clusteringRuns} />
+
+            {/* The three pipeline ledgers read in the order the pipeline runs, and
+                before the registers that ask an operator to decide something. */}
+            <EntityResolutionRunsRegister runs={data.entityResolutionRuns} />
 
             <ClusteringReviewRegister />
 

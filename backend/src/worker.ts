@@ -1,86 +1,115 @@
 import "reflect-metadata";
-import { Worker } from "bullmq";
+import { Worker, type Processor, type Queue } from "bullmq";
 import { AppDataSource } from "./data-source";
 import { runClusteringJob } from "./clustering/jobs";
-import {
-  CLUSTERING_QUEUE,
-  CLUSTERING_TICK_JOB,
-  closeClusteringQueue,
-  clusteringQueue,
-} from "./clustering/queue";
+import { CLUSTERING_QUEUE, CLUSTERING_TICK_JOB, closeClusteringQueue, clusteringQueue } from "./clustering/queue";
+import { runGraphJob } from "./graph/jobs";
+import { GRAPH_QUEUE, GRAPH_TICK_JOB, closeGraphQueue, graphQueue } from "./graph/queue";
 import { runIngestionJob } from "./ingestion/jobs";
 import { INGESTION_QUEUE, TICK_JOB, closeIngestionQueue, ingestionQueue, redisUrl } from "./ingestion/queue";
 
 // The ingestion worker: its own process, sharing this repo's DataSource and
 // entities with the API, and run natively rather than in Compose (ADR-0015).
 // `npm run worker` in development, `npm run start:worker` from dist/.
-// From #49 it drains the clustering queue too — one process, two queues, because
-// the two passes keep different clocks but there is no second thing to deploy.
+// From #49 it drains the clustering queue too, and from #66 the graph queue — one
+// process, three queues, because the passes keep different clocks but there is no
+// second thing to deploy.
 
-// GDELT publishes a new GKG window every 15 minutes on the quarter hour
-// (ADR-0018), so the tick sits on that boundary — six fields, so second 0. The
-// tick is also what ages GKG rows out (ingestion/retention.ts).
-// A tick whose fleet is still draining 15 minutes later has its re-enqueue
-// swallowed by the per-connector job id, and the worker is not a 24/7 service
-// either — so neither a missed tick nor a stopped worker loses a window: the GKG
-// connector's cursor (#45) heals the gap on its next run, up to a two-hour cap.
-const TICK_SCHEDULE = { pattern: "0 */15 * * * *" };
-
-// ADR-0026: clustering is hourly. Five past, not on the hour: the quarter-hour tick
-// above is already fanning the feed fleet out at :00, and a clustering pass reads
-// what ingestion has just written.
-const CLUSTERING_TICK_SCHEDULE = { pattern: "0 5 * * * *" };
-
-// One at a time. A GKG window is ~700 rows and holding the whole fleet behind it
-// is the point: with a per-connector job id (queue.ts) this makes two concurrent
-// runs of anything structurally impossible, rather than something the run function
-// has to defend against.
+// One at a time, per queue. A GKG window is ~700 rows and holding the whole fleet
+// behind it is the point: with a per-connector job id (queue.ts) this makes two
+// concurrent runs of anything structurally impossible, rather than something the run
+// function has to defend against.
 // ponytail: the ceiling is throughput — a slow feed delays the rest of that tick.
 // Raising concurrency is the upgrade, and it needs a per-connector lock in
 // runConnector first.
 const CONCURRENCY = 1;
 
+// What a queue is to this process: a schedule to keep, a handler to run, and a
+// connection to close. Three near-identical ten-line blocks were the alternative, and
+// the third copy is where one of them quietly stops matching the others.
+type Pipeline = {
+  name: string;
+  queue: () => Queue;
+  tickJob: string;
+  // Six cron fields, so the leading 0 is the second.
+  pattern: string;
+  handler: Processor;
+  close: () => Promise<void>;
+};
+
+const PIPELINES: Pipeline[] = [
+  {
+    // GDELT publishes a new GKG window every 15 minutes on the quarter hour
+    // (ADR-0018), so the tick sits on that boundary. The tick is also what ages GKG
+    // rows out (ingestion/retention.ts).
+    // A tick whose fleet is still draining 15 minutes later has its re-enqueue
+    // swallowed by the per-connector job id, and the worker is not a 24/7 service
+    // either — so neither a missed tick nor a stopped worker loses a window: the GKG
+    // connector's cursor (#45) heals the gap on its next run, up to a two-hour cap.
+    name: INGESTION_QUEUE,
+    queue: ingestionQueue,
+    tickJob: TICK_JOB,
+    pattern: "0 */15 * * * *",
+    handler: runIngestionJob,
+    close: closeIngestionQueue,
+  },
+  {
+    // ADR-0026: clustering is hourly. Five past, not on the hour: the quarter-hour
+    // tick above is already fanning the feed fleet out at :00, and a clustering pass
+    // reads what ingestion has just written.
+    name: CLUSTERING_QUEUE,
+    queue: clusteringQueue,
+    tickJob: CLUSTERING_TICK_JOB,
+    pattern: "0 5 * * * *",
+    handler: runClusteringJob,
+    close: closeClusteringQueue,
+  },
+  {
+    // Hourly too, at twenty past: clear of the quarter-hour ingestion ticks on either
+    // side of it, and after clustering, since both read what ingestion wrote and only
+    // one of them should be holding the annotation table at a time.
+    name: GRAPH_QUEUE,
+    queue: graphQueue,
+    tickJob: GRAPH_TICK_JOB,
+    pattern: "0 20 * * * *",
+    handler: runGraphJob,
+    close: closeGraphQueue,
+  },
+];
+
 async function main(): Promise<void> {
   await AppDataSource.initialize();
 
-  // Upsert, not add: restarting the worker must not leave two schedulers ticking.
-  await ingestionQueue().upsertJobScheduler(TICK_JOB, TICK_SCHEDULE, { name: TICK_JOB });
+  const workers: Worker[] = [];
+  for (const pipeline of PIPELINES) {
+    // Upsert, not add: restarting the worker must not leave two schedulers ticking.
+    await pipeline
+      .queue()
+      .upsertJobScheduler(pipeline.tickJob, { pattern: pipeline.pattern }, { name: pipeline.tickJob });
 
-  const worker = new Worker(INGESTION_QUEUE, runIngestionJob, {
-    // Unlike the queue's connection, the worker waits indefinitely rather than
-    // failing a command: a Redis blip should pause draining, not kill the process.
-    connection: { url: redisUrl(), maxRetriesPerRequest: null },
-    concurrency: CONCURRENCY,
-  });
-  // A job that throws is an infrastructure fault: a run that merely fails is a
-  // persisted IngestionRun with status `failed` (ADR-0024), which the Admin
-  // console already states.
-  worker.on("failed", (job, err) => console.error(`[worker] job ${job?.name} ${job?.id} failed`, err));
-  // Without a listener, a dropped Redis connection is an unhandled 'error' event,
-  // which takes the process down — the likeliest thing to happen to a demo.
-  worker.on("error", (err) => console.error("[worker] queue connection error", err));
-  console.log(`[worker] draining "${INGESTION_QUEUE}", ticking on "${TICK_SCHEDULE.pattern}"`);
-
-  // Its own worker, so an hourly clustering pass is not queued behind a fleet of
-  // feeds — and its own concurrency of 1, which with the constant job id is what
-  // makes two concurrent clustering runs structurally impossible.
-  await clusteringQueue().upsertJobScheduler(CLUSTERING_TICK_JOB, CLUSTERING_TICK_SCHEDULE, {
-    name: CLUSTERING_TICK_JOB,
-  });
-  const clusteringWorker = new Worker(CLUSTERING_QUEUE, runClusteringJob, {
-    connection: { url: redisUrl(), maxRetriesPerRequest: null },
-    concurrency: CONCURRENCY,
-  });
-  clusteringWorker.on("failed", (job, err) => console.error(`[worker] job ${job?.name} ${job?.id} failed`, err));
-  clusteringWorker.on("error", (err) => console.error("[worker] queue connection error", err));
-  console.log(`[worker] draining "${CLUSTERING_QUEUE}", ticking on "${CLUSTERING_TICK_SCHEDULE.pattern}"`);
+    // A worker per queue, so an hourly pass is never queued behind a fleet of feeds —
+    // and a concurrency of 1 each, which with the constant job ids is what makes two
+    // concurrent runs of the same pass structurally impossible.
+    const worker = new Worker(pipeline.name, pipeline.handler, {
+      // Unlike the queues' connections, a worker waits indefinitely rather than
+      // failing a command: a Redis blip should pause draining, not kill the process.
+      connection: { url: redisUrl(), maxRetriesPerRequest: null },
+      concurrency: CONCURRENCY,
+    });
+    // A job that throws is an infrastructure fault: a run that merely fails is a
+    // persisted run row with status `failed`, which the Admin console already states.
+    worker.on("failed", (job, err) => console.error(`[worker] job ${job?.name} ${job?.id} failed`, err));
+    // Without a listener, a dropped Redis connection is an unhandled 'error' event,
+    // which takes the process down — the likeliest thing to happen to a demo.
+    worker.on("error", (err) => console.error("[worker] queue connection error", err));
+    workers.push(worker);
+    console.log(`[worker] draining "${pipeline.name}", ticking on "${pipeline.pattern}"`);
+  }
 
   const shutdown = async (signal: string): Promise<void> => {
     console.log(`[worker] ${signal} — finishing the current job`);
-    await worker.close();
-    await clusteringWorker.close();
-    await closeIngestionQueue();
-    await closeClusteringQueue();
+    for (const worker of workers) await worker.close();
+    for (const pipeline of PIPELINES) await pipeline.close();
     await AppDataSource.destroy();
     process.exit(0);
   };

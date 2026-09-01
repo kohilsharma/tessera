@@ -182,6 +182,26 @@ export type ClusteringRunSummary = {
   errorSummary: string | null;
 };
 
+// #66: mirrors backend/src/entities/EntityResolutionRun.ts. CONTEXT.md "Entity
+// Resolution Run" — one pass that promoted surface names into Entities and rebuilt
+// their cited co-occurrence edges, read from Postgres for the reason the two run
+// histories above it are, so this register renders with the worker down.
+export type EntityResolutionRunSummary = {
+  id: string;
+  // The same three-value vocabulary again, shared rather than restated.
+  status: IngestionRunStatus;
+  startedAt: string;
+  completedAt: string | null;
+  annotationsRead: number;
+  articlesRead: number;
+  considered: number;
+  promoted: number;
+  belowFloor: number;
+  demoted: number;
+  edgesBuilt: number;
+  errorSummary: string | null;
+};
+
 // #57: mirrors backend/src/entities/PromptTemplate.ts. CONTEXT.md "PromptTemplate" —
 // the versioned prompt + generation params an Admin tunes to shape what every reader
 // gets. Four knobs, and deliberately no fifth: the citation validation layer lives
@@ -209,6 +229,7 @@ export type AdminDashboardData = {
   connectors: ConnectorSummary[];
   ingestionRuns: IngestionRunSummary[];
   clusteringRuns: ClusteringRunSummary[];
+  entityResolutionRuns: EntityResolutionRunSummary[];
   promptClaimCountRange: { min: number; max: number };
   promptTemplates: PromptTemplateSummary[];
   publishers: PublisherSummary[];
@@ -498,6 +519,13 @@ export type ClusteringRunAccepted = { status: "accepted" };
 
 export function runClustering(): Promise<ClusteringRunAccepted> {
   return sendJson("POST", "/api/v1/clustering/runs", undefined, "Could not run clustering");
+}
+
+// #66: the Admin resolution trigger, an enqueue for the same reason the two above it
+// are. `ClusteringRunAccepted` reused rather than a third identical alias: every
+// accepted enqueue on this surface answers the same one thing.
+export function runEntityResolution(): Promise<ClusteringRunAccepted> {
+  return sendJson("POST", "/api/v1/graph/resolution-runs", undefined, "Could not run entity resolution");
 }
 
 // #50: the review queue. CONTEXT.md "Story Assignment" — a proposal in the band

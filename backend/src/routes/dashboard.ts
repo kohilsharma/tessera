@@ -3,6 +3,7 @@ import { AppDataSource } from "../data-source";
 import { User, USER_ROLES, UserRole } from "../entities/User";
 import { IntelligenceBrief } from "../entities/IntelligenceBrief";
 import { ClusteringRun } from "../entities/ClusteringRun";
+import { EntityResolutionRun } from "../entities/EntityResolutionRun";
 import { IngestionConnector } from "../entities/IngestionConnector";
 import { IngestionRun } from "../entities/IngestionRun";
 import { Publisher } from "../entities/Publisher";
@@ -28,6 +29,12 @@ const RECENT_INGESTION_RUNS = 20;
 // own constant because the two registers are read differently: a feed's runs are
 // diagnosed per connector, a clustering pass is one series.
 const RECENT_CLUSTERING_RUNS = 20;
+
+// And the resolution history the same way again (#66). Its own constant beside the
+// other two rather than one shared depth: they are three separate series an operator
+// reads for three different reasons, and a shared knob would tie their depths together
+// for no reason other than that they happen to agree today.
+const RECENT_ENTITY_RESOLUTION_RUNS = 20;
 
 // #57: prompt versions are not capped the way the run histories beside them are — a
 // version exists only because an operator created it, so the list grows at human rate,
@@ -135,6 +142,14 @@ dashboardRouter.get(
       take: RECENT_CLUSTERING_RUNS,
     });
 
+    // #66: the third run history, on the same terms — Postgres, never the queue, so
+    // this register renders with the worker stopped, and served whole because every
+    // column on it is a count an operator reads.
+    const entityResolutionRuns = await AppDataSource.getRepository(EntityResolutionRun).find({
+      order: { startedAt: "DESC" },
+      take: RECENT_ENTITY_RESOLUTION_RUNS,
+    });
+
     const publishers = await AppDataSource.getRepository(Publisher)
       .createQueryBuilder("publisher")
       .loadRelationCountAndMap("publisher.articleCount", "publisher.articles")
@@ -153,6 +168,7 @@ dashboardRouter.get(
       connectors,
       ingestionRuns: ingestionRuns.map((run) => toPublicIngestionRun(run, run.connector.name)),
       clusteringRuns,
+      entityResolutionRuns,
       promptClaimCountRange: { min: MIN_SURVIVING_CLAIMS, max: MAX_REQUESTED_CLAIMS },
       promptTemplates: promptTemplates.map((template) => ({
         id: template.id,

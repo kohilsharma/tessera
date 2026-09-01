@@ -252,9 +252,32 @@ advances the card with canonical SM-2 while persisting the submitted grade and r
 Question synthesis is shared through `flashcard_question_cache`, keyed by a SHA-256 of immutable
 claim type + text, so another Student studying the same analysis does not repeat the model call.
 Every route is Student-only and every query is owner-scoped.
-Phase 3.5 (entity resolution, the co-occurrence graph, the Cytoscape view, the timeline read
-view) is not built yet; its groundwork is — see ADR-0028/ADR-0029, the restored DOC connector
-(#60), the fixed Guardian feed (#61) and the annotated Curated Corpus (#62) above.
+Phase 3.5 has started with the **entity resolution tracer bullet** (#66): `src/graph/`
+(`runEntityResolution` is the one new seam, over `config.ts`'s two env-read tunables) folds every
+promotable GKG Annotation to a normalized name in Postgres — case, punctuation and whitespace,
+one exported SQL fragment used identically on insert and lookup, so promotion and every later
+lookup search the same fold — promotes the names cited by at least `GRAPH_ENTITY_PROMOTION_FLOOR`
+distinct Articles (5) to `entities`, and rebuilds the whole co-occurrence graph. Themes are never
+nodes (ADR-0028); a location's identity includes GKG's FeatureID, so two Springfields stay two
+Entities. Promotion is `ON CONFLICT DO UPDATE`, so an Entity that stays promoted keeps its id
+across passes and the displayed name follows the commonest surface form as the window rolls; an
+Entity whose annotations have aged out of the retained window is *demoted* — deleted — because the
+graph is rolling. The **citation invariant** is structural, not maintained: `entity_edges` holds one
+row per (pair, Article) with `ON DELETE CASCADE`, so an edge's weight is a count at read time and
+deleting an Article cannot leave an uncited edge behind (asserted directly, not trusted to the
+cascade). Edges are bounded at `GRAPH_EDGES_PER_ENTITY` (25) per Entity, strongest first, from
+*both* ends: a pair survives if it ranks within the bound for either endpoint, so a node never
+loses its own strongest neighbour for being that neighbour's 26th. The whole pass is one
+transaction, so a reader sees the previous graph until it commits and a failure leaves that graph
+intact — which, with stable ids, is what makes a re-run over unchanged annotations produce the same
+Entities and the same edges. Operationally it is a third BullMQ queue on the same worker process,
+ticking hourly at :20 (clear of the quarter-hour ingestion ticks, after clustering's :05), with an
+Admin-only `POST /api/v1/graph/resolution-runs` answering `202 {status:"accepted"}` and an
+`entity_resolution_runs` history table whose ledger is `promoted + belowFloor = considered`.
+Nothing *reads* the graph yet: the Cytoscape view (#68, #69), fuzzy candidate merges and their
+review queue (#67), and the timeline (#64, #65) are still ahead — as is ADR-0028/ADR-0029's
+groundwork behind them, the restored DOC connector (#60), the fixed Guardian feed (#61) and the
+annotated Curated Corpus (#62) above.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
 `/register`, `/account`), role dashboards (`/dashboard/:role`), browsing the corpus
@@ -296,16 +319,19 @@ Enable-Disable commands on each connector row (#39 — Run states that it queued
 the worker is what executes it, #42), and each publisher row shows its Terms
 Class beside its article count (#40). A fifth register carries **ClusteringRun** history with a
 Run-clustering command on the register itself (#49 — one pass over the whole corpus, so there is
-no row to hang it on), and a sixth is the **clustering review queue** (#50) — the one register
-with its own request, so it owns all four UI states, with Accept/Reject on each proposal row. A
-seventh is **Story merge** (#52), the console's one command *form*: two selects over the 50 most
+no row to hang it on), a sixth carries **EntityResolutionRun** history with a Run-resolution
+command for the same reason (#66 — Annotations, Articles, Considered, Promoted, Below floor,
+Demoted and Edges per row; it too states that it *queued* the pass, since the worker is what
+promotes and connects), and a seventh is the **clustering review queue** (#50) — the one register
+with its own request, so it owns all four UI states, with Accept/Reject on each proposal row. An
+eighth is **Story merge** (#52), the console's one command *form*: two selects over the 50 most
 recent Stories (its own request, refetched after a merge since one of the pair is gone), a Merge
 command refused client-side for a Story named twice, and a stated note reporting what the merge
-did rather than what it queued. An eighth is **Prompt versions** (#57), a register and a second
+did rather than what it queued. A ninth is **Prompt versions** (#57), a register and a second
 command form: each version states its own parameters in the note line so two can be told apart
 without opening either, a Make-current command on every row but the current one, and a form whose
 fields are the whole tuning surface — there is no control for the citation check, because it is
-not configuration. Those four Phase-3 registers live in `pages/adminRegisters.tsx`, each owning
+not configuration. Those five Phase-3 registers live in `pages/adminRegisters.tsx`, each owning
 its own request and commands; `pages/AdminDashboard.tsx` is the console that lays them out and
 the two registers reading its own payload. The
 **design prototype** for the Phase-3 flagship (`src/versions/BureauPrototype.tsx` +
@@ -454,8 +480,9 @@ Backend commands (run from `backend/`, after `docker compose up -d` — see `SET
 
 ```bash
 npm run dev       # tsx watch, http://localhost:4000
-npm run worker    # tsx watch, the worker: drains both BullMQ queues — ingestion, ticking every
-                  # 15 minutes (#42), and clustering, ticking hourly at :05 (#49). Needs
+npm run worker    # tsx watch, the worker: drains all three BullMQ queues — ingestion, ticking
+                  # every 15 minutes (#42), clustering, hourly at :05 (#49), and graph
+                  # resolution, hourly at :20 (#66). Needs
                   # REDIS_URL; run it in a second terminal.
 npm run build     # tsc -> dist/
 npm run migrate   # apply TypeORM migrations
@@ -468,7 +495,7 @@ npm run seed      # demo users for all three roles (only path to an Admin, ADR-0
                   # model are set, else the Mock (ADR-0025 — switching providers
                   # needs a fresh volume, see SETUP.md)
 npm test          # vitest; spins up an ephemeral Postgres via Testcontainers, needs docker access
-                  # No Redis in the test stack: the enqueue is stubbed (#42, #49)
+                  # No Redis in the test stack: the enqueue is stubbed (#42, #49, #66)
                   # GDELT_LIVE_SMOKE=1 additionally runs the three live GDELT checks — the GKG
                   # window (#41), the DOC query (#46) and a whole DOC run that inserts
                   # Articles (#60) — skipped by default so the suite stays offline
