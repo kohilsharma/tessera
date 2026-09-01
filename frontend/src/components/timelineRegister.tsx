@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
-import type { GenerationLens, Timeline, TimelineEvent } from "../api/client";
-import { ArticleEntry, EntryLedger } from "./indexArchetype";
+import { LENS_LABELS, type Timeline, type TimelineEvent } from "../api/client";
+import { ArticleEntry, DateStamp, EntryLedger } from "./indexArchetype";
 import { EntryList } from "./uiStates";
 
 // CONTEXT.md "Timeline": a Story's reporting ordered over time with the analytical
@@ -14,29 +14,11 @@ import { EntryList } from "./uiStates";
 // (uiStates.tsx): a Story register and a search route reach an empty timeline for
 // different reasons and say so in different words.
 
-const LENS_LABELS: Record<GenerationLens, string> = {
-  student_context: "Student context",
-  investor_implication: "Investor implication",
-};
-
 const PERIOD_LABELS: Record<Timeline["granularity"], string> = {
   hour: "per hour",
   day: "per day",
   week: "per week",
 };
-
-// A row's date, in the register every other row states one in. The axis' two ends pass
-// `withTime`, because an hourly axis is a span *inside* a day and stating the same date
-// at both ends of it would name no span at all; a row keeps the date alone, which is
-// what ArticleEntry states beside it.
-function stamp(iso: string, withTime = false) {
-  const at = new Date(iso);
-  return (
-    <time dateTime={iso}>
-      {withTime ? at.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" }) : at.toLocaleDateString()}
-    </time>
-  );
-}
 
 // An analytical event names itself and states its own facts in the register every
 // other row uses. It has no record page of its own — an EvidenceSet is frozen inside
@@ -49,7 +31,7 @@ function EventRow({ event }: { event: TimelineEvent }) {
   return (
     <li className="entry">
       <p className="entry-name">{name}</p>
-      <EntryLedger meta={[fact, { term: "Recorded", value: stamp(event.at) }]} />
+      <EntryLedger meta={[fact, { term: "Recorded", value: <DateStamp iso={event.at} /> }]} />
     </li>
   );
 }
@@ -78,8 +60,9 @@ export function TimelineRegister({ timeline }: { timeline: Timeline }) {
         firehose also saw.
       </p>
       {/* Drawn only where there is reporting to draw: a set whose only marks are
-          analytical events has no volume, and an empty ruled box would state a
-          measurement of nothing. */}
+          analytical events carries no volume at all (buildTimeline.ts empties it for
+          exactly that case), and an empty ruled box would state a measurement of
+          nothing. */}
       {timeline.volume.length > 0 && (
         <div
           className="timeline-volume"
@@ -93,11 +76,16 @@ export function TimelineRegister({ timeline }: { timeline: Timeline }) {
       )}
       {/* The axis' span is stated, not assumed: a caller may hand this a set whose
           only members carry no date, and a bar row over an unnamed span is a picture
-          of nothing. */}
+          of nothing. Both ends state the time on an hourly axis, which is a span
+          *inside* one day — the same date twice would name no span at all. */}
       {timeline.from && timeline.to && (
         <p className="timeline-axis">
-          <span>{stamp(timeline.from, timeline.granularity === "hour")}</span>
-          <span>{stamp(timeline.to, timeline.granularity === "hour")}</span>
+          <span>
+            <DateStamp iso={timeline.from} withTime={timeline.granularity === "hour"} />
+          </span>
+          <span>
+            <DateStamp iso={timeline.to} withTime={timeline.granularity === "hour"} />
+          </span>
         </p>
       )}
       <EntryList>{marks.map((mark) => mark.node)}</EntryList>

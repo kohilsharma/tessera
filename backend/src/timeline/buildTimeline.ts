@@ -1,6 +1,7 @@
 import type { Article } from "../entities/Article";
-import type { GenerationLens } from "../entities/GenerationRun";
-import { toPublicArticle } from "../lib/articleView";
+import type { EvidenceSet } from "../entities/EvidenceSet";
+import type { GenerationLens, GenerationRun } from "../entities/GenerationRun";
+import { toPublicArticle, type ArticleProjection } from "../lib/articleView";
 
 // CONTEXT.md "Timeline": a *computed* read view of Articles ordered over time. Not
 // generation — nothing here calls a model, and the whole view is assembled from rows
@@ -22,7 +23,35 @@ export type TimelineEvent =
   | { kind: "evidence_frozen"; id: string; at: Date; articleCount: number }
   | { kind: "analysis_completed"; id: string; at: Date; lens: GenerationLens };
 
+// The events read off the rows that hold them. Beside the type rather than in the
+// route, because the shape is this module's — as every other row→wire mapping here
+// sits with its own view (lib/articleView.ts, lib/ingestionRunView.ts) — and the
+// search timeline (#65) needs the same reading without a second copy of it.
+//
+// Which rows to pass is the caller's: only *completed* runs belong on an axis, a
+// failed one having produced nothing to record.
+export function toTimelineEvents(evidenceSets: EvidenceSet[], runs: GenerationRun[]): TimelineEvent[] {
+  return [
+    ...evidenceSets.map(
+      (set): TimelineEvent => ({
+        kind: "evidence_frozen",
+        id: set.id,
+        at: set.createdAt,
+        articleCount: set.articleCount,
+      }),
+    ),
+    ...runs.map(
+      (run): TimelineEvent => ({ kind: "analysis_completed", id: run.id, at: run.completedAt, lens: run.lens }),
+    ),
+  ];
+}
+
 export type TimelineGranularity = "hour" | "day" | "week";
+
+// What a point on the axis is read off: the projection's own fields plus the Story it
+// belongs to. Narrower than an Article row on purpose — the seam takes a *set*, and a
+// caller assembling one states the fields the axis uses rather than a whole row.
+export type TimelineArticle = ArticleProjection & Pick<Article, "storyId">;
 
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
@@ -56,7 +85,9 @@ export type Timeline = {
   points: (ReturnType<typeof toPublicArticle> & { storyId: string | null })[];
   events: TimelineEvent[];
   // Reporting per period, zero-count buckets included: a lull in coverage is a fact
-  // about the Story and a chart that skips it draws a straight line through it.
+  // about the Story and a chart that skips it draws a straight line through it. Empty
+  // where there is no reporting at all — a set whose only marks are analytical events
+  // has nothing per period to state, and the drawn overlay is guarded on that.
   //
   // Tone is deliberately absent. `articles.tone` comes from GDELT, and it reaches a
   // Story member only by cross-connector enrichment, which measured zero on
@@ -71,7 +102,7 @@ function byTime<T>(at: (item: T) => Date, id: (item: T) => string) {
   return (a: T, b: T) => at(a).getTime() - at(b).getTime() || id(a).localeCompare(id(b));
 }
 
-export function buildTimeline(articles: Article[], events: TimelineEvent[]): Timeline {
+export function buildTimeline(articles: TimelineArticle[], events: TimelineEvent[]): Timeline {
   const points = [...articles]
     .sort(byTime((a) => a.publishedAt, (a) => a.id))
     .map((article) => ({ ...toPublicArticle(article), storyId: article.storyId }));
@@ -88,10 +119,17 @@ export function buildTimeline(articles: Article[], events: TimelineEvent[]): Tim
     PERIODS.find(([, ms]) => bucketCount(from, to, ms) <= MAX_BUCKETS) ?? PERIODS[PERIODS.length - 1];
 
   const origin = alignedOrigin(from, size);
-  const volume = Array.from({ length: bucketCount(from, to, size) }, (_, index) => ({
-    periodStart: new Date(origin + index * size),
-    count: 0,
-  }));
+  // Volume is reporting per period, so a set whose only marks are analytical events has
+  // none at all — a run of zero-count bars would draw a measurement of nothing across a
+  // span where nothing was measured. A lull *inside* reporting is the opposite case and
+  // keeps its empty buckets: there, the zero is the fact.
+  const volume =
+    points.length === 0
+      ? []
+      : Array.from({ length: bucketCount(from, to, size) }, (_, index) => ({
+          periodStart: new Date(origin + index * size),
+          count: 0,
+        }));
   for (const point of points) {
     volume[Math.floor((point.publishedAt.getTime() - origin) / size)].count += 1;
   }

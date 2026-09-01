@@ -2,9 +2,11 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
+  GENERATION_LENSES,
   getMe,
   getStory,
   getStoryTimeline,
+  LENS_LABELS,
   requestStoryAnalysis,
   saveAnalysisToBrief,
   type GenerationFailureCode,
@@ -134,8 +136,11 @@ export default function StoryDetail() {
                 <label className="filter-field">
                   Lens
                   <select value={adminLens} onChange={(event) => setAdminLens(event.target.value as GenerationLens)}>
-                    <option value="student_context">Student context</option>
-                    <option value="investor_implication">Investor implication</option>
+                    {GENERATION_LENSES.map((lens) => (
+                      <option key={lens} value={lens}>
+                        {LENS_LABELS[lens]}
+                      </option>
+                    ))}
                   </select>
                 </label>
               )}

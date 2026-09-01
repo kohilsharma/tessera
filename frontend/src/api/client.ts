@@ -587,6 +587,17 @@ export function decidePendingAssignment(
 export const GENERATION_LENSES = ["student_context", "investor_implication"] as const;
 export type GenerationLens = (typeof GENERATION_LENSES)[number];
 
+// A Lens named as itself: the Admin's select over the whole vocabulary (#53) and the
+// timeline's record of which one a past run was written under (#64) name it the same
+// way, so one map holds both. The analysis register's own labels are *claim group*
+// headings ("Context"), not this — a heading over a Student's claims is not the name
+// of the Lens they were written under, and collapsing the two would flatten a
+// reader-facing distinction into a shared constant.
+export const LENS_LABELS: Record<GenerationLens, string> = {
+  student_context: "Student context",
+  investor_implication: "Investor implication",
+};
+
 export const CORE_CLAIM_TYPES = ["consensus", "source_specific", "contradiction"] as const;
 export type CoreClaimType = (typeof CORE_CLAIM_TYPES)[number];
 export type ClaimType = CoreClaimType | GenerationLens;

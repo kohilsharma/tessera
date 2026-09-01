@@ -178,6 +178,9 @@ describe("Story detail — the timeline", () => {
     expect(await register.findByText("Evidence frozen")).toBeInTheDocument();
     expect(register.getByText("Analysis completed")).toBeInTheDocument();
     expect(register.queryByText("This Story has no datable reporting yet.")).not.toBeInTheDocument();
+    // And no overlay: the volume the API sends for this case is empty, and a ruled box
+    // of zero-height bars would state a measurement of nothing.
+    expect(register.queryByRole("img")).not.toBeInTheDocument();
   });
 
   it("distinguishes a Story with no datable reporting from a request that failed", async () => {

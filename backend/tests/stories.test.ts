@@ -8,7 +8,7 @@ import { Story } from "../src/entities/Story";
 import { Article } from "../src/entities/Article";
 import { EvidenceSet } from "../src/entities/EvidenceSet";
 import { GenerationRun } from "../src/entities/GenerationRun";
-import { buildTimeline } from "../src/timeline/buildTimeline";
+import { buildTimeline, type TimelineArticle } from "../src/timeline/buildTimeline";
 import { setupTestDb } from "./setupTestDb";
 
 setupTestDb();
@@ -601,7 +601,7 @@ describe("GET /api/v1/articles/:id", () => {
 // #64 — the timeline seam. Pure, and tested pure: it takes a *set of Articles* rather
 // than a query precisely so the search timeline (#65) can hand it a set drawn from many
 // Stories, and that contract is worth holding down without a database in the way.
-function pointOf(id: string, publishedAt: string, storyId: string | null = "story-1") {
+function pointOf(id: string, publishedAt: string, storyId: string | null = "story-1"): TimelineArticle {
   return {
     id,
     storyId,
@@ -610,7 +610,7 @@ function pointOf(id: string, publishedAt: string, storyId: string | null = "stor
     publishedAt: new Date(publishedAt),
     analysisTextMode: "manual_fixture",
     publisher: { id: "pub-1", name: "Publisher A", domain: "publisher-a.example" },
-  } as unknown as Article;
+  };
 }
 
 describe("buildTimeline", () => {
@@ -671,6 +671,21 @@ describe("buildTimeline", () => {
     ]);
     expect(timeline.to).toEqual(new Date("2026-01-04T00:00:00Z"));
     expect(timeline.volume.map((bucket) => bucket.count)).toEqual([1, 0, 0, 0]);
+  });
+
+  // A merge (#52) moves a Story's members away and repoints its runs, so a Story
+  // holding analytical events with no accepted reporting left is ordinary. The events
+  // stay on the axis; the volume does not exist, because no reporting does — the drawn
+  // overlay is guarded on exactly this being empty.
+  it("spans the events but measures no volume for a set whose only marks are analytical", () => {
+    const timeline = buildTimeline([], [
+      { kind: "evidence_frozen", id: "set-1", at: new Date("2026-01-01T00:00:00Z"), articleCount: 4 },
+      { kind: "analysis_completed", id: "run-1", at: new Date("2026-01-04T00:00:00Z"), lens: "student_context" },
+    ]);
+    expect(timeline.from).toEqual(new Date("2026-01-01T00:00:00Z"));
+    expect(timeline.to).toEqual(new Date("2026-01-04T00:00:00Z"));
+    expect(timeline.events.map((event) => event.id)).toEqual(["set-1", "run-1"]);
+    expect(timeline.volume).toEqual([]);
   });
 
   it("returns an empty timeline, not a broken axis, for a Story with no datable reporting", () => {

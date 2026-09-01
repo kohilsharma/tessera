@@ -349,10 +349,11 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .record-prose { max-width: 68ch; margin: 22px 0 0; font-size: 1rem; line-height: 1.65; }
 /* The heading's rule opens the register: the entry list's own top rule would be
    a second rule 22px under the first, the same double-ruling the index avoids
-   between its register and its pagination. Unless prose stands between them, in
-   which case the register has to open its own edge (#34's Brief attachments). */
+   between its register and its pagination. Unless something stands between them —
+   prose (#34's Brief attachments) or the timeline's axis (#64) — in which case the
+   register has to open its own edge. One rule for both, because it is one reason. */
 .record-section .entry-list { margin-top: 0; border-top: 0; }
-.record-section .record-prose + .entry-list { margin-top: 22px; border-top: 1px solid var(--bureau-ink); }
+.record-section :is(.record-prose, .timeline-axis) + .entry-list { margin-top: 22px; border-top: 1px solid var(--bureau-ink); }
 
 /* #64's volume overlay: reporting per period as a row of bars on one baseline —
    the dashboard measure's reasoning (DESIGN.md's Redundant Signal Rule) at the
@@ -364,9 +365,6 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 /* The axis' two ends, in the measurement face: a row of bars states a shape, and a
    shape with no span stated under it is a picture of nothing. */
 .timeline-axis { display: flex; justify-content: space-between; gap: 12px; margin: 9px 0 0; color: var(--quiet-ink); font: 500 .66rem ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
-/* The overlay stands between the prose and the register, so the register opens its
-   own edge — the same reason the Brief's attachments do. */
-.record-section .timeline-axis + .entry-list { margin-top: 22px; border-top: 1px solid var(--bureau-ink); }
 
 /* The rights note is a register of stated facts, not a small-print line: ruled
    rows, term in the measurement face, value in the reading face. Also the fact

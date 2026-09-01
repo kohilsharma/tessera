@@ -10,7 +10,7 @@ import { toPublicArticle } from "../lib/articleView";
 import { paginate, parseListQuery, toEnvelope } from "../lib/listQuery";
 import { ACCEPTED_ASSIGNMENT, acceptedMembership } from "../lib/storyMembership";
 import { isUuid } from "../lib/uuid";
-import { buildTimeline, type TimelineEvent } from "../timeline/buildTimeline";
+import { buildTimeline, toTimelineEvents } from "../timeline/buildTimeline";
 
 export const storiesRouter = Router();
 
@@ -141,25 +141,6 @@ storiesRouter.get(
       AppDataSource.getRepository(GenerationRun).find({ where: { storyId: story.id, status: "completed" } }),
     ]);
 
-    res.json(
-      buildTimeline(articles, [
-        ...evidenceSets.map(
-          (set): TimelineEvent => ({
-            kind: "evidence_frozen",
-            id: set.id,
-            at: set.createdAt,
-            articleCount: set.articleCount,
-          }),
-        ),
-        ...runs.map(
-          (run): TimelineEvent => ({
-            kind: "analysis_completed",
-            id: run.id,
-            at: run.completedAt,
-            lens: run.lens,
-          }),
-        ),
-      ]),
-    );
+    res.json(buildTimeline(articles, toTimelineEvents(evidenceSets, runs)));
   }),
 );

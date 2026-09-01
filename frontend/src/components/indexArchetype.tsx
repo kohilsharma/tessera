@@ -124,6 +124,20 @@ export function Entry({
   );
 }
 
+// A date stated in a register row, machine-readable under the reader's own format.
+// One definition because a register states dates the same way wherever it is drawn:
+// the Article rows below, and the timeline's events and axis ends beside them (#64).
+// `withTime` is for a span *inside* a day — an hourly axis stating the same date at
+// both ends would name no span at all; a row keeps the date alone.
+export function DateStamp({ iso, withTime = false }: { iso: string; withTime?: boolean }) {
+  const at = new Date(iso);
+  return (
+    <time dateTime={iso}>
+      {withTime ? at.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" }) : at.toLocaleDateString()}
+    </time>
+  );
+}
+
 // A corpus Article listed under the record that holds it — a Story's coverage
 // (#33) or a Brief's attachments (#34). One definition because it is one row in
 // both: the same provenance, in the same order, linking to the same record page.
@@ -136,10 +150,7 @@ export function ArticleEntry({ article, action }: { article: ArticleSummary; act
       title={article.title}
       meta={[
         { term: "Publisher", value: article.publisher.name },
-        {
-          term: "Published",
-          value: <time dateTime={article.publishedAt}>{new Date(article.publishedAt).toLocaleDateString()}</time>,
-        },
+        { term: "Published", value: <DateStamp iso={article.publishedAt} /> },
       ]}
       action={action}
     />
