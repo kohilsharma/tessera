@@ -88,25 +88,39 @@ export const SEED_CONNECTORS: SeedConnector[] = [
     // because the parser reads one output shape and the truncation check only means
     // anything at the maximum.
     //
-    // Plaintext, and `timespan=6h` rather than the `1h` #46 shipped — both measured
-    // 2026-09-01 (#60), which is why this connector had failed every run:
-    //   * TLS to this host is reset from the development network path while the
-    //     identical plaintext request answers 200. It is the path, not GDELT
-    //     refusing a caller: a deliberately rapid plaintext request gets GDELT's own
-    //     rate-limit notice back. Nothing here is authenticated and nothing but
-    //     public metadata crosses, so plaintext costs no secret.
-    //   * GDELT indexes DOC with a lag of roughly two hours: the same query answered
-    //     0 records over `1h`, 8 over `2h`, 36 over `3h`, 164 over `6h` and the full
-    //     250 over `12h`. A 1-hour window is therefore empty by construction, and a
-    //     day-wide one is permanently truncated. 6h clears the lag with a third of
-    //     the cap still spare, and a quarter-hourly tick re-reading the window is
-    //     what dedup is for.
+    // This comment is the single place the scheme and the window are explained;
+    // everywhere else that cares (`runConnector.ts`, `ingestion/doc.ts`, the tests,
+    // AGENTS.md) points here rather than restating a measurement that moves.
+    //
+    // **Plaintext**, not https — the reason this connector had failed every run
+    // (#60). TLS to this host is reset from the development network path while the
+    // identical plaintext request answers 200; it is the path, not GDELT refusing a
+    // caller, since a deliberately rapid plaintext request gets GDELT's own
+    // rate-limit notice back. Nothing here is authenticated and only public metadata
+    // crosses, so plaintext costs no secret. Re-measured 2026-09-01: http answers
+    // 200 and does *not* redirect to https, which matters because the fetcher
+    // follows redirects (`runConnector.ts`) — a 301 here would put the request
+    // straight back on the reset path and fail the run loudly.
+    //
+    // **`timespan=3h`**, against two opposing bounds rather than one measurement:
+    //   * *Below*: DOC's indexing lag is variable, so the window has to survive the
+    //     bad case. Measured 2026-09-01 the same query answered 0 records over `1h`
+    //     at one point and 77 over `1h` (newest record 27 minutes old) at another.
+    //     A window near the 15-minute tick is empty by construction whenever GDELT
+    //     falls behind; 3h is 12 ticks of overlap, and re-reading a window is what
+    //     dedup is for.
+    //   * *Above*: the 250-record cap is a silent ceiling on coverage — at the cap
+    //     the run reports itself truncated and `sort=datedesc` drops the oldest
+    //     matches, and there is no paging. Volume moves with the news: the same
+    //     query answered 36 records over `3h` at one point on 2026-09-01 and 137 at
+    //     another, with `6h` reaching 215 of 250. 3h keeps real headroom where 6h
+    //     buys nothing dedup does not already give.
     name: "GDELT DOC API",
     kind: "gdelt_doc",
     endpoint:
       "http://api.gdeltproject.org/api/v2/doc/doc" +
       "?query=%28%22artificial%20intelligence%22%20OR%20semiconductor%29%20sourcelang%3Aenglish" +
-      "&sort=datedesc&timespan=6h",
+      "&sort=datedesc&timespan=3h",
     enabled: true,
     feedProvidesFullText: null,
   },

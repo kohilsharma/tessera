@@ -5,6 +5,13 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     environment: "node",
+    // The DOC endpoint's 5-second pacer (`ingestion/runConnector.ts`) is a module
+    // variable, so it paces within a worker and not across them. Two files reach
+    // that one endpoint under `GDELT_LIVE_SMOKE=1` — doc.test.ts and
+    // ingestion.test.ts — and in parallel they would pace independently into the
+    // rate limit the flag exists to respect. Files run serially for that opt-in
+    // pass only; the ordinary offline suite is untouched.
+    fileParallelism: process.env.GDELT_LIVE_SMOKE !== "1",
     testTimeout: 60_000,
     hookTimeout: 60_000,
     // LocalDiskFileStorageProvider reads UPLOADS_DIR once at module load, so a

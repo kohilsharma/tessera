@@ -81,16 +81,19 @@ a full 250-record response is stated as **truncated** on the run rather than rep
 complete; and artlist carries no body or snippet at all, so DOC rows land on the same
 `metadata_only` rung as GKG's and are pruned by the same retention pass (now
 `pruneExpiredGdeltArticles`, covering both GDELT kinds).
-Phase 3.5 opens with the DOC connector **restored** (#60), which had failed every run for two
-reasons measured on 2026-09-01, both now recorded where they bite: TLS to
-`api.gdeltproject.org` is reset from the development network path while the identical plaintext
-request answers 200 — a network path failure, not GDELT refusing a caller, so the seeded endpoint
-requests over plaintext — and GDELT indexes DOC with a ~2-hour lag (0 records over `1h`, 8 over
-`2h`, 36 over `3h`, 164 over `6h`, the full 250 over `12h`), so the seeded `timespan` is now `6h`,
-which clears the lag with a third of the record cap spare. A missing `articles` key is GDELT's
-zero-match answer, not the block signal the parser read it as; refusal still arrives as a
-non-JSON body and still fails the run loudly. The live run behind `GDELT_LIVE_SMOKE=1` now
-asserts a completed run that inserted Articles, since neither cause is expressible in a fixture.
+The DOC connector was later **restored** (#60), having failed every run for two reasons measured
+on 2026-09-01, both now recorded where they bite: TLS to `api.gdeltproject.org` is reset from the
+development network path while the identical plaintext request answers 200 — a network path
+failure, not GDELT refusing a caller, so the seeded endpoint requests over plaintext — and DOC's
+indexing lag is variable enough that the `1h` window #46 shipped is empty whenever GDELT falls
+behind, so the seeded `timespan` is now `3h`, wide enough for the lag and far enough from the
+250-record cap to leave headroom as volume moves. Both bounds are argued once, in
+`seedData/corpus.ts`; everywhere else points there rather than restating a measurement that
+moves. A missing `articles` key is GDELT's zero-match answer, not the block signal the parser
+read it as; refusal still arrives as a non-JSON body and still fails the run loudly. The live run
+behind `GDELT_LIVE_SMOKE=1` now asserts a completed run that inserted Articles, since neither
+cause is expressible in a fixture (that flag also serializes test files, since two of them pace
+against the one rate-limited endpoint).
 The **Guardian feed** is fixed alongside it (#61): fast-xml-parser caps entity expansions at 1,000
 *per document*, which is a function of a feed's legitimate size — the Guardian World feed carries
 2,024 ordinary `&amp;`/`&#8217;` references across 45 items and tripped it at 1,008, so one of the
@@ -249,7 +252,9 @@ advances the card with canonical SM-2 while persisting the submitted grade and r
 Question synthesis is shared through `flashcard_question_cache`, keyed by a SHA-256 of immutable
 claim type + text, so another Student studying the same analysis does not repeat the model call.
 Every route is Student-only and every query is owner-scoped.
-Phase 3.5 (graph/timeline) is not built yet.
+Phase 3.5 (entity resolution, the co-occurrence graph, the Cytoscape view, the timeline read
+view) is not built yet; its groundwork is — see ADR-0028/ADR-0029, the restored DOC connector
+(#60), the fixed Guardian feed (#61) and the annotated Curated Corpus (#62) above.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
 `/register`, `/account`), role dashboards (`/dashboard/:role`), browsing the corpus

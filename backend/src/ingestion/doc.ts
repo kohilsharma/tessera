@@ -101,11 +101,12 @@ export function parseDocArtList(body: string): DocArticle[] {
   }
   const articles = (payload as { articles?: unknown }).articles;
   // A missing `articles` key is GDELT's way of saying nothing matched — measured
-  // 2026-09-01 (#60) both for a nonsense query over a day-wide window and for the
-  // seeded query over the newest hour, which GDELT has not finished indexing. It
-  // used to be read as a block signal; that was wrong, and reading it that way
-  // failed every DOC run whose window happened to be empty. Refusal arrives as a
-  // non-JSON body (above), which still fails loudly, so nothing is lost silently.
+  // 2026-09-01 (#60) both for a nonsense query and for a window GDELT had not
+  // finished indexing, which its variable lag makes an ordinary event (the window
+  // is sized for it in `seedData/corpus.ts`). It used to be read as a block signal;
+  // that was wrong, and reading it that way failed every DOC run whose window
+  // happened to be empty. Refusal arrives as a non-JSON body (above), which still
+  // fails loudly, so nothing is lost silently.
   if (articles === undefined) return [];
   if (!Array.isArray(articles)) {
     throw new Error(`GDELT DOC API returned a non-array "articles": ${snippet(body)}`);

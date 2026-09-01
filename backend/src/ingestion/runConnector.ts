@@ -64,6 +64,12 @@ export async function httpFetchText(url: string): Promise<string> {
   const res = await fetch(url, {
     headers: { "User-Agent": USER_AGENT, Accept: "application/rss+xml, application/xml, text/xml, */*" },
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    // Redirects are followed, which is not free here: the seeded endpoint is
+    // plaintext deliberately (#60), so a 301 to https would land the request back on
+    // the path measured as reset. That is a loud run failure rather than bad data,
+    // and it is not GDELT's behaviour today (re-measured 2026-09-01: http answers
+    // 200 directly), so it is stated rather than blocked — a fetcher that refused
+    // redirects would break the first time GDELT moved this endpoint legitimately.
     redirect: "follow",
   });
   if (!res.ok) throw new Error(`${url} responded ${res.status}`);
@@ -90,11 +96,9 @@ export async function httpFetchBytes(url: string): Promise<Uint8Array> {
 //
 // What is *not* how a block arrives: a dropped connection. This comment used to say
 // consecutive requests get the TLS connection dropped instead of a status code.
-// That was wrong. Measured 2026-09-01, TLS to `api.gdeltproject.org` is reset from
-// the development network path whatever the pacing, while the identical plaintext
-// request answers 200 — the GKG host, on a different route, is unaffected. It is a
-// network-path failure, so the seeded DOC endpoint requests over plaintext (#60,
-// `seedData/corpus.ts`) and this fetcher follows whatever scheme the endpoint names.
+// That was wrong (#60) — the reset is a network-path failure, and the scheme the
+// seeded endpoint names because of it is explained once, in `seedData/corpus.ts`.
+// This fetcher follows whatever scheme that endpoint names.
 const DOC_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 export const DOC_MIN_INTERVAL_MS = 5_000;
@@ -128,6 +132,12 @@ export async function httpFetchDocText(url: string): Promise<string> {
   const res = await fetch(url, {
     headers: { "User-Agent": DOC_USER_AGENT, Accept: "application/json, */*" },
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    // Redirects are followed, which is not free here: the seeded endpoint is
+    // plaintext deliberately (#60), so a 301 to https would land the request back on
+    // the path measured as reset. That is a loud run failure rather than bad data,
+    // and it is not GDELT's behaviour today (re-measured 2026-09-01: http answers
+    // 200 directly), so it is stated rather than blocked — a fetcher that refused
+    // redirects would break the first time GDELT moved this endpoint legitimately.
     redirect: "follow",
   });
   if (!res.ok) throw new Error(`${url} responded ${res.status}`);

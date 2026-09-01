@@ -71,3 +71,17 @@ Ingestion stack, all $0/month:
   and DOC produce, because following 63k unknown domains a day is the general-purpose crawler
   this ADR's own failure-mode note warns about. `@mozilla/readability` needs a DOM, supplied by
   `linkedom` — one dependency, no native build, against jsdom's much larger tree.
+- Amended 2026-09-01 by #60, which corrects two things item 2 says about the DOC API.
+  **Scheme:** item 2's host is reached over **plaintext**, not https. TLS to
+  `api.gdeltproject.org` is reset from the development network path on every attempt, with
+  correct pacing and a browser-like User-Agent, while the identical plaintext request answers
+  200 — and the GKG host, on a different route, is unaffected. It is the network path, not
+  GDELT. Nothing on this endpoint is authenticated and only the public metadata this ADR
+  already calls storable crosses it, so plaintext costs no secret. **"Or it blocks":** that is
+  true of the rate limit and of a bot-like identity, and both mitigations stand unchanged (the
+  User-Agent, and a 5-second floor between requests). What it does *not* describe is a dropped
+  connection: GDELT refuses with a 200 carrying a plain-text notice, so a caller finds out by
+  getting a non-JSON body. Reading a *missing* `articles` key as that refusal was the second
+  reason every run failed — it is GDELT's zero-match answer, which its variable indexing lag
+  makes ordinary. The seeded window is sized between that lag and item 2's 250-record cap, and
+  argued in `backend/src/seedData/corpus.ts` rather than here, because it tracks news volume.

@@ -25,16 +25,16 @@ describe("docRequestUrl", () => {
   it("keeps what the operator configured and forces the output shape and record cap", () => {
     const url = new URL(docRequestUrl(DOC_ENDPOINT));
 
-    // Plaintext, and #60 measured why: TLS to this host is reset from the
-    // development network path while the identical plaintext request answers 200.
+    // Plaintext, and #60 measured why — the scheme and the window are both argued
+    // once, in `seedData/corpus.ts`; this only pins what the seed produces.
     expect(url.origin + url.pathname).toBe("http://api.gdeltproject.org/api/v2/doc/doc");
     // The question is the operator's: DOC answers one rather than streaming a
     // window, which is why it lives in the endpoint and not in a column.
     expect(url.searchParams.get("query")).toBe('("artificial intelligence" OR semiconductor) sourcelang:english');
     expect(url.searchParams.get("sort")).toBe("datedesc");
-    // Wide enough to clear GDELT's own indexing lag (#60): the newest hour of
-    // matches is not indexed yet, so a 1-hour window is empty by construction.
-    expect(url.searchParams.get("timespan")).toBe("6h");
+    // Wide enough to clear GDELT's variable indexing lag and narrow enough to stay
+    // clear of the 250-record cap (#60).
+    expect(url.searchParams.get("timespan")).toBe("3h");
     // The output shape is ours, because the parser reads exactly one; and the cap
     // is asked for at GDELT's maximum, because the truncation check only means
     // something there.
@@ -176,10 +176,13 @@ describe("httpFetchDocText", () => {
   });
 });
 
-// Opt-in: `GDELT_LIVE_SMOKE=1 npm test` reaches the real API, which is how a change// in its shape gets noticed. Skipped by default so the suite stays offline and CI
+// Opt-in: `GDELT_LIVE_SMOKE=1 npm test` reaches the real API, which is how a change
+// in its shape gets noticed. Skipped by default so the suite stays offline and CI
 // never depends on a free public service being up — and this endpoint in particular
 // blocks a caller that asks too often (ADR-0018), so it must not be on the path of
-// an ordinary test run.
+// an ordinary test run. The 5-second pacer is a module variable, so it paces within
+// one worker only: `vitest.config.ts` stops running files in parallel while this
+// flag is set, since ingestion.test.ts reaches the same endpoint.
 describe.runIf(process.env.GDELT_LIVE_SMOKE === "1")("GDELT DOC live smoke", () => {
   it("answers the seeded query with records the connector can read", async () => {
     const articles = parseDocArtList(await httpFetchDocText(docRequestUrl(DOC_ENDPOINT)));

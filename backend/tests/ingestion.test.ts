@@ -1424,9 +1424,12 @@ describe("runConnector over the GDELT DOC API", () => {
   // #60. The one check nothing offline could have made: this connector failed every
   // run for two reasons a fixture cannot express — the request never reached the
   // host, and the window it asked for was one GDELT had not indexed yet. Both are
-  // properties of the live request, so the live request is what asserts them.
+  // properties of the live request, so the live request is what asserts them; the
+  // scheme and the window they argue for are explained in `seedData/corpus.ts`.
   // Opt-in with `GDELT_LIVE_SMOKE=1`, like the parser-shape check in doc.test.ts, so
-  // the ordinary suite stays offline and off this rate-limited endpoint.
+  // the ordinary suite stays offline and off this rate-limited endpoint — the flag
+  // also stops vitest running files in parallel, because both files pace against
+  // the same endpoint through a module-level timestamp (`vitest.config.ts`).
   describe.runIf(process.env.GDELT_LIVE_SMOKE === "1")("against the live API", () => {
     it("completes a run and inserts Articles", async () => {
       const connector = await createDocConnector();
