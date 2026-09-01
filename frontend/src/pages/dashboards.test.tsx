@@ -18,18 +18,28 @@ describe("Student dashboard", () => {
       jsonResponse({
         role: "student",
         studyCollections: [{ id: "b1", title: "Grid resilience", category: "technology" }],
+        flashcards: { dueCount: 3, totalCount: 8, nextDueAt: null },
       }),
     );
 
     renderWithProviders(<StudentDashboard />);
 
-    const row = await screen.findByRole("listitem");
-    expect(within(row).getByRole("link", { name: "Grid resilience" })).toHaveAttribute("href", "/briefs/b1");
+    const collectionLink = await screen.findByRole("link", { name: "Grid resilience" });
+    const row = collectionLink.closest("li")!;
+    expect(collectionLink).toHaveAttribute("href", "/briefs/b1");
     expect(within(row).getByText("technology")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Review 3 flashcards" })).toHaveAttribute("href", "/study");
+    expect(screen.getByText("8")).toBeInTheDocument();
   });
 
   it("offers a way to start one when there are no collections", async () => {
-    vi.mocked(fetch).mockResolvedValue(jsonResponse({ role: "student", studyCollections: [] }));
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({
+        role: "student",
+        studyCollections: [],
+        flashcards: { dueCount: 0, totalCount: 0, nextDueAt: null },
+      }),
+    );
 
     renderWithProviders(<StudentDashboard />);
 

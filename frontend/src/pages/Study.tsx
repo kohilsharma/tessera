@@ -1,7 +1,14 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
-import { getStudyDeck, reviewFlashcard, REVIEW_GRADES, type Flashcard } from "../api/client";
+import { Link, Navigate } from "react-router-dom";
+import {
+  getMe,
+  getStudyDeck,
+  reviewFlashcard,
+  REVIEW_GRADES,
+  type Flashcard,
+  type ReviewGrade,
+} from "../api/client";
 import { EmptyState, ErrorState, PendingState, RetryableError } from "../components/uiStates";
 
 // The Student's study surface (#58, ADR-0021). One card at a time, not a list: a
@@ -29,7 +36,7 @@ function Card({ card, dueCount }: { card: Flashcard; dueCount: number }) {
   // never arrives already answered.
   const [revealed, setRevealed] = useState(false);
   const review = useMutation({
-    mutationFn: (grade: number) => reviewFlashcard(card.id, grade),
+    mutationFn: (grade: ReviewGrade) => reviewFlashcard(card.id, grade),
     // Refetched rather than advanced in place: the schedule is the server's, and the
     // next card is whatever is due after this one was rescheduled.
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["flashcards"] }),
@@ -90,7 +97,23 @@ function Card({ card, dueCount }: { card: Flashcard; dueCount: number }) {
 }
 
 export default function Study() {
-  const query = useQuery({ queryKey: ["flashcards"], queryFn: getStudyDeck });
+  const me = useQuery({ queryKey: ["me"], queryFn: getMe });
+  const query = useQuery({
+    queryKey: ["flashcards"],
+    queryFn: getStudyDeck,
+    enabled: me.data?.role === "student",
+  });
+
+  if (me.isPending) return <PendingState>Loading your flashcards…</PendingState>;
+  if (me.isError)
+    return (
+      <RetryableError
+        message={`Could not verify access to your flashcards: ${me.error.message}`}
+        onRetry={() => me.refetch()}
+        retrying={me.isFetching}
+      />
+    );
+  if (me.data.role !== "student") return <Navigate to="/dashboard" replace />;
 
   if (query.isPending) return <PendingState>Loading your flashcards…</PendingState>;
   if (query.isError)

@@ -26,7 +26,9 @@ export type ReviewSchedule = {
   intervalDays: number;
 };
 
-export function isReviewGrade(value: unknown): value is number {
+export type ReviewGrade = 0 | 1 | 2 | 3 | 4 | 5;
+
+export function isReviewGrade(value: unknown): value is ReviewGrade {
   return (
     typeof value === "number" &&
     Number.isInteger(value) &&
@@ -39,7 +41,7 @@ export function isReviewGrade(value: unknown): value is number {
 // card had when it was reviewed, then the ease is updated from the grade. That order
 // matters on a grade of 3 or 5: using the new ease for the interval quietly applies
 // the grade twice.
-export function reschedule(current: ReviewSchedule, grade: number): ReviewSchedule {
+export function reschedule(current: ReviewSchedule, grade: ReviewGrade): ReviewSchedule {
   const miss = MAX_REVIEW_GRADE - grade;
   // EF' = EF + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02)), floored. SM-2
   // updates ease for every outcome, including a lapse; the reset interval and the

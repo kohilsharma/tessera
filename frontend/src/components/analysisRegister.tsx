@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import {
   getMe,
   makeFlashcards,
+  MAX_STUDY_DETAIL_LENGTH,
   type Analysis,
   type AnalysisClaim,
   type ClaimType,
@@ -140,8 +142,9 @@ function Corroboration({
 function FlashcardCommand({ generationRunId }: { generationRunId: string }) {
   const me = useQuery({ queryKey: ["me"], queryFn: getMe });
   const navigate = useNavigate();
+  const [studyDetail, setStudyDetail] = useState("");
   const make = useMutation({
-    mutationFn: () => makeFlashcards(generationRunId),
+    mutationFn: () => makeFlashcards(generationRunId, studyDetail),
     onSuccess: () => navigate("/study"),
   });
 
@@ -151,16 +154,28 @@ function FlashcardCommand({ generationRunId }: { generationRunId: string }) {
   if (me.data?.role !== "student") return null;
   return (
     <>
-      <div className="record-actions">
-        <button
-          type="button"
-          className="record-command"
-          onClick={() => make.mutate()}
-          disabled={make.isPending}
-        >
+      <form
+        className="record-attach"
+        onSubmit={(event) => {
+          event.preventDefault();
+          make.mutate();
+        }}
+      >
+        <label htmlFor={`study-focus-${generationRunId}`}>
+          Study focus (optional)
+          <input
+            id={`study-focus-${generationRunId}`}
+            value={studyDetail}
+            maxLength={MAX_STUDY_DETAIL_LENGTH}
+            placeholder="e.g. the policy timeline"
+            disabled={make.isPending}
+            onChange={(event) => setStudyDetail(event.target.value)}
+          />
+        </label>
+        <button type="submit" className="record-command" disabled={make.isPending}>
           {make.isPending ? "Making flashcards…" : "Make flashcards"}
         </button>
-      </div>
+      </form>
       {make.isError && <p className="state-error">Could not make flashcards: {make.error.message}</p>}
     </>
   );

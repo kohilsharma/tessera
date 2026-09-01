@@ -24,8 +24,34 @@ export default function StudentDashboard() {
           role="student"
           folio="Student dashboard"
           title="Study desk"
-          dek="Your study collections, and the corpus they are built from."
+          dek="Your due reviews, study collections, and the corpus they are built from."
         >
+          <DashboardRegister heading="Flashcard reviews" folio={`${data.flashcards.dueCount} due`}>
+            <EntryList>
+              <RegisterRow
+                name={
+                  data.flashcards.dueCount > 0
+                    ? `Review ${data.flashcards.dueCount} flashcard${data.flashcards.dueCount === 1 ? "" : "s"}`
+                    : data.flashcards.totalCount > 0
+                      ? "No flashcards due"
+                      : "Make your first flashcards"
+                }
+                to="/study"
+                note={
+                  data.flashcards.dueCount > 0
+                    ? "Ready for review now."
+                    : data.flashcards.totalCount > 0
+                      ? "Your review queue is clear."
+                      : "Build a cited deck from a Story or Brief analysis."
+                }
+                meta={[
+                  { term: "Due now", value: data.flashcards.dueCount },
+                  { term: "In deck", value: data.flashcards.totalCount },
+                ]}
+              />
+            </EntryList>
+          </DashboardRegister>
+
           <DashboardRegister
             heading="Study collections"
             folio={`${data.studyCollections.length} registered`}

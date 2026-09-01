@@ -3,7 +3,7 @@ import { AppDataSource } from "../data-source";
 import type { ClaimType } from "../entities/AnalysisClaim";
 import { Flashcard } from "../entities/Flashcard";
 import type { SynthesisProvider } from "../synthesis";
-import { dueAfter, reschedule } from "./sm2";
+import { dueAfter, reschedule, type ReviewGrade } from "./sm2";
 import { writeQuestions } from "./questions";
 
 // The Student half of ADR-0021, over machinery that already exists: a card is a
@@ -94,16 +94,29 @@ async function withCitations(ownerId: string, rows: CardRow[]): Promise<Flashcar
     .filter((card) => card.citations.length > 0);
 }
 
-export type StudyDeck = {
-  items: FlashcardView[];
+export type StudySummary = {
   // Both counts, because the two empty states are different facts: a Student with no
-  // cards has a deck to make, and a Student with nothing due is finished for now —
-  // and the surface can only say which if it is told both.
+  // cards has a deck to make, and a Student with nothing due is finished for now.
   dueCount: number;
   totalCount: number;
   // When the soonest card not yet due comes back, so "nothing due" can say when.
   nextDueAt: Date | null;
 };
+
+export type StudyDeck = StudySummary & {
+  items: FlashcardView[];
+};
+
+export async function loadStudySummary(ownerId: string): Promise<StudySummary> {
+  const [summary]: StudySummary[] = await AppDataSource.query(
+    `SELECT COUNT(*)::int AS "totalCount",
+            (COUNT(*) FILTER (WHERE "dueAt" <= now()))::int AS "dueCount",
+            MIN("dueAt") FILTER (WHERE "dueAt" > now()) AS "nextDueAt"
+       FROM "flashcards" WHERE "ownerId" = $1`,
+    [ownerId],
+  );
+  return summary;
+}
 
 // What a study session is: this owner's due cards, soonest first. Ordered by id after
 // dueAt so a session is stable across a reload rather than reshuffled by whatever
@@ -117,14 +130,8 @@ export async function loadStudyDeck(ownerId: string): Promise<StudyDeck> {
       LIMIT ${STUDY_SESSION_LIMIT}`,
     [ownerId],
   );
-  const [counts]: { dueCount: number; totalCount: number; nextDueAt: Date | null }[] = await AppDataSource.query(
-    `SELECT COUNT(*)::int AS "totalCount",
-            (COUNT(*) FILTER (WHERE "dueAt" <= now()))::int AS "dueCount",
-            MIN("dueAt") FILTER (WHERE "dueAt" > now()) AS "nextDueAt"
-       FROM "flashcards" WHERE "ownerId" = $1`,
-    [ownerId],
-  );
-  return { items: await withCitations(ownerId, rows), ...counts };
+  const summary = await loadStudySummary(ownerId);
+  return { items: await withCitations(ownerId, rows), ...summary };
 }
 
 // A deck for one analysis, whatever its cards' schedules: what a Student is shown
@@ -140,12 +147,17 @@ export async function loadRunDeck(ownerId: string, generationRunId: string): Pro
   return withCitations(ownerId, rows);
 }
 
-// Questions are a model-derived view of immutable claim text. Cache them by the
-// bytes that decide the question — claim type and text — so another Student studying
-// the same shared analysis creates owned schedule rows without paying for the same
-// synthesis again (AGENTS.md's content-hash invariant).
-function questionContentHash(claim: { claimType: ClaimType; text: string }): string {
-  return createHash("sha256").update(claim.claimType).update("\0").update(claim.text).digest("hex");
+// Questions are a model-derived view of immutable claim text plus the optional
+// Student focus. Cache the bytes that decide the question so shared analyses reuse
+// synthesis only when they are being studied from the same angle.
+function questionContentHash(claim: { claimType: ClaimType; text: string }, studyDetail?: string): string {
+  return createHash("sha256")
+    .update(claim.claimType)
+    .update("\0")
+    .update(claim.text)
+    .update("\0")
+    .update(studyDetail ?? "")
+    .digest("hex");
 }
 
 async function cachedQuestions(hashes: string[]): Promise<Map<string, string>> {
@@ -172,6 +184,7 @@ export async function generateDeck(
   provider: SynthesisProvider,
   ownerId: string,
   generationRunId: string,
+  studyDetail?: string,
 ): Promise<FlashcardView[]> {
   const claims: { id: string; claimType: ClaimType; text: string }[] = await AppDataSource.query(
     `SELECT c."id", c."claimType", c."text"
@@ -184,12 +197,12 @@ export async function generateDeck(
   );
 
   if (claims.length > 0) {
-    const hashes = claims.map(questionContentHash);
+    const hashes = claims.map((claim) => questionContentHash(claim, studyDetail));
     let questionsByHash = await cachedQuestions(hashes);
     const misses = claims.filter((_claim, index) => !questionsByHash.has(hashes[index]));
     if (misses.length > 0) {
-      const written = await writeQuestions(provider, misses);
-      const missHashes = misses.map(questionContentHash);
+      const written = await writeQuestions(provider, misses, studyDetail);
+      const missHashes = misses.map((claim) => questionContentHash(claim, studyDetail));
       await AppDataSource.query(
         `INSERT INTO "flashcard_question_cache" ("contentHash", "question")
          SELECT * FROM unnest($1::varchar[], $2::text[])
@@ -228,7 +241,7 @@ export async function generateDeck(
 export async function reviewCard(
   ownerId: string,
   cardId: string,
-  grade: number,
+  grade: ReviewGrade,
 ): Promise<FlashcardView | null> {
   const reviewedAt = new Date();
   // Locked and re-read rather than computed from what the client sent: a schedule is

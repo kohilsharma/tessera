@@ -118,11 +118,11 @@ async function analysisFor(token: string): Promise<{ storyId: string; runId: str
   return { storyId: story.id, runId: res.body.id };
 }
 
-function makeDeck(token: string, generationRunId: unknown) {
+function makeDeck(token: string, generationRunId: unknown, studyDetail?: unknown) {
   return request(app())
     .post("/api/v1/flashcards")
     .set("Authorization", `Bearer ${token}`)
-    .send({ generationRunId });
+    .send({ generationRunId, ...(studyDetail === undefined ? {} : { studyDetail }) });
 }
 
 function studyDeck(token: string) {
@@ -254,6 +254,29 @@ describe("generating a deck", () => {
     expect(synth.requests[0].prompt).not.toContain("body text");
   });
 
+  it("uses the Student's study focus and keeps differently focused questions out of the same cache entry", async () => {
+    const first = await tokenFor("student");
+    const second = await tokenFor("student");
+    const { runId } = await analysisFor(first.token);
+    synth.requests.length = 0;
+
+    expect((await makeDeck(first.token, runId, "Focus on the policy timeline")).status).toBe(201);
+    expect((await makeDeck(second.token, runId, "Focus on the manufacturing trade-offs")).status).toBe(201);
+
+    const questionCalls = synth.requests.filter((call) => call.task === "flashcard_questions");
+    expect(questionCalls).toHaveLength(2);
+    expect(questionCalls[0].prompt).toContain('"Focus on the policy timeline"');
+    expect(questionCalls[1].prompt).toContain('"Focus on the manufacturing trade-offs"');
+  });
+
+  it("refuses an invalid study focus at the API boundary", async () => {
+    const student = await tokenFor("student");
+    const { runId } = await analysisFor(student.token);
+
+    expect((await makeDeck(student.token, runId, { instructions: "not text" })).status).toBe(422);
+    expect((await makeDeck(student.token, runId, "x".repeat(301))).status).toBe(422);
+  });
+
   it("falls back to a stated question when the provider does not answer", async () => {
     const student = await tokenFor("student");
     const { runId } = await analysisFor(student.token);
@@ -351,6 +374,15 @@ describe("the study session", () => {
     expect(due.body.dueCount).toBe(made.length);
     expect(due.body.nextDueAt).toBeNull();
     expect(due.body.items[0].citations.length).toBeGreaterThan(0);
+
+    const dashboard = await request(app())
+      .get("/api/v1/dashboard/student")
+      .set("Authorization", `Bearer ${student.token}`);
+    expect(dashboard.body.flashcards).toEqual({
+      dueCount: made.length,
+      totalCount: made.length,
+      nextDueAt: null,
+    });
   });
 
   it("reschedules a reviewed card out of the session and says when it returns", async () => {

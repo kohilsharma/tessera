@@ -29,18 +29,40 @@ const card: Flashcard = {
 };
 
 const dueDeck: StudyDeck = { items: [card], dueCount: 1, totalCount: 1, nextDueAt: null };
+const student = { id: "student-1", email: "student@tessera.example", role: "student" as const };
+const investor = { id: "investor-1", email: "investor@tessera.example", role: "investor" as const };
+
+function isIdentityRequest(input: RequestInfo | URL): boolean {
+  return String(input).includes("/auth/me");
+}
 
 describe("Study flashcards", () => {
   it("renders the shared pending state while the due deck loads", () => {
-    vi.mocked(fetch).mockImplementation(() => new Promise(() => {}));
+    vi.mocked(fetch).mockImplementation((input) =>
+      isIdentityRequest(input) ? Promise.resolve(jsonResponse(student)) : new Promise(() => {}),
+    );
 
     renderWithProviders(<Study />, { route: "/study", path: "/study" });
 
     expect(screen.getByRole("status")).toHaveTextContent("Loading your flashcards");
   });
 
+  it("redirects a non-Student before loading any cards", async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      if (isIdentityRequest(input)) return jsonResponse(investor);
+      throw new Error(`unexpected request: ${String(input)}`);
+    });
+
+    renderWithProviders(<Study />, { route: "/study", path: "/study" });
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    expect(String(vi.mocked(fetch).mock.calls[0][0])).toContain("/auth/me");
+  });
+
   it("renders the shared retryable error state", async () => {
-    vi.mocked(fetch).mockResolvedValue(jsonResponse({ error: "database unavailable" }, 500));
+    vi.mocked(fetch).mockImplementation(async (input) =>
+      isIdentityRequest(input) ? jsonResponse(student) : jsonResponse({ error: "database unavailable" }, 500),
+    );
 
     renderWithProviders(<Study />, { route: "/study", path: "/study" });
 
@@ -49,8 +71,10 @@ describe("Study flashcards", () => {
   });
 
   it("states how to make a first deck when the Student owns no cards", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      jsonResponse({ items: [], dueCount: 0, totalCount: 0, nextDueAt: null } satisfies StudyDeck),
+    vi.mocked(fetch).mockImplementation(async (input) =>
+      isIdentityRequest(input)
+        ? jsonResponse(student)
+        : jsonResponse({ items: [], dueCount: 0, totalCount: 0, nextDueAt: null } satisfies StudyDeck),
     );
 
     renderWithProviders(<Study />, { route: "/study", path: "/study" });
@@ -62,8 +86,10 @@ describe("Study flashcards", () => {
 
   it("states when the next card returns when none are due", async () => {
     const nextDueAt = "2026-03-08T09:30:00Z";
-    vi.mocked(fetch).mockResolvedValue(
-      jsonResponse({ items: [], dueCount: 0, totalCount: 3, nextDueAt } satisfies StudyDeck),
+    vi.mocked(fetch).mockImplementation(async (input) =>
+      isIdentityRequest(input)
+        ? jsonResponse(student)
+        : jsonResponse({ items: [], dueCount: 0, totalCount: 3, nextDueAt } satisfies StudyDeck),
     );
 
     renderWithProviders(<Study />, { route: "/study", path: "/study" });
@@ -74,11 +100,14 @@ describe("Study flashcards", () => {
 
   it("keeps the cited answer hidden until recall, then records the outcome", async () => {
     const nextDueAt = "2026-03-02T09:30:00Z";
-    vi.mocked(fetch).mockImplementation(async (_input, init) => {
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (isIdentityRequest(input)) return jsonResponse(student);
       if (init?.method === "POST") return jsonResponse({ ...card, repetitions: 1, intervalDays: 1, dueAt: nextDueAt });
       // The invalidation after review gets the completed session. Before it, the card
       // is due. Fetch calls are sequential at this seam, so the count says which.
-      const getCalls = vi.mocked(fetch).mock.calls.filter(([, options]) => options?.method !== "POST").length;
+      const getCalls = vi
+        .mocked(fetch)
+        .mock.calls.filter(([url, options]) => String(url).includes("/flashcards") && options?.method !== "POST").length;
       return jsonResponse(
         getCalls === 1 ? dueDeck : { items: [], dueCount: 0, totalCount: 1, nextDueAt },
       );

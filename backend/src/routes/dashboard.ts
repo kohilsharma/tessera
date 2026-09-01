@@ -9,6 +9,7 @@ import { Publisher } from "../entities/Publisher";
 import { PromptTemplate } from "../entities/PromptTemplate";
 import { Story } from "../entities/Story";
 import type { StoryCategory } from "../entities/Story";
+import { loadStudySummary } from "../flashcards/deck";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
@@ -47,12 +48,15 @@ dashboardRouter.get(
   requireAuth,
   requireRole("student"),
   asyncHandler(async (req, res) => {
-    const studyCollections = await AppDataSource.getRepository(IntelligenceBrief).find({
-      where: { ownerId: req.user!.id },
-      select: { id: true, title: true, category: true },
-      order: { updatedAt: "DESC" },
-    });
-    res.json({ role: "student", studyCollections });
+    const [studyCollections, flashcards] = await Promise.all([
+      AppDataSource.getRepository(IntelligenceBrief).find({
+        where: { ownerId: req.user!.id },
+        select: { id: true, title: true, category: true },
+        order: { updatedAt: "DESC" },
+      }),
+      loadStudySummary(req.user!.id),
+    ]);
+    res.json({ role: "student", studyCollections, flashcards });
   }),
 );
 

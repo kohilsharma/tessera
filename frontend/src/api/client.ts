@@ -100,6 +100,7 @@ export async function getMe(): Promise<User> {
 export type StudentDashboardData = {
   role: "student";
   studyCollections: { id: string; title: string; category: StoryCategory }[];
+  flashcards: StudySummary;
 };
 export type Sector = { category: StoryCategory; storyCount: number; articleCount: number };
 // #56: a Story an Investor can read comparatively — two or more Publishers' accepted,
@@ -676,11 +677,14 @@ export type Flashcard = {
 // The study session: what is due now, and both counts — a Student with no cards has a
 // deck to make, and a Student with nothing due is finished for today. `nextDueAt` is
 // what lets the second of those say when.
-export type StudyDeck = {
-  items: Flashcard[];
+export type StudySummary = {
   dueCount: number;
   totalCount: number;
   nextDueAt: string | null;
+};
+
+export type StudyDeck = StudySummary & {
+  items: Flashcard[];
 };
 
 export type FlashcardDeck = {
@@ -693,24 +697,34 @@ export type FlashcardDeck = {
 // SM-2 grades 0–5; these are the four a person can tell apart. The numbers are the
 // algorithm's (backend/src/flashcards/sm2.ts) — 3 is the pass mark, so "Again" is the
 // only one that lapses the card.
+export type ReviewGrade = 0 | 1 | 2 | 3 | 4 | 5;
+
 export const REVIEW_GRADES = [
   { grade: 0, label: "Again" },
   { grade: 3, label: "Hard" },
   { grade: 4, label: "Good" },
   { grade: 5, label: "Easy" },
-] as const;
+] as const satisfies readonly { grade: ReviewGrade; label: string }[];
+
+export const MAX_STUDY_DETAIL_LENGTH = 300;
 
 // Making a deck is a mutation for the same reason requesting an analysis is: it may
 // cost money (one model call writes the questions) and it creates rows a Student owns.
 // Asking twice is safe — cards already made keep their schedule.
-export function makeFlashcards(generationRunId: string): Promise<FlashcardDeck> {
-  return sendJson("POST", "/api/v1/flashcards", { generationRunId }, "Could not make flashcards");
+export function makeFlashcards(generationRunId: string, studyDetail = ""): Promise<FlashcardDeck> {
+  const detail = studyDetail.trim();
+  return sendJson(
+    "POST",
+    "/api/v1/flashcards",
+    { generationRunId, ...(detail ? { studyDetail: detail } : {}) },
+    "Could not make flashcards",
+  );
 }
 
 export function getStudyDeck(): Promise<StudyDeck> {
   return getJson("/api/v1/flashcards", "Could not load your flashcards");
 }
 
-export function reviewFlashcard(id: string, grade: number): Promise<Flashcard> {
+export function reviewFlashcard(id: string, grade: ReviewGrade): Promise<Flashcard> {
   return sendJson("POST", `/api/v1/flashcards/${id}/reviews`, { grade }, "Could not record this review");
 }
