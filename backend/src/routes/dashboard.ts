@@ -13,8 +13,8 @@ import { loadStudySummary } from "../flashcards/deck";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
-import { MAX_REQUESTED_CLAIMS, MIN_DISTINCT_PUBLISHERS, MIN_SURVIVING_CLAIMS } from "../generation/config";
-import { distinctPublisherCount, selectEvidence } from "../generation/evidence";
+import { MAX_REQUESTED_CLAIMS, MIN_SURVIVING_CLAIMS } from "../generation/config";
+import { comparableStories } from "../generation/evidence";
 import { toPublicIngestionRun } from "../lib/ingestionRunView";
 import { acceptedMembership } from "../lib/storyMembership";
 
@@ -34,10 +34,6 @@ const RECENT_CLUSTERING_RUNS = 20;
 // not corpus rate. And it has to be whole: a past run's promptVersion is traceable only
 // while the label it names is still readable somewhere, and this is the only surface
 // that reads them.
-
-// #56: how many Stories the Investor surface offers a comparative reading of. A
-// landing page, not an index — /stories is where a reader goes for all of them.
-const COMPARABLE_STORY_LIMIT = 10;
 
 // ADR-0004: Student and Investor are genuinely distinct endpoints/data, not one
 // shared shape with a role flag — each route below returns its own field set.
@@ -59,50 +55,6 @@ dashboardRouter.get(
     res.json({ role: "student", studyCollections, flashcards });
   }),
 );
-
-// #56: the Investor surface's route into the consensus/contradiction reading — the
-// Stories a comparative analysis can actually be written about, newest movement
-// first. Candidate discovery is one cheap aggregate; the final gate deliberately
-// calls generation's own evidence selector, so wire-copy collapse and every future
-// eligibility rule have one implementation.
-//
-// ponytail: this can run evidence selection once per candidate Story. The dashboard
-// is capped at ten and a Story holds tens of members; batch or materialize the result
-// if corpus size makes this measurable.
-async function comparableStories(): Promise<
-  { id: string; title: string; category: StoryCategory; publisherCount: number; lastSeenAt: Date }[]
-> {
-  const candidates: {
-    id: string;
-    title: string;
-    category: StoryCategory;
-    lastSeenAt: Date;
-  }[] = await AppDataSource.query(
-    `SELECT s."id", s."title", s."category", s."lastSeenAt"
-       FROM "stories" s
-       JOIN "articles" a ON a."storyId" = s."id" AND ${acceptedMembership("a")}
-        AND a."analysisText" ~ '[^[:space:]]' AND a."embedding" IS NOT NULL
-      GROUP BY s."id"
-     HAVING COUNT(DISTINCT a."publisherId") >= $1
-      ORDER BY s."lastSeenAt" DESC, s."title" ASC`,
-    [MIN_DISTINCT_PUBLISHERS],
-  );
-
-  const comparable: {
-    id: string;
-    title: string;
-    category: StoryCategory;
-    publisherCount: number;
-    lastSeenAt: Date;
-  }[] = [];
-  for (const story of candidates) {
-    const publisherCount = distinctPublisherCount(await selectEvidence(story.id));
-    if (publisherCount < MIN_DISTINCT_PUBLISHERS) continue;
-    comparable.push({ ...story, publisherCount });
-    if (comparable.length === COMPARABLE_STORY_LIMIT) break;
-  }
-  return comparable;
-}
 
 // The Investor surface is market context over the corpus (CONTEXT.md: Investor
 // = "watchlist/sectors"). Sectors are the Story category vocabulary rolled up

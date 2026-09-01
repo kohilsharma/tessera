@@ -54,16 +54,17 @@ promptsRouter.post(
   }),
 );
 
-// Activation or deactivation. PATCH on the version rather than a command route, the
-// same shape as a connector's `enabled` (#39). With none current, generation uses the
-// shipped prompt; a fresh database still gets that version as a current row.
+// Activation. PATCH on the version rather than a command route, the same shape as a
+// connector's `enabled` (#39) — but only one direction: `isCurrent: true`. Superseding a
+// version means activating another, because a table with nothing current is a state #57
+// does not describe. With none current at all, generation uses the shipped prompt; a
+// fresh database gets that version as a current row from the migration.
 promptsRouter.patch(
   "/prompt-templates/:id",
   ...adminOnly,
   asyncHandler(async (req, res) => {
-    const isCurrent = (req.body ?? {}).isCurrent;
-    if (typeof isCurrent !== "boolean") {
-      res.status(422).json({ error: "isCurrent must be true or false" });
+    if ((req.body ?? {}).isCurrent !== true) {
+      res.status(422).json({ error: "isCurrent must be true: a version is superseded by activating another" });
       return;
     }
     if (!isUuid(req.params.id)) {
@@ -71,7 +72,7 @@ promptsRouter.patch(
       return;
     }
 
-    const updated = await setPromptTemplateCurrent(req.params.id, isCurrent);
+    const updated = await setPromptTemplateCurrent(req.params.id);
     if (!updated) {
       res.status(404).json({ error: "Prompt version not found" });
       return;

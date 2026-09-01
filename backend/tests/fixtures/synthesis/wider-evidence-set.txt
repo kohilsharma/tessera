@@ -18,7 +18,7 @@
       "text": "The plant plans to add 400 roles prior to the pilot line reaching volume production.",
       "claim_type": "investor_implication",
       "citations": [
-        "A3"
+        "A1"
       ]
     },
     {

@@ -158,7 +158,9 @@ seed body), and below full text the prompt carries v3 §16.6's wording while val
 omission phrasing outright — with investment advice and price targets rejected under *every*
 Lens, and a `contradiction` rejected unless its citations resolve to two distinct Publishers.
 A failing claim is now **dropped and recorded**, not fatal: the run completes if at least two
-claims survive including one `consensus`, and fails otherwise (`invalid_citations` when claims
+claims survive including one `consensus` *and* one claim of the run's own Lens — an Investor
+analysis whose implication was dropped is a Student's analysis with an Investor's name on it
+(ADR-0004) — and fails otherwise (`invalid_citations` when claims
 were refused, `below_claim_floor` when the answer was merely thin). Structural failures still
 fail whole. Before any failure, the answer is re-prompted twice with the specific validation
 error and the rejected text (`repairAttempts` on the run, `SYNTHESIS_TIMEOUT_MS` now the budget
@@ -264,7 +266,9 @@ did rather than what it queued. An eighth is **Prompt versions** (#57), a regist
 command form: each version states its own parameters in the note line so two can be told apart
 without opening either, a Make-current command on every row but the current one, and a form whose
 fields are the whole tuning surface — there is no control for the citation check, because it is
-not configuration. The
+not configuration. Those four Phase-3 registers live in `pages/adminRegisters.tsx`, each owning
+its own request and commands; `pages/AdminDashboard.tsx` is the console that lays them out and
+the two registers reading its own payload. The
 **design prototype** for the Phase-3 flagship (`src/versions/BureauPrototype.tsx` +
 `bureau.tsx` over hardcoded `src/data.ts`, styled by `src/styles.css`) sits at
 `/design-prototype`, out of the Phase-1 path.

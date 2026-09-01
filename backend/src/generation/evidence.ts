@@ -5,11 +5,13 @@ import { weakestAnalysisTextMode, type AnalysisTextMode } from "../entities/Arti
 import { EvidenceSet } from "../entities/EvidenceSet";
 import { EvidenceSetArticle, type SelectionReason } from "../entities/EvidenceSetArticle";
 import type { TermsClass } from "../entities/Publisher";
+import type { StoryCategory } from "../entities/Story";
 import { acceptedCentroid, acceptedMembership } from "../lib/storyMembership";
 import {
   EXCERPT_CHARS,
   MAX_ARTICLES_PER_PUBLISHER,
   MAX_EVIDENCE_ARTICLES,
+  MIN_DISTINCT_PUBLISHERS,
   NEAR_DUPLICATE_SIMILARITY,
 } from "./config";
 
@@ -229,6 +231,53 @@ export async function selectEvidence(storyId: string): Promise<SelectedEvidence[
 
 export function distinctPublisherCount(selected: SelectedEvidence[]): number {
   return new Set(selected.map((row) => row.publisherId)).size;
+}
+
+// #56: how many Stories the Investor surface offers a comparative reading of. A
+// landing page, not an index — /stories is where a reader goes for all of them.
+const COMPARABLE_STORY_LIMIT = 10;
+
+export type ComparableStory = {
+  id: string;
+  title: string;
+  category: StoryCategory;
+  publisherCount: number;
+  lastSeenAt: Date;
+};
+
+// The Stories an analysis can actually be written about, newest movement first: what
+// the Investor dashboard routes into (#56), and a question about evidence rather than
+// about a dashboard — so it lives beside the selector that answers it rather than in
+// the route that displays it. Candidate discovery is one cheap aggregate; the final
+// gate calls selectEvidence itself, so wire-copy collapse and every future
+// eligibility rule have one implementation.
+//
+// It deliberately reports no article count: the members eligible here are a subset of
+// the accepted members /stories counts, and one word for two numbers would be a defect.
+//
+// ponytail: this runs evidence selection once per candidate Story. The list is capped
+// at ten and a Story holds tens of members; batch or materialize the result if corpus
+// size makes this measurable.
+export async function comparableStories(): Promise<ComparableStory[]> {
+  const candidates: Omit<ComparableStory, "publisherCount">[] = await AppDataSource.query(
+    `SELECT s."id", s."title", s."category", s."lastSeenAt"
+       FROM "stories" s
+       JOIN "articles" a ON a."storyId" = s."id" AND ${acceptedMembership("a")}
+        AND a."analysisText" ~ '[^[:space:]]' AND a."embedding" IS NOT NULL
+      GROUP BY s."id"
+     HAVING COUNT(DISTINCT a."publisherId") >= $1
+      ORDER BY s."lastSeenAt" DESC, s."title" ASC`,
+    [MIN_DISTINCT_PUBLISHERS],
+  );
+
+  const comparable: ComparableStory[] = [];
+  for (const story of candidates) {
+    const publisherCount = distinctPublisherCount(await selectEvidence(story.id));
+    if (publisherCount < MIN_DISTINCT_PUBLISHERS) continue;
+    comparable.push({ ...story, publisherCount });
+    if (comparable.length === COMPARABLE_STORY_LIMIT) break;
+  }
+  return comparable;
 }
 
 // ADR-0027: the set's rung is the weakest among its members, and it is what decides

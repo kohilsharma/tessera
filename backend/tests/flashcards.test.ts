@@ -118,11 +118,11 @@ async function analysisFor(token: string): Promise<{ storyId: string; runId: str
   return { storyId: story.id, runId: res.body.id };
 }
 
-function makeDeck(token: string, generationRunId: unknown, studyDetail?: unknown) {
+function makeDeck(token: string, generationRunId: unknown) {
   return request(app())
     .post("/api/v1/flashcards")
     .set("Authorization", `Bearer ${token}`)
-    .send({ generationRunId, ...(studyDetail === undefined ? {} : { studyDetail }) });
+    .send({ generationRunId });
 }
 
 function studyDeck(token: string) {
@@ -254,27 +254,29 @@ describe("generating a deck", () => {
     expect(synth.requests[0].prompt).not.toContain("body text");
   });
 
-  it("uses the Student's study focus and keeps differently focused questions out of the same cache entry", async () => {
+  it("writes each question once, however many Students study the same analysis", async () => {
     const first = await tokenFor("student");
     const second = await tokenFor("student");
     const { runId } = await analysisFor(first.token);
     synth.requests.length = 0;
 
-    expect((await makeDeck(first.token, runId, "Focus on the policy timeline")).status).toBe(201);
-    expect((await makeDeck(second.token, runId, "Focus on the manufacturing trade-offs")).status).toBe(201);
+    expect((await makeDeck(first.token, runId)).status).toBe(201);
+    expect((await makeDeck(second.token, runId)).status).toBe(201);
 
-    const questionCalls = synth.requests.filter((call) => call.task === "flashcard_questions");
-    expect(questionCalls).toHaveLength(2);
-    expect(questionCalls[0].prompt).toContain('"Focus on the policy timeline"');
-    expect(questionCalls[1].prompt).toContain('"Focus on the manufacturing trade-offs"');
-  });
-
-  it("refuses an invalid study focus at the API boundary", async () => {
-    const student = await tokenFor("student");
-    const { runId } = await analysisFor(student.token);
-
-    expect((await makeDeck(student.token, runId, { instructions: "not text" })).status).toBe(422);
-    expect((await makeDeck(student.token, runId, "x".repeat(301))).status).toBe(422);
+    // The cache is keyed by claim type + text, both immutable (#58), so the second
+    // Student's deck is written from the answer the first one paid for. Their cards are
+    // still their own rows, with their own schedules.
+    expect(synth.requests.filter((call) => call.task === "flashcard_questions")).toHaveLength(1);
+    const [firstDeck, secondDeck] = await Promise.all([
+      makeDeck(first.token, runId),
+      makeDeck(second.token, runId),
+    ]);
+    expect(secondDeck.body.cards.map((card: { question: string }) => card.question)).toEqual(
+      firstDeck.body.cards.map((card: { question: string }) => card.question),
+    );
+    expect(secondDeck.body.cards.map((card: { id: string }) => card.id)).not.toEqual(
+      firstDeck.body.cards.map((card: { id: string }) => card.id),
+    );
   });
 
   it("falls back to a stated question when the provider does not answer", async () => {

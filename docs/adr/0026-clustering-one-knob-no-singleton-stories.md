@@ -35,7 +35,12 @@ Three facts about this build make most of that shape unbuildable or unusable now
   fixture Stories are not assignment candidates, in both directions.
 - **One knob.** Assignment scores cosine similarity against the Story centroid. Time is a
   hard **gate**, not a weighted term: a Story whose `lastSeenAt` falls outside the window is
-  not a candidate at any similarity. Two tunables total (threshold, window).
+  not a candidate at any similarity. Two tunables total (threshold, window) — the two numbers
+  that change *which Articles land together*. `CLUSTERING_EMBED_BATCH_SIZE` also reads from
+  the environment and is deliberately not a third: it bounds one request to the embedding
+  provider (ADR-0025 counts requests, so a run batches), a run drains every eligible Article
+  whatever it is set to, and no value changes a single membership decision. A knob that
+  cannot change an outcome is not calibration.
 - **No singleton Stories.** A new Story is seeded only when at least two mutually-matching
   Articles from at least two distinct Publishers are available. An Article that matches
   nothing stays Unclustered and is reconsidered every run.

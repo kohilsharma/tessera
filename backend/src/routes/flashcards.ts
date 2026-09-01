@@ -1,6 +1,5 @@
 import { Router } from "express";
 import { generateDeck, loadStudyDeck, reviewCard } from "../flashcards/deck";
-import { MAX_STUDY_DETAIL_LENGTH } from "../flashcards/questions";
 import { isReviewGrade, MAX_REVIEW_GRADE, MIN_REVIEW_GRADE } from "../flashcards/sm2";
 import { loadReaderRun } from "../generation/readerRun";
 import { asyncHandler } from "../middleware/asyncHandler";
@@ -30,22 +29,12 @@ flashcardsRouter.use("/flashcards", requireAuth, requireRole("student"));
 flashcardsRouter.post(
   "/flashcards",
   asyncHandler(async (req, res) => {
-    const body = req.body ?? {};
-    if (body.studyDetail !== undefined && typeof body.studyDetail !== "string") {
-      res.status(422).json({ error: "studyDetail must be text" });
-      return;
-    }
-    const studyDetail = body.studyDetail?.trim() || undefined;
-    if (studyDetail && studyDetail.length > MAX_STUDY_DETAIL_LENGTH) {
-      res.status(422).json({ error: `studyDetail must be at most ${MAX_STUDY_DETAIL_LENGTH} characters` });
-      return;
-    }
-    const reader = await loadReaderRun(body.generationRunId, req.user!.role);
+    const reader = await loadReaderRun((req.body ?? {}).generationRunId, req.user!.role);
     if (!reader.ok) {
       res.status(422).json({ error: reader.error });
       return;
     }
-    const cards = await generateDeck(createSynthesisProvider(), req.user!.id, reader.run.id, studyDetail);
+    const cards = await generateDeck(createSynthesisProvider(), req.user!.id, reader.run.id);
     // An analysis whose every claim is somehow uncited would produce nothing. Nothing
     // can write one — validation refuses an uncited claim below the prompt — so this
     // is the honest answer rather than an error: there is no deck here to study.

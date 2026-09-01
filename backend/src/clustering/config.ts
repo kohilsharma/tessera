@@ -22,7 +22,10 @@ export const REVIEW_THRESHOLD = Math.max(0, SIMILARITY_THRESHOLD - 0.1);
 // Time is a hard gate rather than a weighted score component.
 export const RECENCY_WINDOW_HOURS = envNumber("CLUSTERING_RECENCY_WINDOW_HOURS", 72, { min: 1, max: 24 * 365 });
 
-// Request payload bound only; a run still drains every eligible Article.
+// Request payload bound only, and not ADR-0026's third tunable: it bounds one request
+// to the embedding provider (ADR-0025 counts requests, so a run batches), a run drains
+// every eligible Article whatever it is set to, and no value changes a membership
+// decision.
 export const EMBED_BATCH_SIZE = envNumber("CLUSTERING_EMBED_BATCH_SIZE", 32, { min: 1, max: 256 });
 
 export const CLUSTERABLE_TEXT_MODES: AnalysisTextMode[] = ["feed_excerpt", "api_content", "licensed_full_text"];

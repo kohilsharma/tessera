@@ -1,0 +1,31 @@
+{
+  "claims": [
+    {
+      "text": "Both outlets report that the pilot line is scheduled to reach volume output in 2027.",
+      "claim_type": "consensus",
+      "citations": [
+        "A1",
+        "A2"
+      ]
+    },
+    {
+      "text": "Only one outlet names the deadline for the subsidy application.",
+      "claim_type": "source_specific",
+      "citations": [
+        "A1"
+      ]
+    },
+    {
+      "text": "Analysts expect further consolidation across the sector in the coming quarters.",
+      "claim_type": "consensus",
+      "citations": []
+    },
+    {
+      "text": "Consolidation talk of this kind is background rather than reporting, and the two outlets here are writing about one plant.",
+      "claim_type": "student_context",
+      "citations": [
+        "A2"
+      ]
+    }
+  ]
+}

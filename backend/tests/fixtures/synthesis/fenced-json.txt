@@ -15,6 +15,11 @@
       "text": "Officials stated they would not say when the subsidy decision will land.",
       "claim_type": "source_specific",
       "citations": ["A2"]
+    },
+    {
+      "text": "A subsidy application of this kind is reviewed in stages, so a pending decision is not a refusal.",
+      "claim_type": "student_context",
+      "citations": ["A1", "A2"]
     }
   ]
 }

@@ -465,7 +465,7 @@ describe("Admin dashboard", () => {
     renderWithProviders(<AdminDashboard />);
 
     const review = await screen.findByRole("region", { name: "Clustering review" });
-    expect(within(review).getByRole("alert")).toHaveTextContent("Review queue unavailable");
+    expect(await within(review).findByRole("alert")).toHaveTextContent("Review queue unavailable");
     expect(within(review).getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
@@ -475,7 +475,7 @@ describe("Admin dashboard", () => {
     renderWithProviders(<AdminDashboard />);
 
     const review = await screen.findByRole("region", { name: "Clustering review" });
-    expect(within(review).getByText(/Nothing is waiting on a decision/)).toBeInTheDocument();
+    expect(await within(review).findByText(/Nothing is waiting on a decision/)).toBeInTheDocument();
   });
 
   it("registers each proposal with its score and the Story it would join", async () => {
@@ -484,7 +484,7 @@ describe("Admin dashboard", () => {
     renderWithProviders(<AdminDashboard />);
 
     const review = await screen.findByRole("region", { name: "Clustering review" });
-    const row = within(review).getByRole("listitem");
+    const row = await within(review).findByRole("listitem");
     expect(within(row).getByText("Grid operator revises connection timetable")).toBeInTheDocument();
     expect(within(row).getByText("Score").closest("div")).toHaveTextContent("0.81");
     // The proposed Story opens, so a reviewer can read what the proposal claims this
@@ -539,7 +539,7 @@ describe("Admin dashboard", () => {
     renderWithProviders(<AdminDashboard />);
 
     const register = await screen.findByRole("region", { name: "Story merge" });
-    await userEvent.selectOptions(within(register).getByLabelText(/Surviving Story/), "s1");
+    await userEvent.selectOptions(await within(register).findByLabelText(/Surviving Story/), "s1");
     await userEvent.selectOptions(within(register).getByLabelText(/Merged into it/), "s2");
     await userEvent.click(within(register).getByRole("button", { name: "Merge" }));
 
@@ -558,7 +558,7 @@ describe("Admin dashboard", () => {
     renderWithProviders(<AdminDashboard />);
 
     const register = await screen.findByRole("region", { name: "Story merge" });
-    const command = within(register).getByRole("button", { name: "Merge" });
+    const command = await within(register).findByRole("button", { name: "Merge" });
     expect(command).toBeDisabled();
 
     // The same Story on both sides is the one pair the command must never send: it
@@ -577,7 +577,7 @@ describe("Admin dashboard", () => {
     const { unmount } = renderWithProviders(<AdminDashboard />);
 
     const register = await screen.findByRole("region", { name: "Story merge" });
-    await userEvent.selectOptions(within(register).getByLabelText(/Surviving Story/), "s1");
+    await userEvent.selectOptions(await within(register).findByLabelText(/Surviving Story/), "s1");
     await userEvent.selectOptions(within(register).getByLabelText(/Merged into it/), "s2");
     await userEvent.click(within(register).getByRole("button", { name: "Merge" }));
 
@@ -591,7 +591,7 @@ describe("Admin dashboard", () => {
     renderWithProviders(<AdminDashboard />);
 
     const alone = await screen.findByRole("region", { name: "Story merge" });
-    expect(within(alone).getByText(/Fewer than two Stories/)).toBeInTheDocument();
+    expect(await within(alone).findByText(/Fewer than two Stories/)).toBeInTheDocument();
   });
 
   // #57, ADR-0021: an Admin shapes what every reader gets by writing a version and
@@ -667,21 +667,16 @@ describe("Admin dashboard", () => {
     expect(within(register).getByRole("status")).toHaveTextContent(/under this exact version may be reused/);
   });
 
-  it("deactivates the current prompt version", async () => {
-    mockConsole({
-      command: jsonResponse({ id: "t1", version: "generation-v2", isCurrent: false }),
-    });
+  it("offers no way to leave the console with no current version", async () => {
+    mockConsole();
 
     renderWithProviders(<AdminDashboard />);
 
     const register = await screen.findByRole("region", { name: "Prompt versions" });
-    await userEvent.click(await within(register).findByRole("button", { name: "Deactivate" }));
-
-    expect(callTo("/api/v1/prompt-templates/t1")?.[1]).toMatchObject({
-      method: "PATCH",
-      body: JSON.stringify({ isCurrent: false }),
-    });
-    expect(within(register).getByRole("status")).toHaveTextContent(/generation uses the shipped prompt/);
+    // The current version carries no command at all: it is superseded by activating
+    // another (#57), and "nothing current" is a state the API refuses.
+    expect(within(register).getByText("Current")).toBeInTheDocument();
+    expect(within(register).queryByRole("button", { name: /Deactivate|Make current/ })).toBeNull();
   });
 
   it("states a refused prompt version where it was fired", async () => {

@@ -136,19 +136,24 @@ export async function createPromptTemplate(
   }
 }
 
-// The one mutation on this table. Activation clears then sets; deactivation only
-// clears the named row. The partial unique index permits at most one current row.
+// The one mutation on this table: activation. Clears whatever was current, then sets the
+// named row; the partial unique index permits at most one current row.
 //
-// The advisory lock keeps concurrent activate/deactivate requests deterministic rather
-// than surfacing a unique violation. This is an operator button, not a hot path.
-export async function setPromptTemplateCurrent(id: string, isCurrent: boolean): Promise<PromptTemplate | null> {
+// There is deliberately no deactivation (#57 asks to "set which version is current", and
+// nothing else): a table with no current row is a state no acceptance criterion describes,
+// and it would leave generation on the shipped fallback below rather than on a version an
+// operator chose. Superseding a version means activating another one.
+//
+// The advisory lock keeps concurrent activations deterministic rather than surfacing a
+// unique violation. This is an operator button, not a hot path.
+export async function setPromptTemplateCurrent(id: string): Promise<PromptTemplate | null> {
   return AppDataSource.transaction(async (manager) => {
     await manager.query(`SELECT pg_advisory_xact_lock(hashtext('prompt_templates.isCurrent'))`);
     const templates = manager.getRepository(PromptTemplate);
     const held = await templates.findOneBy({ id });
     if (!held) return null;
-    if (isCurrent) await templates.update({ isCurrent: true }, { isCurrent: false });
-    await templates.update({ id }, { isCurrent });
-    return { ...held, isCurrent };
+    await templates.update({ isCurrent: true }, { isCurrent: false });
+    await templates.update({ id }, { isCurrent: true });
+    return { ...held, isCurrent: true };
   });
 }

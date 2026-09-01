@@ -374,13 +374,17 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .claim-list .claim-cites { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 9px 0 0; }
 .claim-cites a { font: 500 .68rem ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
 
-/* The Investor reading of the same register (#56). Two additions, both provenance
-   rather than prose, so both sit in the measurement face beside the citations:
-   what an agreement is worth counted in newsrooms, and the sides of a
-   disagreement as a ruled pair. The side rule is what makes "both sides" legible
-   as two things rather than one run of links — vertical, because the pair reads
-   down the column at either breakpoint. */
-.claim-measure { margin: 7px 0 0; color: var(--quiet-ink); font: 500 .66rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+/* The Investor reading of the same register (#56). Two additions: what an agreement is
+   worth counted in newsrooms, and the sides of a disagreement as a ruled pair. The
+   side rule is what makes "both sides" legible as two things rather than one run of
+   links — vertical, because the pair reads down the column at either breakpoint.
+
+   The count and the two stated absences are sentences, so they stay in the reading
+   face at a quieter weight: DESIGN.md's Measurement Rule reserves the monospace face
+   for values whose alignment or fixed identity matters — an evidence id, not a clause
+   — and the Reading Rule keeps metadata from replacing prose hierarchy. Only the
+   citations beside them are provenance. */
+.claim-note { max-width: 68ch; margin: 8px 0 0; color: var(--quiet-ink); font-size: .82rem; line-height: 1.55; }
 .claim-sides { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 10px; }
 .claim-sides > li { padding-left: 12px; border-left: 2px solid var(--bureau-ink); }
 .claim-sides .side-publisher { font-weight: 700; font-size: .82rem; }
@@ -876,8 +880,11 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .study-question { margin: 0; max-width: 28ch; font-size: clamp(1.5rem, 4vw, 2.5rem); font-weight: 750; line-height: 1.12; letter-spacing: -.025em; text-wrap: balance; }
 .study-answer { margin: 30px 0 0; padding: 22px 0 0; border-top: 3px solid var(--proof-blue); font-size: 1.05rem; line-height: 1.65; }
 .study-card .claim-cites { display: flex; flex-wrap: wrap; gap: 7px 16px; margin: 18px 0 0; }
-.study-card .claim-cites a, .study-card .claim-measure { color: var(--bureau-ink); font: 500 .68rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; text-underline-offset: 3px; }
-.study-card .claim-measure { margin-top: 12px; color: var(--quiet-ink); }
+.study-card .claim-cites a { color: var(--bureau-ink); font: 500 .68rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; text-underline-offset: 3px; }
+/* Where the card came from is a sentence naming a Story, so it reads as prose here
+   too — the ids above it are the provenance. */
+.study-card .claim-note { margin-top: 14px; }
+.study-card .claim-note a { color: var(--bureau-ink); font-weight: 700; text-underline-offset: 3px; }
 .study-card .record-actions { padding-top: 4px; }
 
 @media (max-width: 560px) {

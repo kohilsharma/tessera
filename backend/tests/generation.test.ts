@@ -79,10 +79,23 @@ const sourceSpecific = (citations: string[], text = "Only one outlet names the s
   claim_type: "source_specific",
   citations,
 });
+// The Lens claim ADR-0027's floor now requires: a run is published only if a claim of
+// its own Lens survives, because an Investor analysis without its implication is a
+// Student's analysis with an Investor's name on it (ADR-0004). So every answer here that
+// is meant to complete carries exactly one, as the prompt asks for.
+type Lens = "student_context" | "investor_implication";
+const lensClaim = (
+  lens: Lens,
+  citations: string[],
+  text = lens === "student_context"
+    ? "The pilot line is the company's first at this node, which is what the timetable is about."
+    : "The timetable is the number to watch when the next filing lands.",
+) => ({ text, claim_type: lens, citations });
 // The smallest answer that clears ADR-0027's floor: two surviving claims, one of them
-// consensus. Anything thinner is a failed run now, however valid its citations (#54).
-const publishable = (citations: string[] = ["A1", "A2"]) =>
-  claimsAnswer(consensus(citations), sourceSpecific([citations[0]]));
+// consensus, plus the run's own Lens claim. Anything thinner is a failed run now,
+// however valid its citations (#54).
+const publishable = (citations: string[] = ["A1", "A2"], lens: Lens = "student_context") =>
+  claimsAnswer(consensus(citations), sourceSpecific([citations[0]]), lensClaim(lens, [citations[0]]));
 // A rejected answer is re-prompted twice before its run fails (ADR-0027), so a test
 // about a refusal has to hand the provider the same bad answer three times.
 const insisting = (answer: string) => answering(answer, answer, answer);
@@ -590,11 +603,15 @@ describe("citation validation", () => {
   it("completes a run whose claims all cite frozen evidence, and persists what it did", async () => {
     const { story, first } = await twoPublisherStory();
     answering(
-      claimsAnswer(consensus(["A1", "A2"]), {
-        text: "Only one outlet names the subsidy deadline.",
-        claim_type: "source_specific",
-        citations: ["A2"],
-      }),
+      claimsAnswer(
+        consensus(["A1", "A2"]),
+        {
+          text: "Only one outlet names the subsidy deadline.",
+          claim_type: "source_specific",
+          citations: ["A2"],
+        },
+        lensClaim("student_context", ["A1"]),
+      ),
     );
 
     const res = await requestAnalysis(story.id, await tokenFor("student"));
@@ -603,7 +620,7 @@ describe("citation validation", () => {
     expect(res.body.status).toBe("completed");
     expect(res.body.failureCode).toBeNull();
     expect(res.body.promptVersion).toBe(PROMPT_VERSION);
-    expect(res.body.claims).toHaveLength(2);
+    expect(res.body.claims).toHaveLength(3);
     expect(res.body.claims[0]).toMatchObject({ claimType: "consensus", citations: ["A1", "A2"] });
     // A citation is followable: the id resolves to a row of the frozen set, and that
     // row names an Article a reader can open.
@@ -614,7 +631,7 @@ describe("citation validation", () => {
       await AppDataSource.query(`SELECT "status", "rawResponse", "validationResult" FROM "generation_runs"`);
     expect(runs).toHaveLength(1);
     expect(runs[0].rawResponse).toContain("source_specific");
-    expect(runs[0].validationResult).toMatchObject({ claimsReturned: 2, claimsAccepted: 2, claimsRejected: 0 });
+    expect(runs[0].validationResult).toMatchObject({ claimsReturned: 3, claimsAccepted: 3, claimsRejected: 0 });
   });
 
   it("drops a claim whose citation names evidence outside the frozen set", async () => {
@@ -624,7 +641,7 @@ describe("citation validation", () => {
     insisting(
       claimsAnswer(
         consensus(["A1", "A2"]),
-        sourceSpecific(["A2"]),
+        lensClaim("student_context", ["A2"]),
         consensus(["A9"], "A ninth source that was never frozen."),
       ),
     );
@@ -659,18 +676,15 @@ describe("citation validation", () => {
 
   it("drops a claim that cites nothing at all", async () => {
     const { story } = await twoPublisherStory();
-    insisting(
-      claimsAnswer(
-        consensus(["A1", "A2"]),
-        sourceSpecific(["A1"]),
-        { text: "Analysts expect consolidation.", claim_type: "consensus", citations: [] },
-      ),
-    );
+    insisting(fixture("uncited-claim"));
 
     const res = await requestAnalysis(story.id, await tokenFor("student"));
 
     expect(res.body.status).toBe("completed");
-    expect(res.body.claims).toHaveLength(2);
+    expect(res.body.claims).toHaveLength(3);
+    expect(res.body.claims.some((claim: { text: string }) => /consolidation across the sector/.test(claim.text))).toBe(
+      false,
+    );
     const runs: { validationResult: { issues: { code: string }[] } }[] = await AppDataSource.query(
       `SELECT "validationResult" FROM "generation_runs"`,
     );
@@ -767,7 +781,7 @@ describe("citation validation", () => {
         publishedAt: new Date(Date.UTC(2026, 0, 4, index)),
       });
     }
-    answering(claimsAnswer(consensus(["A10", "A2"]), sourceSpecific(["A1"])));
+    answering(claimsAnswer(consensus(["A10", "A2"]), lensClaim("student_context", ["A1"])));
 
     const res = await requestAnalysis(story.id, await tokenFor("student"));
 
@@ -852,7 +866,7 @@ describe("reuse", () => {
 
   it("is per Lens, so an Investor does not read the Student's analysis", async () => {
     const { story } = await twoPublisherStory();
-    answering(publishable(["A1", "A2"]), publishable(["A2", "A1"]));
+    answering(publishable(["A1", "A2"]), publishable(["A2", "A1"], "investor_implication"));
 
     const student = await requestAnalysis(story.id, await tokenFor("student"));
     const investor = await requestAnalysis(story.id, await tokenFor("investor"));
@@ -1292,7 +1306,7 @@ describe("the mixed-rung wording rule", () => {
     const res = await requestAnalysis(story.id, await tokenFor("student"));
 
     expect(res.body.status).toBe("completed");
-    expect(res.body.claims).toHaveLength(2);
+    expect(res.body.claims).toHaveLength(3);
     expect(res.body.claims.some((claim: { text: string }) => /omitted/i.test(claim.text))).toBe(false);
     const runs: { validationResult: { issues: { claimIndex: number; code: string }[] } }[] =
       await AppDataSource.query(`SELECT "validationResult" FROM "generation_runs"`);
@@ -1304,7 +1318,7 @@ describe("the mixed-rung wording rule", () => {
     answering(
       claimsAnswer(
         consensus(["A1", "A2"]),
-        sourceSpecific(["A2"]),
+        lensClaim("student_context", ["A2"]),
         sourceSpecific(["A1"], "Northwind Ledger omitted the subsidy deadline."),
       ),
     );
@@ -1320,7 +1334,9 @@ describe("the mixed-rung wording rule", () => {
 // Every fixture below is a transcript: the configured cheap model's own answer to a
 // prompt built the way generation builds one, captured once and replayed offline. One
 // per failure mode, which is what makes the contract testable with no key and no
-// network (ADR-0027).
+// network (ADR-0027). Each carries exactly one Lens claim, because that is what the
+// prompt asks for and what the floor requires of a run that is published at all — a
+// transcript missing one would be testing a prompt this code does not send.
 describe("captured model failures", () => {
   it("tolerates the fenced JSON a cheap model actually returns", async () => {
     const { story } = await twoPublisherStory();
@@ -1329,7 +1345,7 @@ describe("captured model failures", () => {
     const res = await requestAnalysis(story.id, await tokenFor("student"));
 
     expect(res.body.status).toBe("completed");
-    expect(res.body.claims).toHaveLength(3);
+    expect(res.body.claims).toHaveLength(4);
   });
 
   it("fails an answer the token budget cut off, because there is nothing to keep", async () => {
@@ -1351,15 +1367,47 @@ describe("captured model failures", () => {
     expect(res.body.failureCode).toBe("schema_violation");
   });
 
-  it("drops investment advice and a price target, whatever the prompt asked for", async () => {
+  it("refuses the run when investment advice was the Investor's own claim", async () => {
     const { story } = await twoPublisherStory();
     insisting(fixture("investment-advice"));
 
     const res = await requestAnalysis(story.id, await tokenFor("investor"));
 
+    // The advice *is* the investor_implication here, so dropping it leaves an Investor
+    // analysis with no Investor claim in it — which is a Student's analysis under
+    // another name (ADR-0004), and refused rather than published or cached.
+    expect(res.body.status).toBe("failed");
+    expect(res.body.failureCode).toBe("below_claim_floor");
+    expect(res.body.claims).toEqual([]);
+    const runs: { validationResult: { issues: { code: string }[] } }[] = await AppDataSource.query(
+      `SELECT "validationResult" FROM "generation_runs"`,
+    );
+    // Recorded, not silent: the price target was refused three times, once per attempt.
+    expect(runs[0].validationResult.issues).toEqual(
+      Array.from({ length: 1 + MAX_REPAIR_ATTEMPTS }, () => ({
+        claimIndex: 2,
+        code: "prohibited_investor_language",
+      })),
+    );
+  });
+
+  it("drops investment advice under the Student Lens too, and the analysis stands", async () => {
+    const { story } = await twoPublisherStory();
+    // The same prohibition, on the reader who was never offered a market reading:
+    // advice in a Student's analysis is no more permitted than advice in an Investor's.
+    insisting(
+      claimsAnswer(consensus(["A1", "A2"]), lensClaim("student_context", ["A1"]), {
+        text: "Readers should sell into the pilot-line announcement.",
+        claim_type: "source_specific",
+        citations: ["A2"],
+      }),
+    );
+
+    const res = await requestAnalysis(story.id, await tokenFor("student"));
+
     expect(res.body.status).toBe("completed");
     expect(res.body.claims).toHaveLength(2);
-    expect(res.body.claims.some((claim: { text: string }) => /price target/i.test(claim.text))).toBe(false);
+    expect(res.body.claims.some((claim: { text: string }) => /should sell/i.test(claim.text))).toBe(false);
     const runs: { validationResult: { issues: { code: string }[] } }[] = await AppDataSource.query(
       `SELECT "validationResult" FROM "generation_runs"`,
     );
@@ -1376,6 +1424,7 @@ describe("captured model failures", () => {
     expect(res.body.claims.map((claim: { claimType: string }) => claim.claimType)).toEqual([
       "consensus",
       "source_specific",
+      "student_context",
     ]);
     const runs: { validationResult: { issues: { code: string }[] } }[] = await AppDataSource.query(
       `SELECT "validationResult" FROM "generation_runs"`,
@@ -1388,7 +1437,7 @@ describe("captured model failures", () => {
     answering(
       claimsAnswer(
         consensus(["A1", "A2"]),
-        sourceSpecific(["A1"]),
+        lensClaim("student_context", ["A1"]),
         {
           text: "One outlet reports the timetable as unchanged; the other reports it as under review.",
           claim_type: "contradiction",
@@ -1402,7 +1451,7 @@ describe("captured model failures", () => {
     expect(res.body.status).toBe("completed");
     expect(res.body.claims.map((claim: { claimType: string }) => claim.claimType)).toEqual([
       "consensus",
-      "source_specific",
+      "student_context",
     ]);
     const runs: { validationResult: { issues: { code: string }[] } }[] = await AppDataSource.query(
       `SELECT "validationResult" FROM "generation_runs"`,
@@ -1413,17 +1462,21 @@ describe("captured model failures", () => {
   it("keeps and persists both sides of a contradiction", async () => {
     const { story } = await twoPublisherStory();
     answering(
-      claimsAnswer(consensus(["A1", "A2"]), {
-        text: "The timetable remains unchanged.",
-        claim_type: "contradiction",
-        sides: { supports: ["A1"], contradicts: ["A2"] },
-      }),
+      claimsAnswer(
+        consensus(["A1", "A2"]),
+        {
+          text: "The timetable remains unchanged.",
+          claim_type: "contradiction",
+          sides: { supports: ["A1"], contradicts: ["A2"] },
+        },
+        lensClaim("student_context", ["A1"]),
+      ),
     );
 
     const res = await requestAnalysis(story.id, await tokenFor("student"));
 
     expect(res.body.status).toBe("completed");
-    expect(res.body.claims).toHaveLength(2);
+    expect(res.body.claims).toHaveLength(3);
     expect(res.body.claims[1]).toMatchObject({
       citations: ["A1", "A2"],
       citationSides: [
@@ -1450,11 +1503,11 @@ describe("captured model failures", () => {
     const res = await requestAnalysis(story.id, await tokenFor("investor"));
 
     expect(res.body.status).toBe("completed");
-    expect(res.body.claims).toHaveLength(2);
+    expect(res.body.claims).toHaveLength(3);
     const runs: { validationResult: { claimsReturned: number; claimsAccepted: number; unknownEvidenceIds: string[] } }[] =
       await AppDataSource.query(`SELECT "validationResult" FROM "generation_runs"`);
-    expect(runs[0].validationResult).toMatchObject({ claimsReturned: 4, claimsAccepted: 2, claimsRejected: 2 });
-    expect(runs[0].validationResult.unknownEvidenceIds).toEqual(["A3", "A4"]);
+    expect(runs[0].validationResult).toMatchObject({ claimsReturned: 4, claimsAccepted: 3, claimsRejected: 1 });
+    expect(runs[0].validationResult.unknownEvidenceIds).toEqual(["A4"]);
   });
 
   it("fails a run whose answer is too thin to publish, with nothing wrong in it", async () => {
@@ -1521,8 +1574,8 @@ describe("repair", () => {
       };
     }[] = await AppDataSource.query(`SELECT "validationResult" FROM "generation_runs"`);
     expect(runs[0].validationResult).toEqual({
-      claimsReturned: 4,
-      claimsAccepted: 3,
+      claimsReturned: 5,
+      claimsAccepted: 4,
       claimsRejected: 1,
       unknownEvidenceIds: ["A9"],
       issues: [{ claimIndex: 1, code: "unknown_evidence_id", detail: "A9" }],
@@ -1607,6 +1660,7 @@ describe("the phrase checks", () => {
       claimsAnswer(
         consensus(["A1", "A2"], "Both outlets report that the government must sell its remaining stake."),
         sourceSpecific(["A2"], "One outlet reports the plant will buy the line outright."),
+        lensClaim("investor_implication", ["A1"], "The stake sale is the term to watch in the next filing."),
       ),
     );
 
@@ -1615,17 +1669,21 @@ describe("the phrase checks", () => {
     // Reporting that an actor in the story will trade something is not advice to the
     // reader, and the excerpt rung does not make it an omission claim either.
     expect(res.body.status).toBe("completed");
-    expect(res.body.claims).toHaveLength(2);
+    expect(res.body.claims).toHaveLength(3);
   });
 
   it("catches a target the model phrased without the words price target", async () => {
     const { story } = await twoPublisherStory();
     insisting(
-      claimsAnswer(consensus(["A1", "A2"]), sourceSpecific(["A2"]), {
-        text: "The reporting implies fair value at $45, roughly 30% upside from here.",
-        claim_type: "investor_implication",
-        citations: ["A1"],
-      }),
+      claimsAnswer(
+        consensus(["A1", "A2"]),
+        lensClaim("investor_implication", ["A2"]),
+        {
+          text: "The reporting implies fair value at $45, roughly 30% upside from here.",
+          claim_type: "source_specific",
+          citations: ["A1"],
+        },
+      ),
     );
 
     const res = await requestAnalysis(story.id, await tokenFor("investor"));
@@ -2036,7 +2094,7 @@ describe("Admin prompt tuning", () => {
     expect(run.validationResult.unknownEvidenceIds).toEqual(["A7"]);
   });
 
-  it("keeps at most one version current and allows explicit deactivation", async () => {
+  it("keeps at most one version current, and supersedes rather than deactivates", async () => {
     const admin = await tokenFor("admin");
     const created = await createVersion(admin, "2026-10-07-second", tuned({ tone: "terse" }));
     expect((await activateVersion(admin, created.body.id)).body.isCurrent).toBe(true);
@@ -2046,10 +2104,20 @@ describe("Admin prompt tuning", () => {
     );
     expect(current.map((row) => row.version)).toEqual(["2026-10-07-second"]);
 
+    // There is no way to leave the table with nothing current (#57 asks to set which
+    // version is current, and no more than that): a version is superseded by activating
+    // another, which the partial unique index makes an exchange rather than an addition.
     const deactivated = await activateVersion(admin, created.body.id, false);
-    expect(deactivated.status).toBe(200);
-    expect(deactivated.body.isCurrent).toBe(false);
-    expect(await AppDataSource.query(`SELECT "version" FROM "prompt_templates" WHERE "isCurrent"`)).toEqual([]);
+    expect(deactivated.status).toBe(422);
+    const third = await createVersion(admin, "2026-10-07-third", tuned({ tone: "plain" }));
+    expect((await activateVersion(admin, third.body.id)).body.isCurrent).toBe(true);
+    expect(
+      (
+        await AppDataSource.query<{ version: string }[]>(
+          `SELECT "version" FROM "prompt_templates" WHERE "isCurrent"`,
+        )
+      ).map((row) => row.version),
+    ).toEqual(["2026-10-07-third"]);
     expect((await activateVersion(admin, randomUUID())).status).toBe(404);
     expect((await activateVersion(admin, "not-an-id")).status).toBe(404);
   });

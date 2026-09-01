@@ -147,17 +147,11 @@ export async function loadRunDeck(ownerId: string, generationRunId: string): Pro
   return withCitations(ownerId, rows);
 }
 
-// Questions are a model-derived view of immutable claim text plus the optional
-// Student focus. Cache the bytes that decide the question so shared analyses reuse
-// synthesis only when they are being studied from the same angle.
-function questionContentHash(claim: { claimType: ClaimType; text: string }, studyDetail?: string): string {
-  return createHash("sha256")
-    .update(claim.claimType)
-    .update("\0")
-    .update(claim.text)
-    .update("\0")
-    .update(studyDetail ?? "")
-    .digest("hex");
+// Questions are a model-derived view of immutable claim text. Cache the bytes that
+// decide the question, so a second Student studying the same analysis reads the
+// question the first one's call produced instead of paying for another.
+function questionContentHash(claim: { claimType: ClaimType; text: string }): string {
+  return createHash("sha256").update(claim.claimType).update("\0").update(claim.text).digest("hex");
 }
 
 async function cachedQuestions(hashes: string[]): Promise<Map<string, string>> {
@@ -184,7 +178,6 @@ export async function generateDeck(
   provider: SynthesisProvider,
   ownerId: string,
   generationRunId: string,
-  studyDetail?: string,
 ): Promise<FlashcardView[]> {
   const claims: { id: string; claimType: ClaimType; text: string }[] = await AppDataSource.query(
     `SELECT c."id", c."claimType", c."text"
@@ -197,12 +190,12 @@ export async function generateDeck(
   );
 
   if (claims.length > 0) {
-    const hashes = claims.map((claim) => questionContentHash(claim, studyDetail));
+    const hashes = claims.map((claim) => questionContentHash(claim));
     let questionsByHash = await cachedQuestions(hashes);
     const misses = claims.filter((_claim, index) => !questionsByHash.has(hashes[index]));
     if (misses.length > 0) {
-      const written = await writeQuestions(provider, misses, studyDetail);
-      const missHashes = misses.map((claim) => questionContentHash(claim, studyDetail));
+      const written = await writeQuestions(provider, misses);
+      const missHashes = misses.map((claim) => questionContentHash(claim));
       await AppDataSource.query(
         `INSERT INTO "flashcard_question_cache" ("contentHash", "question")
          SELECT * FROM unnest($1::varchar[], $2::text[])

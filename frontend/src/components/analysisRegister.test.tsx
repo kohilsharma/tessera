@@ -59,16 +59,12 @@ describe("Analysis flashcard command", () => {
 
     renderWithProviders(<AnalysisRegister analysis={analysis} />, { route: "/story", path: "/story" });
 
-    await user.type(await screen.findByLabelText("Study focus (optional)"), "Focus on the policy timeline");
-    await user.click(screen.getByRole("button", { name: "Make flashcards" }));
+    await user.click(await screen.findByRole("button", { name: "Make flashcards" }));
 
     await waitFor(() => {
       const create = vi.mocked(fetch).mock.calls.find(([, options]) => options?.method === "POST");
       expect(create?.[0]).toBe("/api/v1/flashcards");
-      expect(JSON.parse(String(create?.[1]?.body))).toEqual({
-        generationRunId: analysis.id,
-        studyDetail: "Focus on the policy timeline",
-      });
+      expect(JSON.parse(String(create?.[1]?.body))).toEqual({ generationRunId: analysis.id });
     });
   });
 

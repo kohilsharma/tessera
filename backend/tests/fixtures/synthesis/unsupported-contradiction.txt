@@ -21,6 +21,13 @@
       "citations": [
         "A1"
       ]
+    },
+    {
+      "text": "Volume output is the point at which a line runs at its designed rate rather than in trial batches.",
+      "claim_type": "student_context",
+      "citations": [
+        "A1"
+      ]
     }
   ]
 }

@@ -10,6 +10,7 @@ import {
   type ReviewGrade,
 } from "../api/client";
 import { EmptyState, ErrorState, PendingState, RetryableError } from "../components/uiStates";
+import { CitationRow } from "../components/analysisRegister";
 
 // The Student's study surface (#58, ADR-0021). One card at a time, not a list: a
 // screen of twenty questions with their answers beside them is a transcript of an
@@ -66,15 +67,10 @@ function Card({ card, dueCount }: { card: Flashcard; dueCount: number }) {
           <p className="study-answer">{card.answer}</p>
           {/* The invariant, on a study card: the answer is a claim, and the reporting
               it rests on is named and openable. A card is not a fact a reader is
-              asked to take on trust. */}
-          <p className="claim-cites">
-            {card.citations.map((citation) => (
-              <Link key={citation.evidenceId} to={`/articles/${citation.articleId}`}>
-                {citation.evidenceId} · {citation.publisherName}
-              </Link>
-            ))}
-          </p>
-          <p className="claim-measure">
+              asked to take on trust. The same row the analysis register renders, for
+              the same reason it is the same fact. */}
+          <CitationRow citations={card.citations} />
+          <p className="claim-note">
             From <Link to={`/stories/${card.storyId}`}>{card.storyTitle}</Link>
           </p>
           <div className="record-actions">

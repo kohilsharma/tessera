@@ -282,17 +282,21 @@ export function validateAnalysis(
   // below it, "we showed whatever survived" is not an analysis of how outlets compared,
   // so the reader is shown a stated unavailable state instead.
   //
-  // Two conditions, exactly as ADR-0027 states them. Note what that leaves open: the
-  // run's *Lens* claim is not one of them, so an Investor analysis whose only
-  // investor_implication claim was dropped completes as two consensus claims — and reuse
-  // then serves that as the Investor reading of the Story until the evidence changes.
-  // Adding the Lens claim to the floor is a policy change to make in the ADR, not here.
+  // Three conditions. The third is the run's own Lens (ADR-0027, revised): an analysis
+  // whose Lens claim was dropped is the *other* role's analysis, and reuse would then
+  // serve it as this role's reading of the Story until the evidence changed. ADR-0004
+  // is that roles differ in the data they get, and the Lens is the whole mechanism for
+  // it — so a missing Lens claim is a shortfall like a missing consensus claim, worded
+  // the same way, repaired first like any other and only then failing the run.
   const shortfall: string[] = [];
   if (claims.length < MIN_SURVIVING_CLAIMS) {
     shortfall.push(`only ${claims.length} of ${returned.length} claims could be used, and at least ${MIN_SURVIVING_CLAIMS} are needed`);
   }
   if (!claims.some((claim) => claim.claimType === "consensus")) {
     shortfall.push("no consensus claim survived, and an analysis needs at least one");
+  }
+  if (!claims.some((claim) => claim.claimType === lens)) {
+    shortfall.push(`no ${lens} claim survived, and an analysis under this Lens needs one`);
   }
   if (shortfall.length > 0) {
     const rejections = issues.map(

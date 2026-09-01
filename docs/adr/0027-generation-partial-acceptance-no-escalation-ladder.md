@@ -24,9 +24,13 @@ happens when four claims validate and one does not; and where the mixed-rung wor
   (Student → `student_context`, Investor → `investor_implication`), an Admin choosing
   explicitly. Generating for every new Story spends money on Stories nobody opens.
 - **Reuse is keyed on a composite content hash** — the member Articles' content hashes, the
-  lens, and the prompt version. This is the implementation of the "cache LLM calls by
-  content_hash" invariant. A timestamp comparison would miss an Article whose text was
-  enriched in place without any new member joining.
+  lens, the prompt version, and **the provider origin and model that answered**. This is the
+  implementation of the "cache LLM calls by content_hash" invariant. A timestamp comparison
+  would miss an Article whose text was enriched in place without any new member joining. The
+  provider and model are in the key because otherwise the first thing a fresh clone does is
+  cache itself: with no key configured the Mock writes `[mock synthesis]` claims as a
+  completed run, and configuring a real provider afterwards would change nothing a reader
+  can see. Model ids are not globally unique, so it takes both.
 - **Selection is deterministic**: rank by distance to the Story centroid, apply ADR-0010's
   bounds (≤10 Articles, ≤2 per Publisher, earliest and latest forced in), exclude pending
   assignments. No model participates in choosing evidence — evidence a model selected is
@@ -49,16 +53,26 @@ happens when four claims validate and one does not; and where the mixed-rung wor
   rejection of omission and prohibited-investor language in validation — prompt-only
   enforcement makes a cheap model's carelessness into a rights-adjacent overclaim on screen.
 - **Repair, not escalation.** Two repair attempts, each re-prompting with the specific
-  validation error, then `failed` and a safe unavailable state.
-  `SYNTHESIS_ESCALATION_MODEL` is read and unset by default: ADR-0025's measurements found
-  no dependable stronger rung on a free tier, and a ladder that cannot be populated is a
-  cost path and a branch to test for a capability we do not have.
+  validation error, then `failed` and a safe unavailable state. There is deliberately **no
+  `SYNTHESIS_ESCALATION_MODEL`**: an earlier draft of this ADR had the variable read and
+  unset by default, but a knob nothing reaches is not a capability, and the branch behind it
+  is untestable — ADR-0025's measurements found no dependable stronger rung on a free tier,
+  so there is no model to point it at and no run that could exercise it. It is also not the
+  one-line change it looks like: a run records the provider and model that answered, and both
+  are in the reuse key (ADR-0025), so escalating mid-run means one run written by two models.
+  Whoever populates the ladder decides that then; until then the absent variable is the
+  honest statement that nothing climbs.
 - **Partial acceptance.** An invalid claim is **dropped and recorded** in `validationResult`,
-  not fatal to its run, with a floor: at least two surviving claims including at least one
-  `consensus`, or the run fails. The invariant is "no *displayed* claim without a valid
-  citation", which permits dropping; the floor is what stops that degrading into "we showed
-  whatever survived". **Structural failures — unparseable JSON, schema violation — fail the
-  whole run**, because there is no claim to drop.
+  not fatal to its run, with a floor: at least two surviving claims, including at least one
+  `consensus` **and at least one claim of the run's own Lens**, or the run fails. The
+  invariant is "no *displayed* claim without a valid citation", which permits dropping; the
+  floor is what stops that degrading into "we showed whatever survived". The Lens is in the
+  floor because ADR-0004 is that roles differ in the *data they get*: an Investor analysis
+  whose `investor_implication` claim was dropped is a Student's analysis with an Investor's
+  name on it, and reuse would serve it as this role's reading until the evidence changed.
+  Like every other shortfall it is re-prompted first, so the usual cost of it is one repair
+  rather than a failed run. **Structural failures — unparseable JSON, schema violation — fail
+  the whole run**, because there is no claim to drop.
 - **The prompt is a versioned code constant** whose version is recorded on every run. The
   PromptTemplate table and its Admin CRUD (ADR-0021) arrive later in the phase; the recorded
   version means no history is lost when they do.

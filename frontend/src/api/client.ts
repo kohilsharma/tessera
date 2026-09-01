@@ -625,8 +625,9 @@ export function mergeStories(survivorStoryId: string, mergedStoryId: string): Pr
 }
 
 
-// #57: create, then activate or deactivate. Creating one changes nothing about what is
-// generated; current prompt version is part of the reuse key.
+// #57: create, then activate. Creating one changes nothing about what is generated;
+// the current prompt version is part of the reuse key. Activation is the only mutation —
+// a version is superseded by making another current, never switched off.
 export function createPromptTemplate(input: {
   version: string;
   params: PromptParams;
@@ -634,12 +635,12 @@ export function createPromptTemplate(input: {
   return sendJson("POST", "/api/v1/prompt-templates", input, "Could not create this prompt version");
 }
 
-export function setPromptTemplateCurrent(id: string, isCurrent: boolean): Promise<PromptTemplateSummary> {
+export function setPromptTemplateCurrent(id: string): Promise<PromptTemplateSummary> {
   return sendJson(
     "PATCH",
     `/api/v1/prompt-templates/${id}`,
-    { isCurrent },
-    `Could not ${isCurrent ? "make" : "stop making"} this prompt version current`,
+    { isCurrent: true },
+    "Could not make this prompt version current",
   );
 }
 
@@ -706,19 +707,11 @@ export const REVIEW_GRADES = [
   { grade: 5, label: "Easy" },
 ] as const satisfies readonly { grade: ReviewGrade; label: string }[];
 
-export const MAX_STUDY_DETAIL_LENGTH = 300;
-
 // Making a deck is a mutation for the same reason requesting an analysis is: it may
 // cost money (one model call writes the questions) and it creates rows a Student owns.
 // Asking twice is safe — cards already made keep their schedule.
-export function makeFlashcards(generationRunId: string, studyDetail = ""): Promise<FlashcardDeck> {
-  const detail = studyDetail.trim();
-  return sendJson(
-    "POST",
-    "/api/v1/flashcards",
-    { generationRunId, ...(detail ? { studyDetail: detail } : {}) },
-    "Could not make flashcards",
-  );
+export function makeFlashcards(generationRunId: string): Promise<FlashcardDeck> {
+  return sendJson("POST", "/api/v1/flashcards", { generationRunId }, "Could not make flashcards");
 }
 
 export function getStudyDeck(): Promise<StudyDeck> {

@@ -1,10 +1,8 @@
-import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import {
   getMe,
   makeFlashcards,
-  MAX_STUDY_DETAIL_LENGTH,
   type Analysis,
   type AnalysisClaim,
   type ClaimType,
@@ -51,35 +49,51 @@ const CLAIM_LABELS: Record<ClaimType, string> = {
 };
 
 // A citation is the invariant made clickable: the evidence id the claim cited, the
-// outlet it resolves to, and a link to the Article itself. An id with no frozen row
+// outlet it resolves to, and a link to the Article itself. One row for both surfaces
+// that show cited answers — the analysis register here and the Student's study card
+// (#58) — because they are the same fact rendered the same way, and a second copy of
+// it is a second chance to drift.
+//
+// Evidence ids are set in the measurement face: they are fixed identities, which is
+// what DESIGN.md reserves it for.
+export type Citation = { evidenceId: string; articleId: string; publisherName: string };
+
+export function CitationRow({ citations }: { citations: Citation[] }) {
+  return (
+    <p className="claim-cites">
+      {citations.map((citation) => (
+        <Link key={citation.evidenceId} to={`/articles/${citation.articleId}`}>
+          {citation.evidenceId} · {citation.publisherName}
+        </Link>
+      ))}
+    </p>
+  );
+}
+
+// The claim's citations, resolved through the frozen set. An id with no frozen row
 // behind it is not rendered — the backend cannot persist one, and this is the last
 // place that could put one on screen.
 function Citations({ claim, evidence }: { claim: AnalysisClaim; evidence: Map<string, EvidenceRow> }) {
   return (
-    <p className="claim-cites">
-      {claim.citations.map((evidenceId) => {
+    <CitationRow
+      citations={claim.citations.flatMap((evidenceId) => {
         const row = evidence.get(evidenceId);
-        if (!row) return null;
-        return (
-          <Link key={evidenceId} to={`/articles/${row.articleId}`}>
-            {evidenceId} · {row.publisher.name}
-          </Link>
-        );
+        return row ? [{ evidenceId, articleId: row.articleId, publisherName: row.publisher.name }] : [];
       })}
-    </p>
+    />
   );
 }
 
 // The rows a claim cited, grouped by Publisher for the corroboration count. A
 // contradiction does not use this grouping: its polarity comes from citationSides.
 function citedByPublisher(claim: AnalysisClaim, evidence: Map<string, EvidenceRow>): EvidenceRow[][] {
-  const sides = new Map<string, EvidenceRow[]>();
+  const byPublisher = new Map<string, EvidenceRow[]>();
   for (const evidenceId of claim.citations) {
     const row = evidence.get(evidenceId);
     if (!row) continue;
-    sides.set(row.publisher.id, [...(sides.get(row.publisher.id) ?? []), row]);
+    byPublisher.set(row.publisher.id, [...(byPublisher.get(row.publisher.id) ?? []), row]);
   }
-  return [...sides.values()];
+  return [...byPublisher.values()];
 }
 
 // A contradiction's actual polarity, recorded below the prompt and persisted with
@@ -89,7 +103,7 @@ function ContradictionSides({ claim, evidence }: { claim: AnalysisClaim; evidenc
   if (!claim.citationSides) {
     return (
       <>
-        <p className="claim-measure">This earlier analysis did not record which citation was on each side</p>
+        <p className="claim-note">This earlier analysis did not record which citation was on each side</p>
         <Citations claim={claim} evidence={evidence} />
       </>
     );
@@ -133,7 +147,7 @@ function Corroboration({
 }) {
   const cited = citedByPublisher(claim, evidence).length;
   return (
-    <p className="claim-measure">
+    <p className="claim-note">
       Cited to {cited} of {totalPublisherCount} publisher{totalPublisherCount === 1 ? "" : "s"} in the evidence
     </p>
   );
@@ -142,9 +156,8 @@ function Corroboration({
 function FlashcardCommand({ generationRunId }: { generationRunId: string }) {
   const me = useQuery({ queryKey: ["me"], queryFn: getMe });
   const navigate = useNavigate();
-  const [studyDetail, setStudyDetail] = useState("");
   const make = useMutation({
-    mutationFn: () => makeFlashcards(generationRunId, studyDetail),
+    mutationFn: () => makeFlashcards(generationRunId),
     onSuccess: () => navigate("/study"),
   });
 
@@ -154,28 +167,16 @@ function FlashcardCommand({ generationRunId }: { generationRunId: string }) {
   if (me.data?.role !== "student") return null;
   return (
     <>
-      <form
-        className="record-attach"
-        onSubmit={(event) => {
-          event.preventDefault();
-          make.mutate();
-        }}
-      >
-        <label htmlFor={`study-focus-${generationRunId}`}>
-          Study focus (optional)
-          <input
-            id={`study-focus-${generationRunId}`}
-            value={studyDetail}
-            maxLength={MAX_STUDY_DETAIL_LENGTH}
-            placeholder="e.g. the policy timeline"
-            disabled={make.isPending}
-            onChange={(event) => setStudyDetail(event.target.value)}
-          />
-        </label>
-        <button type="submit" className="record-command" disabled={make.isPending}>
+      <div className="record-actions">
+        <button
+          type="button"
+          className="record-command"
+          disabled={make.isPending}
+          onClick={() => make.mutate()}
+        >
           {make.isPending ? "Making flashcards…" : "Make flashcards"}
         </button>
-      </form>
+      </div>
       {make.isError && <p className="state-error">Could not make flashcards: {make.error.message}</p>}
     </>
   );
@@ -211,7 +212,7 @@ export function AnalysisRegister({ analysis }: { analysis: Analysis }) {
             <dt>{CLAIM_LABELS[group.claimType]}</dt>
             <dd>
               {group.claims.length === 0 ? (
-                <p className="claim-measure">No disagreement between these outlets is recorded in this analysis</p>
+                <p className="claim-note">No disagreement between these outlets is recorded in this analysis</p>
               ) : (
                 <ul className="claim-list">
                   {group.claims.map((claim) => (

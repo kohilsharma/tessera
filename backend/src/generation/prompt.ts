@@ -132,6 +132,7 @@ export function analysisRequest(
   params: PromptParams,
 ) {
   return {
+    task: "synthesis" as const,
     system: SYSTEM,
     prompt: buildAnalysisPrompt(evidence, lens, dataMode, params),
     json: true,
@@ -167,5 +168,5 @@ export function repairRequest(
     "",
     "Answer again, correcting exactly those problems and keeping to the contract above.",
   ].join("\n");
-  return { system: SYSTEM, prompt, json: true, maxTokens: 1200 };
+  return { task: "synthesis" as const, system: SYSTEM, prompt, json: true, maxTokens: 1200 };
 }
