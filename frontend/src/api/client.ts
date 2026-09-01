@@ -401,6 +401,36 @@ export function search(params: SearchParams): Promise<ListEnvelope<SearchResult>
   return getJson(`/api/v1/search${toQueryString(params)}`, "Could not run this search");
 }
 
+// #65: the same query's matches on one time axis, grouped into a lane per Story. Mirrors
+// backend/src/routes/search.ts — the axis is the timeline seam's, and relevance is the
+// search endpoint's, so both surfaces agree about what matched.
+export type SearchTimelineLane = {
+  // The same Story projection a result row carries, so both readings of a search name a
+  // Story the one way.
+  story: { id: string; slug: string; title: string };
+  // Index-aligned with `volume` on the timeline itself: a lane is bucketed against the
+  // shared axis, never its own span, which is what makes parallel coverage read as
+  // parallel rather than as two charts.
+  volume: number[];
+};
+
+export type SearchTimelineResult = Timeline & {
+  lanes: SearchTimelineLane[];
+  // Every match the query has, which can be more than one axis carries — the endpoint
+  // takes the most relevant up to its cap, and this is how the reader is told so.
+  total: number;
+};
+
+// No page, no pageSize, no sort: a timeline is a set, and its order is time.
+export type SearchTimelineParams = Pick<SearchParams, "q" | "category" | "dateFrom" | "dateTo">;
+
+export function searchTimeline(params: SearchTimelineParams): Promise<SearchTimelineResult> {
+  return getJson(
+    `/api/v1/search/timeline${toQueryString(params)}`,
+    "Could not lay this search out on a timeline",
+  );
+}
+
 // #20: mirrors backend/src/entities/IntelligenceBrief.ts + routes/briefs.ts.
 export const DEFAULT_ARTICLE_CAPACITY_LIMIT = 20;
 

@@ -5,6 +5,7 @@ import { Entry, EntryRegister, FilterRegister, IndexPage } from "../components/i
 import {
   CategoryFilter,
   DateRangeFilter,
+  SearchTermFilter,
   SortDirectionFilter,
   SortFieldFilter,
   useListQueryParams,
@@ -36,20 +37,20 @@ export default function Search() {
   });
 
   return (
-    <IndexPage title="Search">
-      {/* The term sits in the register with the filters — it is the one control
-          that is not a filter (it is what the results are *of*), which is why it
-          never wears the applied pill and why clearing filters keeps it. */}
+    <IndexPage
+      title="Search"
+      // The other reading of the same query (#65), carrying the query with it: a reader
+      // who has searched switches how they read it rather than typing it again.
+      action={
+        <Link className="index-switch" to={`/search/timeline${list.queryString ? `?${list.queryString}` : ""}`}>
+          Read as a timeline
+        </Link>
+      }
+    >
+      {/* The term sits in the register with the filters, as the one control that is not a
+          filter (listControls.tsx). */}
       <FilterRegister label="Search and filter Articles">
-        <label className="filter-field">
-          Search{" "}
-          <input
-            type="search"
-            value={q}
-            placeholder="Search Articles…"
-            onChange={(e) => list.updateFilter("q", e.target.value)}
-          />
-        </label>{" "}
+        <SearchTermFilter value={q} onChange={(value) => list.updateFilter("q", value)} />{" "}
         <CategoryFilter value={list.category} onChange={(value) => list.updateFilter("category", value)} />{" "}
         <SortFieldFilter
           value={sortField}

@@ -282,11 +282,31 @@ tests; a failed GenerationRun is left off, having produced nothing. Tone is deli
 axis: `articles.tone` is GDELT's and reaches a clustered Story only by cross-connector
 enrichment, which measured zero, so the register says so in a line rather than drawing an empty
 one.
+**Search anything, read it as a timeline** (#65) is that seam's second consumer, and it is two
+reuses rather than any new machinery: `GET /api/v1/search/timeline` and `GET /api/v1/search` share
+one `matchesFor` — one accepted param vocabulary, one call into `hybridSearchArticleIds`' fused
+lexical⊕semantic ranking, one load of the Articles behind the hits — so the two readings of a
+query cannot disagree about what matched, and the axis is the one `buildTimeline` already draws.
+It groups the matches into **one lane per Story** via `toLanes`, which buckets each Story against
+the *shared* axis' buckets, index for index (`bucketOf` is the one bucket-index definition both
+use): two Stories reported in the same week land in the same column and read as parallel, which
+is precisely what a per-lane `buildTimeline` call would destroy. Lanes come back in first-report
+order, so the page reads down in the order the events themselves began, each naming its Story
+with the same `{id, slug, title}` projection a result row carries. Accepted membership is not
+re-implemented here either — search joins through it, so the firehose stays invisible for the
+reason it is invisible on `/search` (ADR-0028). One deliberate ceiling: an axis is a *set* and so
+cannot page, so the endpoint takes the most relevant matches up to `TIMELINE_MATCH_CAP` (200) and
+returns the true match count beside them, which the page states — span included — rather than
+hides. No analytical events ride this axis — they are facts about one Story's history, and a
+lane's heading routes into that Story to read them (#64). The endpoint accepts `/search`'s whole
+param vocabulary, `sort` included (where it only chooses which matches survive the cap), so a
+reader switching readings with their own URL never hits a 422.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
 `/register`, `/account`), role dashboards (`/dashboard/:role`), browsing the corpus
 (`/stories`, `/stories/:id`, `/articles/:id`), IntelligenceBriefs (`/briefs`, `/briefs/:id`),
-search (`/search`), and the Student study session (`/study`). The **Bureau rollout** (#28) is mid-flight: root design tokens and the
+search (`/search`, `/search/timeline`), and the Student study session (`/study`). The
+**Bureau rollout** (#28) is mid-flight: root design tokens and the
 application shell (#29), the four shared UI-state treatments and restyled list controls (#30),
 and the Index archetype across all three of its consumers — `/stories` (#31), `/briefs` and
 `/search` (#32) — are done, as is the Record archetype across all three of its consumers:
@@ -303,7 +323,14 @@ Article row still the Index archetype's own entry opening its Article, each even
 itself over its ledger. It folds in the Articles register #33 shipped rather than listing the
 same rows twice, and owns its own request and so its own four states: a Story with no datable
 reporting says that, and a failed request says *that* while still listing the Articles off the
-record this page already loaded. Story detail carries the **analysis surface** (#53): a Request-analysis command (a
+record this page already loaded. `pages/SearchTimeline.tsx` at `/search/timeline` is the Index
+archetype's fourth surface and that register's other consumer (#65): the same filter register and
+the same Article rows, but what it registers is a `<section>` per Story rather than a ranked list,
+each headed by a link into the Story, each drawing its bars through the shared `TimelineVolume`
+against one page-wide `peak` so a tall bar means the same count in every lane. `/search` and it
+are one address bar — `useListQueryParams` hands over `queryString` whole, so `Read as a timeline`
+and `Read as a ranked list` switch the reading without re-typing the query, and `q` survives Clear
+filters on both. Story detail carries the **analysis surface** (#53): a Request-analysis command (a
 mutation, never a fetch on render, since an analysis may cost money), a Lens select for an Admin
 only — a reader's Lens is their role, and the API refuses one from them — claims grouped by kind
 in the record's note register with each citation an `A1 · Publisher` link to the Article it

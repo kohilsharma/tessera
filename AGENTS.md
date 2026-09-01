@@ -18,8 +18,8 @@ Each pointer names the branch that reaches it. Read what your task hits.
 
 ## Repo state
 
-Phases 1 and 2 are complete; Phase 3 through #58; Phase 3.5 in flight — entity resolution (#66)
-and a Story's timeline (#64) are in, the search timeline (#65), candidate merges (#67) and the
+Phases 1 and 2 are complete; Phase 3 through #58; Phase 3.5 in flight — entity resolution (#66),
+a Story's timeline (#64) and the search timeline (#65) are in, candidate merges (#67) and the
 Cytoscape view (#68, #69) are ahead. `docs/repo-state.md` carries the per-ticket detail.
 
 **backend/** — one seam per module. Extend the seam rather than adding a parallel path.
@@ -30,7 +30,7 @@ Cytoscape view (#68, #69) are ahead. `docs/repo-state.md` carries the per-ticket
 | `src/clustering/` | `runClustering` | Embed → centroid → nearest-Story assignment. No singleton Stories, model-named new Stories, a pending-review band beneath the threshold, Story merge |
 | `src/generation/` | `runGeneration` | Deterministic evidence selection → frozen EvidenceSet (`A1…` ids, SHA-256) → cited claims under one Lens. Validation below the prompt, repair ×2, Admin-tunable `prompt_templates` |
 | `src/graph/` | `runEntityResolution` | Normalized-name folding, promotion floor, rolling co-occurrence graph, edges bounded from both ends, whole pass in one transaction |
-| `src/timeline/` | `buildTimeline` | Takes a **set of Articles**, never a query. Reporting and analytical events on one axis, granularity chosen from the span |
+| `src/timeline/` | `buildTimeline` | Takes a **set of Articles**, never a query. Reporting and analytical events on one axis, granularity chosen from the span, one lane per Story over a set drawn from many |
 | `src/lib/storyMembership.ts` | — | The one accepted-membership predicate every reader surface tests |
 
 Worker: `src/worker.ts` is its own process (natively, not in Compose — ADR-0015) draining three
@@ -45,7 +45,8 @@ screenshots at both breakpoints in `docs/verification/bureau-rollout/`. Every ro
 four shared UI states, and states "nothing here" differently from a failed request.
 
 Shared registers, reused rather than redrawn per page: `components/timelineRegister.tsx` (Story
-detail's coverage register) and `components/analysisRegister.tsx` (claims, read differently under
+detail's coverage register, and the axis and bars every `/search/timeline` lane draws) and
+`components/analysisRegister.tsx` (claims, read differently under
 each Lens, on both Story detail and Brief detail). The Admin console's five Phase-3 registers
 live in `pages/adminRegisters.tsx`, each owning its own request and commands, laid out by
 `pages/AdminDashboard.tsx`. `src/versions/BureauPrototype.tsx` at `/design-prototype` sits

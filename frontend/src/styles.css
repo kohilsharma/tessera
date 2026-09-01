@@ -202,6 +202,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .index-action, .record-command, .form-submit { border: 1px solid var(--bureau-ink); background: var(--stock-paper); color: var(--bureau-ink); padding: 11px 18px; margin-right: 5px; font-size: .78rem; font-weight: 700; text-decoration: none; box-shadow: 5px 5px 0 var(--proof-magenta); transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease, transform 140ms ease; }
 .index-action:hover, .record-command:hover, .form-submit:hover:enabled { background: var(--proof-blue); color: var(--stock-paper); }
 .index-action:active, .record-command:active, .form-submit:active:enabled { transform: translate(3px, 3px); box-shadow: 2px 2px 0 var(--proof-magenta); }
+/* #65's switch between two readings of one search — the ranked list and the timeline.
+   It sits where the index's command sits but is not one: it creates nothing and goes
+   somewhere, so it takes the ruled-destination treatment of the dashboard's onward band
+   (neutral rule, stock fill on hover) rather than the command's Proof Magenta offset —
+   sharing that band's hover rule below rather than restating it here. */
+.index-switch { border: 1px solid var(--registration-rule); padding: 11px 16px; color: var(--bureau-ink); font-size: .78rem; font-weight: 700; text-decoration: none; text-underline-offset: 3px; transition: background-color 140ms ease; }
 
 /* The register reads as one band on the bench rather than fields floating on
    paper: ink edge because a registered band is ruled in ink (the neutral dashed
@@ -342,7 +348,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .record-section { margin-top: 44px; }
 /* The section scale, shared with a dashboard register's heading (#36) — a part
    of a record and a register on a surface are the same rank. */
-.record-section h2, .dash-register h2 { font-size: clamp(1.2rem, 2vw, 1.6rem); font-weight: 700; line-height: 1.1; letter-spacing: -.02em; }
+.record-section h2, .dash-register h2, .timeline-lane h2 { font-size: clamp(1.2rem, 2vw, 1.6rem); font-weight: 700; line-height: 1.1; letter-spacing: -.02em; }
 .record-section h2 { margin: 0 0 4px; padding-bottom: 13px; border-bottom: 1px solid var(--bureau-ink); }
 /* The reading measure DESIGN.md sets for prose — the register above is compact,
    the record's own text is not. */
@@ -365,6 +371,16 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 /* The axis' two ends, in the measurement face: a row of bars states a shape, and a
    shape with no span stated under it is a picture of nothing. */
 .timeline-axis { display: flex; justify-content: space-between; gap: 12px; margin: 9px 0 0; color: var(--quiet-ink); font: 500 .66rem ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+
+/* #65's lanes: one register per Story under the search timeline's shared axis. A lane is
+   a register on a surface, so it takes the heading scale and the head band a dashboard
+   register uses — by selector list, above and below, rather than a second copy of those
+   declarations. Its rows open on the volume's own baseline rule; a second rule under it
+   would be the double-ruling the record's sections already avoid. */
+.timeline-lane { margin-top: 42px; }
+.timeline-lane h2 a { color: var(--bureau-ink); text-decoration: none; text-underline-offset: 3px; }
+.timeline-lane h2 a:hover, .timeline-lane h2 a:focus-visible { text-decoration: underline; }
+.timeline-lane .timeline-volume + .entry-list { border-top: 0; }
 
 /* The rights note is a register of stated facts, not a small-print line: ruled
    rows, term in the measurement face, value in the reading face. Also the fact
@@ -603,9 +619,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    sections open on. The folio states how much the register holds, which is what
    tells three registers apart before a single row is read. */
 .dash-register { margin-top: 42px; }
-.dash-register-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 20px; padding-bottom: 13px; border-bottom: 1px solid var(--bureau-ink); }
-.dash-register h2 { margin: 0; }
-.dash-register-folio { margin: 0; color: var(--quiet-ink); font: 500 .66rem ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.dash-register-head, .timeline-lane-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 20px; padding-bottom: 13px; border-bottom: 1px solid var(--bureau-ink); }
+.dash-register h2, .timeline-lane h2 { margin: 0; }
+.dash-register-folio, .timeline-lane-folio { margin: 0; color: var(--quiet-ink); font: 500 .66rem ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
 /* Rows open on the heading's rule rather than ruling again 22px under it — the
    record archetype's own choice for the same pair. An empty state keeps its
    margin: it is an unregistered sheet on the ground, not a row in the register. */
@@ -641,7 +657,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .dash-onward { display: flex; flex-wrap: wrap; margin-top: 46px; border-top: 1px solid var(--bureau-ink); }
 .dash-onward a { padding: 16px 22px; border-left: 1px solid var(--registration-rule); color: var(--bureau-ink); font-size: .84rem; font-weight: 700; text-decoration: none; text-underline-offset: 3px; transition: background-color 140ms ease; }
 .dash-onward a:first-child { border-left: 0; padding-left: 2px; }
-.dash-onward a:hover, .dash-onward a:focus-visible { background: var(--bench-stock); text-decoration: underline; }
+.dash-onward a:hover, .dash-onward a:focus-visible, .index-switch:hover, .index-switch:focus-visible { background: var(--bench-stock); text-decoration: underline; }
 
 @media (max-width: 560px) {
   .dash-register { margin-top: 34px; }

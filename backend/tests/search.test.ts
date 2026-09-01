@@ -9,6 +9,7 @@ import { Article } from "../src/entities/Article";
 import { MockEmbeddingProvider } from "../src/embeddings/MockEmbeddingProvider";
 import { toVectorLiteral } from "../src/embeddings/pgvector";
 import { hybridSearchArticleIds } from "../src/lib/hybridSearch";
+import { buildTimeline, toLanes } from "../src/timeline/buildTimeline";
 import { setupTestDb } from "./setupTestDb";
 
 setupTestDb();
@@ -483,5 +484,236 @@ describe("GET /api/v1/search", () => {
     expect(first.body.items.map((a: { id: string }) => a.id)).toEqual(
       second.body.items.map((a: { id: string }) => a.id),
     );
+  });
+});
+
+// #65 — lanes over an assembled Timeline. Pure, so the property that matters is held
+// down without a database in the way: every lane draws against the *shared* axis, which
+// is the whole reason parallel coverage reads as parallel.
+function pointOf(id: string, publishedAt: string, storyId: string | null) {
+  return {
+    id,
+    storyId,
+    title: `Article ${id}`,
+    url: `https://publisher-a.example/${id}`,
+    publishedAt: new Date(publishedAt),
+    analysisTextMode: "manual_fixture" as const,
+    publisher: { id: "pub-1", name: "Publisher A", domain: "publisher-a.example" },
+  };
+}
+
+describe("toLanes", () => {
+  it("buckets each Story against the shared axis, so overlapping coverage lands in one column", () => {
+    const timeline = buildTimeline(
+      [
+        pointOf("a", "2026-01-01T00:00:00Z", "story-1"),
+        pointOf("b", "2026-01-02T00:00:00Z", "story-1"),
+        pointOf("c", "2026-01-02T00:00:00Z", "story-2"),
+        pointOf("d", "2026-01-04T00:00:00Z", "story-2"),
+      ],
+      [],
+    );
+    const lanes = toLanes(timeline);
+
+    // Both lanes span the whole axis, four buckets wide, and both report on the 2nd —
+    // the same index in each. A per-lane axis would have given story-2 three buckets
+    // starting at its own first report, and the overlap would be invisible.
+    expect(lanes).toEqual([
+      { storyId: "story-1", volume: [1, 1, 0, 0] },
+      { storyId: "story-2", volume: [0, 1, 0, 1] },
+    ]);
+    expect(lanes.every((lane) => lane.volume.length === timeline.volume.length)).toBe(true);
+  });
+
+  it("orders the lanes by when each Story's coverage began", () => {
+    const timeline = buildTimeline(
+      [
+        pointOf("late", "2026-01-03T00:00:00Z", "story-late"),
+        pointOf("early", "2026-01-01T00:00:00Z", "story-early"),
+      ],
+      [],
+    );
+    expect(toLanes(timeline).map((lane) => lane.storyId)).toEqual(["story-early", "story-late"]);
+  });
+
+  it("leaves an Article in no Story out of the lanes rather than inventing one", () => {
+    const timeline = buildTimeline(
+      [pointOf("a", "2026-01-01T00:00:00Z", "story-1"), pointOf("loose", "2026-01-02T00:00:00Z", null)],
+      [],
+    );
+    expect(toLanes(timeline).map((lane) => lane.storyId)).toEqual(["story-1"]);
+  });
+
+  it("has no lanes for a set with nothing in it", () => {
+    expect(toLanes(buildTimeline([], []))).toEqual([]);
+  });
+});
+
+describe("GET /api/v1/search/timeline", () => {
+  it("rejects an unauthenticated request with 401", async () => {
+    const res = await request(app()).get("/api/v1/search/timeline").query({ q: "quantum" });
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects a blank q with 422", async () => {
+    const res = await request(app())
+      .get("/api/v1/search/timeline")
+      .query({ q: "  " })
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(422);
+  });
+
+  it("lays the matching reporting on one axis, ordered", async () => {
+    const res = await request(app())
+      .get("/api/v1/search/timeline")
+      .query({ q: SEMANTIC_QUERY })
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.points.map((point: { id: string }) => point.id)).toEqual([
+      quantumArticleId,
+      internalTextArticleId,
+      semanticOnlyArticleId,
+    ]);
+    expect(res.body.from).toBe("2026-01-01T00:00:00.000Z");
+    expect(res.body.to).toBe("2026-04-01T00:00:00.000Z");
+    // No analytical events on this axis: they belong to a Story's own history (#64).
+    expect(res.body.events).toEqual([]);
+  });
+
+  it("returns the same Article set the search endpoint does for the same query", async () => {
+    // The acceptance criterion behind the reuse: one relevance implementation, so the
+    // two surfaces cannot disagree about what matched.
+    const list = await request(app())
+      .get("/api/v1/search")
+      .query({ q: SEMANTIC_QUERY, pageSize: 50 })
+      .set("Authorization", `Bearer ${token}`);
+    const timeline = await request(app())
+      .get("/api/v1/search/timeline")
+      .query({ q: SEMANTIC_QUERY })
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(timeline.status).toBe(200);
+    expect(list.body.items).toHaveLength(3);
+    expect(timeline.body.points.map((p: { id: string }) => p.id).sort()).toEqual(
+      list.body.items.map((a: { id: string }) => a.id).sort(),
+    );
+    expect(timeline.body.total).toBe(list.body.total);
+  });
+
+  it("groups the matches into one lane per Story, each naming the Story it routes into", async () => {
+    const res = await request(app())
+      .get("/api/v1/search/timeline")
+      .query({ q: SEMANTIC_QUERY })
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(res.body.lanes).toHaveLength(2);
+    expect(res.body.lanes.map((lane: { story: { slug: string } }) => lane.story.slug)).toEqual([
+      "story-quantum",
+      "story-trade",
+    ]);
+    // The same Story projection a result row carries — id, slug and title, nothing the
+    // Story's own record page is for.
+    expect(res.body.lanes[0].story).toEqual({
+      id: expect.any(String),
+      slug: "story-quantum",
+      title: "Story Quantum",
+    });
+    // Every lane is drawn against the axis' own buckets, which is what makes two
+    // Stories' coverage comparable on one page.
+    for (const lane of res.body.lanes) {
+      expect(lane.volume).toHaveLength(res.body.volume.length);
+    }
+    expect(res.body.lanes[0].volume.reduce((sum: number, n: number) => sum + n, 0)).toBe(2);
+  });
+
+  it("shows only accepted Story Assignment members", async () => {
+    const publisher = await AppDataSource.getRepository(Publisher).findOneByOrFail({
+      domain: "publisher-a.example",
+    });
+    const story = await AppDataSource.getRepository(Story).save({
+      slug: "story-timeline-pending",
+      title: "Timeline pending",
+      summary: "Zeppelin coverage under review.",
+      category: "world",
+      firstSeenAt: new Date("2026-06-01T00:00:00Z"),
+      lastSeenAt: new Date("2026-06-01T00:00:00Z"),
+    });
+    const proposed = await AppDataSource.getRepository(Article).save({
+      storyId: story.id,
+      // A proposal carries the Story's id but is not part of it until an Admin says so.
+      storyAssignmentStatus: "pending_review" as const,
+      publisherId: publisher.id,
+      title: "Zeppelin, merely proposed",
+      url: "https://publisher-a.example/zeppelin-proposed",
+      analysisText: "A zeppelin proposal awaiting review.",
+      analysisTextMode: "manual_fixture" as const,
+      publishedAt: new Date("2026-06-01T00:00:00Z"),
+    });
+
+    try {
+      const res = await request(app())
+        .get("/api/v1/search/timeline")
+        // The one term in the corpus that appears nowhere but this proposal and its
+        // Story, so a hit here could only be the proposal itself.
+        .query({ q: "zeppelin" })
+        .set("Authorization", `Bearer ${token}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.points).toEqual([]);
+      expect(res.body.lanes).toEqual([]);
+    } finally {
+      await AppDataSource.getRepository(Article).delete(proposed.id);
+      await AppDataSource.getRepository(Story).delete(story.id);
+    }
+  });
+
+  it("narrows the axis by date range", async () => {
+    const res = await request(app())
+      .get("/api/v1/search/timeline")
+      .query({ q: SEMANTIC_QUERY, dateFrom: "2026-01-02", dateTo: "2026-01-02" })
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.points.map((p: { id: string }) => p.id)).toEqual([internalTextArticleId]);
+    expect(res.body.lanes).toHaveLength(1);
+    expect(res.body.total).toBe(1);
+  });
+
+  it("returns an empty axis, not an error, when nothing matched", async () => {
+    const res = await request(app())
+      .get("/api/v1/search/timeline")
+      .query({ q: "zzzzqqq nonexistentterm" })
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ from: null, to: null, points: [], lanes: [], volume: [], total: 0 });
+  });
+
+  it("accepts the list endpoint's sort vocabulary rather than dead-ending a switched URL", async () => {
+    const res = await request(app())
+      .get("/api/v1/search/timeline")
+      .query({ q: SEMANTIC_QUERY, sort: "publishedAt:asc" })
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    // Still time-ordered: an axis has one order, whatever the sort asked for.
+    expect(res.body.points.map((p: { id: string }) => p.id)).toEqual([
+      quantumArticleId,
+      internalTextArticleId,
+      semanticOnlyArticleId,
+    ]);
+  });
+
+  it("serves no body text, exactly as the result list does not (ADR-0018)", async () => {
+    const res = await request(app())
+      .get("/api/v1/search/timeline")
+      .query({ q: "quantum computing licensed" })
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.points.map((p: { id: string }) => p.id)).toContain(internalTextArticleId);
+    expect(JSON.stringify(res.body)).not.toContain("must never leave the API");
+    expect(JSON.stringify(res.body)).not.toContain("error correction");
   });
 });

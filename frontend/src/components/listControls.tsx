@@ -54,6 +54,11 @@ export function useListQueryParams(preserveOnClear: readonly string[] = ["sort"]
     dateFrom,
     dateTo,
     page,
+    // The current state as a query string, so a page can hand the same query to a sibling
+    // reading of it — /search and its timeline (#65) — rather than making the reader type
+    // it twice. Passed whole, params the other reading ignores included: both accept the
+    // same vocabulary, and dropping one here would silently lose a filter.
+    queryString: searchParams.toString(),
     hasFilters: Boolean(category || dateFrom || dateTo),
     updateFilter,
     clearFilters,
@@ -72,6 +77,23 @@ export function useListQueryParams(preserveOnClear: readonly string[] = ["sort"]
 // clearing filters keeps it. Those wear a plain `.filter-field`.
 const filterFieldClass = (applied: boolean) =>
   applied ? "filter-field filter-field--applied" : "filter-field";
+
+// The term the results are *of*, rather than a filter on them — which is why it wears a plain
+// pill and why clearing filters keeps it (above). One component because both readings of a
+// search carry the same control: the ranked list and its timeline (#65).
+export function SearchTermFilter({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="filter-field">
+      Search{" "}
+      <input
+        type="search"
+        value={value}
+        placeholder="Search Articles…"
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </label>
+  );
+}
 
 export function CategoryFilter({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   return (

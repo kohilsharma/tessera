@@ -75,6 +75,13 @@ function bucketCount(from: number, to: number, size: number): number {
   return Math.floor((to - alignedOrigin(from, size)) / size) + 1;
 }
 
+// Which bucket a moment falls in, off the origin and period the axis was drawn with. One
+// definition for the same reason: a lane bucketed a hair differently from the volume it is
+// drawn against would put one week in two columns (`toLanes` below).
+function bucketOf(at: Date, origin: number, size: number): number {
+  return Math.floor((at.getTime() - origin) / size);
+}
+
 export type Timeline = {
   // The axis, spanning the reporting *and* the events — an analysis written a week
   // after the last Article is still on the axis, because that is when it happened.
@@ -131,10 +138,45 @@ export function buildTimeline(articles: TimelineArticle[], events: TimelineEvent
           count: 0,
         }));
   for (const point of points) {
-    volume[Math.floor((point.publishedAt.getTime() - origin) / size)].count += 1;
+    volume[bucketOf(point.publishedAt, origin, size)].count += 1;
   }
 
   return { from: new Date(from), to: new Date(to), granularity, points, events: ordered, volume };
+}
+
+// One lane per Story over a Timeline assembled from many Stories' reporting (#65). The
+// axis stays the whole set's: a lane's bars fall in the buckets `Timeline.volume` already
+// drew, index for index, so two Stories reported in the same week land in the same column
+// and read as parallel. Bucketing each lane against its own span — what a per-lane
+// buildTimeline call would do — is exactly what would stop them reading that way.
+//
+// Lane order is first reporting first: `points` are time-ordered above and a Map keeps
+// insertion order, so the lanes read down the page in the order their coverage began.
+export type TimelineLane = { storyId: string; volume: number[] };
+
+export function toLanes(timeline: Timeline): TimelineLane[] {
+  const size = periodMs(timeline.granularity);
+  // Non-empty wherever this loop has work to do: a set with reporting in it always has
+  // volume (see above), and one without has no lanes.
+  const origin = timeline.volume[0]?.periodStart.getTime() ?? 0;
+  const lanes = new Map<string, TimelineLane>();
+  for (const point of timeline.points) {
+    // An Article in no Story has no lane to be in. Unreachable from search, which joins
+    // through Story on both signals — but the seam takes any set, so it is skipped
+    // rather than assumed away.
+    if (point.storyId === null) continue;
+    const lane = lanes.get(point.storyId) ?? {
+      storyId: point.storyId,
+      volume: timeline.volume.map(() => 0),
+    };
+    lane.volume[bucketOf(point.publishedAt, origin, size)] += 1;
+    lanes.set(point.storyId, lane);
+  }
+  return [...lanes.values()];
+}
+
+function periodMs(granularity: TimelineGranularity): number {
+  return PERIODS.find(([name]) => name === granularity)![1];
 }
 
 // Buckets start on a clean boundary so the first one is not a ragged offset of the

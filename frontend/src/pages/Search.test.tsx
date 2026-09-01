@@ -78,4 +78,17 @@ describe("Search view — UI states", () => {
     expect(lastRequestedUrl()).not.toContain("category=");
     expect(screen.getByLabelText("Search")).toHaveValue("packaging");
   });
+
+  // #65: the other reading of the same query. It carries the whole query, filters
+  // included — switching how you read a search must never mean typing it again.
+  it("offers the timeline reading of the query it is already showing", async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(listEnvelope([result])));
+
+    renderWithProviders(<Search />, { route: "/search?q=packaging&category=technology" });
+
+    expect(await screen.findByRole("link", { name: "Read as a timeline" })).toHaveAttribute(
+      "href",
+      "/search/timeline?q=packaging&category=technology",
+    );
+  });
 });

@@ -14,11 +14,56 @@ import { EntryList } from "./uiStates";
 // (uiStates.tsx): a Story register and a search route reach an empty timeline for
 // different reasons and say so in different words.
 
-const PERIOD_LABELS: Record<Timeline["granularity"], string> = {
+// Shared with the search timeline (#65), which states the same period in the same words
+// over a set drawn from many Stories.
+export const PERIOD_LABELS: Record<Timeline["granularity"], string> = {
   hour: "per hour",
   day: "per day",
   week: "per week",
 };
+
+// Reporting per period as a row of bars on one baseline. Its own component because the
+// search timeline (#65) draws this once for the whole match set and once per Story lane,
+// all against the same buckets — `peak` is the caller's for exactly that reason: lanes
+// scaled to their own maxima would draw two different quantities at the same height.
+//
+// `label` is the caller's too: what the bars measure differs per drawing, and a bar row
+// is a picture until something states what it is (DESIGN.md's Redundant Signal Rule).
+export function TimelineVolume({ counts, peak, label }: { counts: number[]; peak: number; label: string }) {
+  return (
+    <div className="timeline-volume" role="img" aria-label={label}>
+      {counts.map((count, index) => (
+        <i key={index} style={{ "--share": count / peak } as CSSProperties} />
+      ))}
+    </div>
+  );
+}
+
+// The axis' two ends, stated rather than assumed: a caller may hand this a set whose only
+// members carry no date, and a row of bars over an unnamed span is a picture of nothing.
+// Both ends state the time on an hourly axis, which is a span *inside* one day — the same
+// date twice would name no span at all.
+export function TimelineAxis({
+  from,
+  to,
+  granularity,
+}: {
+  from: string | null;
+  to: string | null;
+  granularity: Timeline["granularity"];
+}) {
+  if (!from || !to) return null;
+  return (
+    <p className="timeline-axis">
+      <span>
+        <DateStamp iso={from} withTime={granularity === "hour"} />
+      </span>
+      <span>
+        <DateStamp iso={to} withTime={granularity === "hour"} />
+      </span>
+    </p>
+  );
+}
 
 // An analytical event names itself and states its own facts in the register every
 // other row uses. It has no record page of its own — an EvidenceSet is frozen inside
@@ -64,30 +109,13 @@ export function TimelineRegister({ timeline }: { timeline: Timeline }) {
           exactly that case), and an empty ruled box would state a measurement of
           nothing. */}
       {timeline.volume.length > 0 && (
-        <div
-          className="timeline-volume"
-          role="img"
-          aria-label={`Reporting volume ${PERIOD_LABELS[timeline.granularity]} across ${timeline.volume.length} periods, at most ${peak} in one.`}
-        >
-          {timeline.volume.map((bucket) => (
-            <i key={bucket.periodStart} style={{ "--share": bucket.count / peak } as CSSProperties} />
-          ))}
-        </div>
+        <TimelineVolume
+          counts={timeline.volume.map((bucket) => bucket.count)}
+          peak={peak}
+          label={`Reporting volume ${PERIOD_LABELS[timeline.granularity]} across ${timeline.volume.length} periods, at most ${peak} in one.`}
+        />
       )}
-      {/* The axis' span is stated, not assumed: a caller may hand this a set whose
-          only members carry no date, and a bar row over an unnamed span is a picture
-          of nothing. Both ends state the time on an hourly axis, which is a span
-          *inside* one day — the same date twice would name no span at all. */}
-      {timeline.from && timeline.to && (
-        <p className="timeline-axis">
-          <span>
-            <DateStamp iso={timeline.from} withTime={timeline.granularity === "hour"} />
-          </span>
-          <span>
-            <DateStamp iso={timeline.to} withTime={timeline.granularity === "hour"} />
-          </span>
-        </p>
-      )}
+      <TimelineAxis from={timeline.from} to={timeline.to} granularity={timeline.granularity} />
       <EntryList>{marks.map((mark) => mark.node)}</EntryList>
     </>
   );
