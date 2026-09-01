@@ -25,6 +25,7 @@ import {
   SYNTHESIS_TIMEOUT_MS,
 } from "../src/generation/config";
 import { DEFAULT_PROMPT_PARAMS, type PromptParams } from "../src/entities/PromptTemplate";
+import { AnalysisClaim } from "../src/entities/AnalysisClaim";
 import { MockSynthesisProvider } from "../src/synthesis/MockSynthesisProvider";
 import type { SynthesisProvider, SynthesisRequest } from "../src/synthesis";
 import { setupTestDb } from "./setupTestDb";
@@ -1924,6 +1925,52 @@ describe("Admin prompt tuning", () => {
     expect(prompt).toContain("Never advise buying, selling or holding anything");
   });
 
+  it("validates then drops core claim types the current version did not surface", async () => {
+    const { story } = await twoPublisherStory();
+    const admin = await tokenFor("admin");
+    await activate(admin, "2026-10-03-consensus-only", tuned({ surfacedClaimTypes: ["consensus"] }));
+    const answer = claimsAnswer(
+      consensus(["A1", "A2"]),
+      sourceSpecific(["A7"]),
+      {
+        text: "A pilot line proves a process before volume production.",
+        claim_type: "student_context",
+        citations: ["A1"],
+      },
+    );
+    answering(answer, answer);
+
+    const student = await tokenFor("student");
+    const res = await requestAnalysis(story.id, student);
+
+    expect(res.body.status).toBe("completed");
+    expect(res.body.claims.map((claim: { claimType: string }) => claim.claimType)).toEqual([
+      "consensus",
+      "student_context",
+    ]);
+    const [run] = await AppDataSource.query(`SELECT "validationResult" FROM "generation_runs"`);
+    expect(run.validationResult).toMatchObject({
+      claimsAccepted: 2,
+      claimsRejected: 1,
+      unknownEvidenceIds: ["A7"],
+    });
+
+    // Runs written before this fix can contain a configured-out claim. They are not
+    // reusable under the same immutable prompt version.
+    const claims = AppDataSource.getRepository(AnalysisClaim);
+    const legacy = await claims.save({
+      generationRunId: res.body.id,
+      claimType: "source_specific",
+      text: "Legacy configured-out claim",
+      displayOrder: 2,
+    });
+    const regenerated = await requestAnalysis(story.id, student);
+    await claims.delete(legacy.id);
+    expect(regenerated.body.reused).toBe(false);
+    expect(regenerated.body.id).not.toBe(res.body.id);
+    expect(synth.requests).toHaveLength(2);
+  });
+
   it("neutralises tuned text that would pose as further instructions", async () => {
     const admin = await tokenFor("admin");
     const created = await createVersion(
@@ -1989,7 +2036,7 @@ describe("Admin prompt tuning", () => {
     expect(run.validationResult.unknownEvidenceIds).toEqual(["A7"]);
   });
 
-  it("keeps one version current, and refuses being asked for none", async () => {
+  it("keeps at most one version current and allows explicit deactivation", async () => {
     const admin = await tokenFor("admin");
     const created = await createVersion(admin, "2026-10-07-second", tuned({ tone: "terse" }));
     expect((await activateVersion(admin, created.body.id)).body.isCurrent).toBe(true);
@@ -1999,7 +2046,10 @@ describe("Admin prompt tuning", () => {
     );
     expect(current.map((row) => row.version)).toEqual(["2026-10-07-second"]);
 
-    expect((await activateVersion(admin, created.body.id, false)).status).toBe(422);
+    const deactivated = await activateVersion(admin, created.body.id, false);
+    expect(deactivated.status).toBe(200);
+    expect(deactivated.body.isCurrent).toBe(false);
+    expect(await AppDataSource.query(`SELECT "version" FROM "prompt_templates" WHERE "isCurrent"`)).toEqual([]);
     expect((await activateVersion(admin, randomUUID())).status).toBe(404);
     expect((await activateVersion(admin, "not-an-id")).status).toBe(404);
   });

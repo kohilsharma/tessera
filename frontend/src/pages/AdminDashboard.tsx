@@ -7,13 +7,11 @@ import {
   getAdminDashboard,
   getPendingAssignments,
   getStories,
-  makePromptTemplateCurrent,
+  setPromptTemplateCurrent,
   mergeStories,
   runClustering,
   runIngestionConnector,
   setConnectorEnabled,
-  MAX_TUNABLE_CLAIMS,
-  MIN_TUNABLE_CLAIMS,
   CORE_CLAIM_TYPES,
   USER_ROLES,
   type AssignmentDecision,
@@ -158,9 +156,8 @@ export default function AdminDashboard() {
     },
   });
 
-  // #57: creating a version and making one current both change the register this payload
-  // carries, so both refetch it. Neither touches a Story, an Article or a run — a
-  // prompt version is configuration, and what it changes is the *next* analysis.
+  // #57: creating a version or changing current status refetches this register.
+  // Prompt configuration affects only the next analysis request.
   const tune = useMutation({
     mutationFn: () =>
       createPromptTemplate({
@@ -172,7 +169,10 @@ export default function AdminDashboard() {
       invalidate();
     },
   });
-  const activate = useMutation({ mutationFn: makePromptTemplateCurrent, onSuccess: invalidate });
+  const current = useMutation({
+    mutationFn: ({ id, isCurrent }: { id: string; isCurrent: boolean }) => setPromptTemplateCurrent(id, isCurrent),
+    onSuccess: invalidate,
+  });
 
   // Firing any command clears the others' refusals first: a mutation keeps its
   // error until it is reset, so a failed Run would otherwise stay stated above the
@@ -185,7 +185,7 @@ export default function AdminDashboard() {
     decide.reset();
     merge.reset();
     tune.reset();
-    activate.reset();
+    current.reset();
     fire();
   }
 
@@ -539,23 +539,28 @@ export default function AdminDashboard() {
                 data.promptTemplates.find((template) => template.isCurrent)?.version ?? "none current"
               }
             >
-              {(tune.error || activate.error) && (
-                <ErrorState>{tune.error?.message ?? activate.error?.message}</ErrorState>
+              {(tune.error || current.error) && (
+                <ErrorState>{tune.error?.message ?? current.error?.message}</ErrorState>
               )}
-              {/* Created, not live: an operator has to make it current, and until they
-                  do every reader is still served under the version above. Saying which
-                  it is, is the difference between a staged version and a change nobody
-                  asked for. */}
               {tune.isSuccess && (
                 <PendingState>
-                  Version {tune.data.version} created. Make it current to serve it — the next analysis of each
-                  Story is generated again under it, rather than reused.
+                  Version {tune.data.version} created. Make it current to serve it — its first matching analysis
+                  is generated under that version.
                 </PendingState>
               )}
-              {activate.isSuccess && (
+              {current.isSuccess && (
                 <PendingState>
-                  Version {activate.data.version} is current. Cached analyses under earlier versions are not served
-                  again; the next request for each Story regenerates.
+                  {current.data.isCurrent ? (
+                    <>
+                      Version {current.data.version} is current. Analyses already produced under this exact version
+                      may be reused; other prompt versions do not match.
+                    </>
+                  ) : (
+                    <>
+                      Version {current.data.version} is retained, not current. If no other version is current,
+                      generation uses the shipped prompt.
+                    </>
+                  )}
                 </PendingState>
               )}
               {data.promptTemplates.length === 0 ? (
@@ -577,19 +582,21 @@ export default function AdminDashboard() {
                         { term: "Created", value: new Date(template.createdAt).toLocaleString() },
                       ]}
                       action={
-                        // The current version is not offered: making it current again is
-                        // a command with nothing to do, and the server would honour it.
-                        template.isCurrent ? null : (
-                          <button
-                            type="button"
-                            disabled={activate.isPending && activate.variables === template.id}
-                            onClick={() => command(() => activate.mutate(template.id))}
-                          >
-                            {activate.isPending && activate.variables === template.id
-                              ? "Activating…"
+                        <button
+                          type="button"
+                          disabled={current.isPending && current.variables?.id === template.id}
+                          onClick={() =>
+                            command(() => current.mutate({ id: template.id, isCurrent: !template.isCurrent }))
+                          }
+                        >
+                          {current.isPending && current.variables?.id === template.id
+                            ? template.isCurrent
+                              ? "Deactivating…"
+                              : "Activating…"
+                            : template.isCurrent
+                              ? "Deactivate"
                               : "Make current"}
-                          </button>
-                        )
+                        </button>
                       }
                     />
                   ))}
@@ -633,14 +640,12 @@ export default function AdminDashboard() {
                     placeholder="what to weigh"
                   />
                 </label>{" "}
-                {/* The floor is validation's own claim floor, so the form states it
-                    rather than only being refused by it. */}
                 <label className="filter-field">
                   Fewest claims{" "}
                   <input
                     type="number"
-                    min={MIN_TUNABLE_CLAIMS}
-                    max={MAX_TUNABLE_CLAIMS}
+                    min={data.promptClaimCountRange.min}
+                    max={data.promptClaimCountRange.max}
                     value={claimMin}
                     onChange={(e) => setClaimMin(Number(e.target.value))}
                   />
@@ -649,8 +654,8 @@ export default function AdminDashboard() {
                   Most claims{" "}
                   <input
                     type="number"
-                    min={MIN_TUNABLE_CLAIMS}
-                    max={MAX_TUNABLE_CLAIMS}
+                    min={data.promptClaimCountRange.min}
+                    max={data.promptClaimCountRange.max}
                     value={claimMax}
                     onChange={(e) => setClaimMax(Number(e.target.value))}
                   />

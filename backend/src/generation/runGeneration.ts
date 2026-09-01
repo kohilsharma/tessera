@@ -123,12 +123,19 @@ async function reusableRunId(
   const rows: { id: string }[] = await AppDataSource.query(
     `SELECT r."id" FROM "generation_runs" r
        JOIN "evidence_sets" e ON e."id" = r."evidenceSetId"
+       JOIN "prompt_templates" t ON t."version" = r."promptVersion"
       WHERE r."storyId" = $1 AND r."lens" = $2 AND r."promptVersion" = $3
         AND r."provider" = $4 AND r."model" = $5
         AND r."status" = 'completed' AND e."contentHash" = $6
         AND NOT EXISTS (
           SELECT 1 FROM "evidence_set_articles" legacy
            WHERE legacy."evidenceSetId" = e."id" AND legacy."titleSnapshot" IS NULL
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM "analysis_claims" c
+           WHERE c."generationRunId" = r."id"
+             AND c."claimType" IN ('consensus', 'source_specific', 'contradiction')
+             AND NOT (t."params"->'surfacedClaimTypes' ? c."claimType")
         )
       ORDER BY r."completedAt" DESC
       LIMIT 1`,
@@ -285,7 +292,10 @@ async function generateOnce(
       return { status: "produced", view: await loadGenerationView(run.id) };
     }
 
-    const validated = validateAnalysis(raw, lens, frozenEvidence, { fullPermittedText });
+    const validated = validateAnalysis(raw, lens, frozenEvidence, {
+      fullPermittedText,
+      surfacedClaimTypes: template.params.surfacedClaimTypes,
+    });
     accumulatedValidation = accumulatedValidation
       ? {
           claimsReturned: accumulatedValidation.claimsReturned + validated.result.claimsReturned,

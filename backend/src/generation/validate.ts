@@ -1,5 +1,5 @@
 import type { ClaimEvidenceRelationship } from "../entities/ClaimEvidence";
-import { claimTypesFor, type ClaimType } from "../entities/AnalysisClaim";
+import { claimTypesFor, type ClaimType, type CoreClaimType } from "../entities/AnalysisClaim";
 import type { GenerationFailureCode, GenerationLens, GenerationValidationResult } from "../entities/GenerationRun";
 import { MIN_SURVIVING_CLAIMS } from "./config";
 
@@ -8,9 +8,10 @@ import { MIN_SURVIVING_CLAIMS } from "./config";
 //   no displayed factual claim without a valid citation into its generation's
 //   frozen EvidenceSet.
 //
-// Nothing here consults the model's own confidence, and nothing here can be
-// configured — the only inputs are the answer, the run's Lens, what was actually
-// frozen and which rung that evidence sits on. It holds whichever provider answered.
+// Citation safety here is not configurable: evidence resolution, rights wording,
+// prohibited advice and the claim floor are fixed. The current prompt version may only
+// choose which otherwise-valid core claim types are retained; the run's Lens remains
+// mandatory and outside that tuning surface.
 //
 // #54 splits the two ways an answer can be wrong. A *claim* that fails is dropped and
 // recorded (partial acceptance, ADR-0027): one bad claim among four good ones costs the
@@ -105,6 +106,7 @@ const ISSUE_GUIDANCE: Record<string, string> = {
   omission_language: "claimed a publisher omitted something, which an excerpt cannot support",
   prohibited_investor_language: "gave investment advice or named a price target",
   unsupported_contradiction: "was a contradiction without distinct supporting and contradicting Publishers",
+  claim_type_not_requested: "used a core claim type the current prompt version did not request",
 };
 
 // Cheap models fence their JSON even when asked for an object, and some prepend a
@@ -135,7 +137,10 @@ export function validateAnalysis(
   raw: string,
   lens: GenerationLens,
   evidence: FrozenEvidence,
-  { fullPermittedText }: { fullPermittedText: boolean },
+  { fullPermittedText, surfacedClaimTypes }: {
+    fullPermittedText: boolean;
+    surfacedClaimTypes: readonly CoreClaimType[];
+  },
 ): Validation {
   const parsed = parseObject(raw);
   if (!parsed) {
@@ -256,6 +261,10 @@ export function validateAnalysis(
         drop("unsupported_contradiction");
         continue;
       }
+    }
+    if (claimType !== lens && !surfacedClaimTypes.includes(claimType as CoreClaimType)) {
+      drop("claim_type_not_requested");
+      continue;
     }
     claims.push({ claimType: claimType as ClaimType, text: text.trim(), citations: parsedCitations });
   }

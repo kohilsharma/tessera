@@ -80,7 +80,10 @@ describe.runIf(process.env.SYNTHESIS_LIVE_SMOKE === "1")("synthesis live smoke",
       ...analysisRequest(evidence, "student_context", "feed_excerpt", DEFAULT_PROMPT_PARAMS),
       timeoutMs: SYNTHESIS_TIMEOUT_MS,
     });
-    const validated = validateAnalysis(raw, "student_context", frozen, { fullPermittedText: false });
+    const validated = validateAnalysis(raw, "student_context", frozen, {
+      fullPermittedText: false,
+      surfacedClaimTypes: DEFAULT_PROMPT_PARAMS.surfacedClaimTypes,
+    });
 
     // The message is part of the assertion: when a live model drifts off the contract,
     // what it did wrong is the whole point of running this.

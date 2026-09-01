@@ -118,6 +118,7 @@ describe("Admin dashboard", () => {
     ],
     ingestionRuns: [],
     clusteringRuns: [],
+    promptClaimCountRange: { min: 2, max: 8 },
     promptTemplates: [
       {
         id: "t1",
@@ -594,6 +595,8 @@ describe("Admin dashboard", () => {
     renderWithProviders(<AdminDashboard />);
 
     const register = await screen.findByRole("region", { name: "Prompt versions" });
+    expect(within(register).getByLabelText(/Fewest claims/)).toHaveAttribute("min", "2");
+    expect(within(register).getByLabelText(/Most claims/)).toHaveAttribute("max", "8");
     await userEvent.type(within(register).getByLabelText(/Version label/), "2026-10-01-plainer");
     await userEvent.type(within(register).getByLabelText(/Tone/), "plain, unhurried sentences");
     await userEvent.click(within(register).getByRole("checkbox", { name: "contradiction" }));
@@ -616,7 +619,7 @@ describe("Admin dashboard", () => {
     expect(within(register).getByRole("status")).toHaveTextContent(/Make it current to serve it/);
   });
 
-  it("makes a retained version current and states what that does to cached analyses", async () => {
+  it("makes a retained version current and states exact-version reuse", async () => {
     mockConsole({
       payload: adminPayload({
         promptTemplates: [
@@ -641,22 +644,34 @@ describe("Admin dashboard", () => {
     renderWithProviders(<AdminDashboard />);
 
     const register = await screen.findByRole("region", { name: "Prompt versions" });
-    // The parameters are readable on the row, so two versions can be told apart
-    // without opening either.
     expect(within(register).getByText(/2–4 claims · consensus, source_specific/)).toBeInTheDocument();
     expect(within(register).getByText("Current")).toBeInTheDocument();
-    // One command, on the version that is not current: activating the current one
-    // would be a command with nothing to do.
-    const activate = within(register).getAllByRole("button", { name: "Make current" });
-    expect(activate).toHaveLength(1);
+    const activate = within(register).getByRole("button", { name: "Make current" });
 
-    await userEvent.click(activate[0]);
+    await userEvent.click(activate);
 
     expect(callTo("/api/v1/prompt-templates/t2")?.[1]).toMatchObject({
       method: "PATCH",
       body: JSON.stringify({ isCurrent: true }),
     });
-    expect(within(register).getByRole("status")).toHaveTextContent(/next request for each Story regenerates/);
+    expect(within(register).getByRole("status")).toHaveTextContent(/under this exact version may be reused/);
+  });
+
+  it("deactivates the current prompt version", async () => {
+    mockConsole({
+      command: jsonResponse({ id: "t1", version: "generation-v2", isCurrent: false }),
+    });
+
+    renderWithProviders(<AdminDashboard />);
+
+    const register = await screen.findByRole("region", { name: "Prompt versions" });
+    await userEvent.click(await within(register).findByRole("button", { name: "Deactivate" }));
+
+    expect(callTo("/api/v1/prompt-templates/t1")?.[1]).toMatchObject({
+      method: "PATCH",
+      body: JSON.stringify({ isCurrent: false }),
+    });
+    expect(within(register).getByRole("status")).toHaveTextContent(/generation uses the shipped prompt/);
   });
 
   it("states a refused prompt version where it was fired", async () => {

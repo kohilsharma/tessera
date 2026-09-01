@@ -202,19 +202,13 @@ export type PromptTemplateSummary = {
   createdAt: string;
 };
 
-// The bounds the API enforces (backend/src/generation/config.ts): the floor is
-// validation's own claim floor, so a tuned prompt can never ask for fewer claims than a
-// publishable run needs. Mirrored here so the form states them rather than only being
-// refused by them.
-export const MIN_TUNABLE_CLAIMS = 2;
-export const MAX_TUNABLE_CLAIMS = 8;
-
 export type AdminDashboardData = {
   role: "admin";
   userCounts: Record<UserRole, number>;
   connectors: ConnectorSummary[];
   ingestionRuns: IngestionRunSummary[];
   clusteringRuns: ClusteringRunSummary[];
+  promptClaimCountRange: { min: number; max: number };
   promptTemplates: PromptTemplateSummary[];
   publishers: PublisherSummary[];
 };
@@ -630,10 +624,8 @@ export function mergeStories(survivorStoryId: string, mergedStoryId: string): Pr
 }
 
 
-// #57: create, then activate — two operations, because a version can be staged and read
-// before every reader is served under it. Creating one changes nothing about what is
-// being generated; making it current is what invalidates the cached analyses, which the
-// API does by way of the reuse key rather than by clearing anything.
+// #57: create, then activate or deactivate. Creating one changes nothing about what is
+// generated; current prompt version is part of the reuse key.
 export function createPromptTemplate(input: {
   version: string;
   params: PromptParams;
@@ -641,12 +633,12 @@ export function createPromptTemplate(input: {
   return sendJson("POST", "/api/v1/prompt-templates", input, "Could not create this prompt version");
 }
 
-export function makePromptTemplateCurrent(id: string): Promise<PromptTemplateSummary> {
+export function setPromptTemplateCurrent(id: string, isCurrent: boolean): Promise<PromptTemplateSummary> {
   return sendJson(
     "PATCH",
     `/api/v1/prompt-templates/${id}`,
-    { isCurrent: true },
-    "Could not make this prompt version current",
+    { isCurrent },
+    `Could not ${isCurrent ? "make" : "stop making"} this prompt version current`,
   );
 }
 

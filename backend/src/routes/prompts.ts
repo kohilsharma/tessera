@@ -2,7 +2,7 @@ import { Router } from "express";
 import {
   createPromptTemplate,
   isVersionLabel,
-  makePromptTemplateCurrent,
+  setPromptTemplateCurrent,
   parsePromptParams,
 } from "../generation/template";
 import { asyncHandler } from "../middleware/asyncHandler";
@@ -23,9 +23,8 @@ export const promptsRouter = Router();
 // produced.
 const adminOnly = [requireAuth, requireRole("admin")] as const;
 
-// Create, then activate — v3 §11.6's two operations, kept separate so a version can be
-// staged and read before every reader is served under it. A created version is never
-// current, so creating one changes nothing about what is being generated.
+// Create separately from current-state changes so a version can be staged and read
+// before every reader is served under it.
 promptsRouter.post(
   "/prompt-templates",
   ...adminOnly,
@@ -55,17 +54,16 @@ promptsRouter.post(
   }),
 );
 
-// Activation. PATCH on the version rather than a command route, the same shape as a
-// connector's `enabled` (#39): it is one field's value on one row an operator is looking
-// at. `isCurrent: false` is refused rather than honoured — a version is retired by
-// making another one current, and a pipeline with no current prompt is not a state an
-// operator should be able to ask for.
+// Activation or deactivation. PATCH on the version rather than a command route, the
+// same shape as a connector's `enabled` (#39). With none current, generation uses the
+// shipped prompt; a fresh database still gets that version as a current row.
 promptsRouter.patch(
   "/prompt-templates/:id",
   ...adminOnly,
   asyncHandler(async (req, res) => {
-    if ((req.body ?? {}).isCurrent !== true) {
-      res.status(422).json({ error: "isCurrent must be true — retire a version by making another one current" });
+    const isCurrent = (req.body ?? {}).isCurrent;
+    if (typeof isCurrent !== "boolean") {
+      res.status(422).json({ error: "isCurrent must be true or false" });
       return;
     }
     if (!isUuid(req.params.id)) {
@@ -73,13 +71,11 @@ promptsRouter.patch(
       return;
     }
 
-    const current = await makePromptTemplateCurrent(req.params.id);
-    if (!current) {
+    const updated = await setPromptTemplateCurrent(req.params.id, isCurrent);
+    if (!updated) {
       res.status(404).json({ error: "Prompt version not found" });
       return;
     }
-    // Nothing is invalidated by hand here: generation's reuse key carries the prompt
-    // version, so the next request under this one finds no cached run and regenerates.
-    res.json(current);
+    res.json(updated);
   }),
 );

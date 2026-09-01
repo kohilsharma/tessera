@@ -12,7 +12,7 @@ import type { StoryCategory } from "../entities/Story";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
-import { MIN_DISTINCT_PUBLISHERS } from "../generation/config";
+import { MAX_REQUESTED_CLAIMS, MIN_DISTINCT_PUBLISHERS, MIN_SURVIVING_CLAIMS } from "../generation/config";
 import { distinctPublisherCount, selectEvidence } from "../generation/evidence";
 import { toPublicIngestionRun } from "../lib/ingestionRunView";
 import { acceptedMembership } from "../lib/storyMembership";
@@ -197,6 +197,7 @@ dashboardRouter.get(
       connectors,
       ingestionRuns: ingestionRuns.map((run) => toPublicIngestionRun(run, run.connector.name)),
       clusteringRuns,
+      promptClaimCountRange: { min: MIN_SURVIVING_CLAIMS, max: MAX_REQUESTED_CLAIMS },
       promptTemplates: promptTemplates.map((template) => ({
         id: template.id,
         version: template.version,

@@ -136,22 +136,19 @@ export async function createPromptTemplate(
   }
 }
 
-// The one mutation on this table. Clear then set, in a transaction: the partial unique
-// index permits at most one current row, so the order is load-bearing rather than tidy.
+// The one mutation on this table. Activation clears then sets; deactivation only
+// clears the named row. The partial unique index permits at most one current row.
 //
-// The advisory lock is what keeps the index a backstop rather than a failure mode: two
-// activations landing together would otherwise interleave their clear and set, and the
-// loser would surface a unique violation as a 500 on a request that did nothing wrong.
-// One activation at a time is free — this is an operator pressing a button, not a hot
-// path.
-export async function makePromptTemplateCurrent(id: string): Promise<PromptTemplate | null> {
+// The advisory lock keeps concurrent activate/deactivate requests deterministic rather
+// than surfacing a unique violation. This is an operator button, not a hot path.
+export async function setPromptTemplateCurrent(id: string, isCurrent: boolean): Promise<PromptTemplate | null> {
   return AppDataSource.transaction(async (manager) => {
     await manager.query(`SELECT pg_advisory_xact_lock(hashtext('prompt_templates.isCurrent'))`);
     const templates = manager.getRepository(PromptTemplate);
     const held = await templates.findOneBy({ id });
     if (!held) return null;
-    await templates.update({ isCurrent: true }, { isCurrent: false });
-    await templates.update({ id }, { isCurrent: true });
-    return { ...held, isCurrent: true };
+    if (isCurrent) await templates.update({ isCurrent: true }, { isCurrent: false });
+    await templates.update({ id }, { isCurrent });
+    return { ...held, isCurrent };
   });
 }
