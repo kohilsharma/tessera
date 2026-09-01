@@ -112,14 +112,46 @@ Terms are canonical: use these words in code, docs, and conversation.
 
 ## Knowledge graph & timeline (Phase 3.5 — bounded, GKG-backed)
 
-- **Entity** — A canonical person / organization / location resolved from GKG surface-name
-  strings via an alias map + confidence threshold (borderline merges go to Admin review).
-  Locations reuse GKG FeatureIDs (already disambiguated). (ADR-0018, ADR-0019)
+- **Entity** — A canonical person, organization or location, resolved from GKG surface-name
+  strings. Not every name becomes one: a name is *promoted* only once it clears the **Entity
+  Promotion Floor**, and below it stays an unresolved **GKG Annotation** that expires with its
+  Article. Resolution is normalization plus fuzzy candidate matching against a confidence
+  threshold, with the band beneath it queued for Admin review — the same shape as a *Story
+  Assignment*'s review band, for the same reason. Locations reuse GKG FeatureIDs (already
+  disambiguated). Themes are **not** Entities (see *Theme*). (ADR-0018, ADR-0019, ADR-0028)
+
+- **Entity Promotion Floor** — The number of distinct Articles a surface name must appear in
+  before it becomes an Entity. What makes "bounded" a property of the data rather than a
+  cleanup job: one GKG window yields ~2,000 distinct person names but ~130 seen in five or more
+  Articles. A name that falls back below the floor is not an Entity any more — Tessera keeps a
+  *bounded working set*, not a permanent registry of everyone ever named. (ADR-0019, ADR-0028)
+
 - **EntityEdge** — A **co-occurrence** link between two Entities ("co-mentioned in the same
-  article/Story"), each carrying its `source_article_id`(s). NOT a typed relation (acquired/
-  sued/partnered) — typed edges are deferred post-course. An uncited edge is a bug. (ADR-0019)
-- **Timeline** — A read view of a Story's Articles/EvidenceSets ordered over time (with GKG
-  tone/volume overlays). Showing evolution only — NOT change-detection/alerting. (ADR-0020)
+  Article"), each carrying its `source_article_id`(s). NOT a typed relation (acquired/sued/
+  partnered) — typed edges are deferred post-course. An uncited edge is a bug, and an edge
+  therefore lives exactly as long as the Article it cites: the firehose-derived part of the
+  graph rolls over with the *Retention Window*, while edges cited to Articles the corpus kept
+  are permanent. Bounded per Entity, strongest co-occurrences first — bounded nodes do not
+  imply a bounded picture. (ADR-0019, ADR-0028)
+
+- **Refused merge** — Two surface names an Admin declined to resolve into one Entity,
+  remembered so later runs never re-propose the pair. Keyed on the *names*, not on Entity ids,
+  because an Entity is a working-set row that may roll away and come back while the judgement
+  about the two names stays true. The entity-resolution counterpart of a *Rejected pairing*,
+  which keys on ids because Stories are durable. (ADR-0019, ADR-0028)
+
+- **Theme** — One of GDELT's controlled-vocabulary subject codes on an Article. The cleanest
+  annotation Tessera receives and deliberately never a graph node: at ~48 per Article, theme
+  co-occurrence is close to a complete graph and says nothing. A Theme is a **facet** — what
+  the graph and the timeline are filtered *by*. (ADR-0028)
+
+- **Timeline** — A **computed** read view of Articles ordered over time, with GKG tone/volume
+  overlays, reached two ways: as a register on a Story, and as its own route over any search.
+  Over a search it groups the matching Articles into one lane per Story, so parallel events
+  read as parallel. Showing evolution only — NOT change-detection/alerting. _Avoid_:
+  "generated timeline". *Generation* in Tessera means the cited-synthesis pipeline; a timeline
+  is assembled from rows that already exist, costs nothing per view, and no model writes any
+  part of it. (ADR-0020, ADR-0028)
 
 ## Roles
 
@@ -233,8 +265,11 @@ Terms are canonical: use these words in code, docs, and conversation.
   GKG doesn't provide them; needs a separate LLM extraction pipeline. Highest risk. (ADR-0019)
 - **Neo4j / Apache AGE** — The graph ships in **plain Postgres** tables + recursive CTEs; a
   dedicated graph store is an optional later projection, not built. (ADR-0019)
-- **Broad cross-Story firehose graph** — rejected for the "noisy duplicate nodes" demo risk;
-  the graph is bounded/curated (~50–200 nodes, scoped to the Story in view). (ADR-0019)
+- **Story-scoped graph** — rejected on measurement, not taste: GKG Annotations land on
+  `metadata_only` firehose rows, which never cluster, so a graph scoped to the Story in view is
+  an empty graph. The graph reads the retained firehose instead, and ADR-0019's "noisy
+  duplicate nodes" risk is answered by the *Entity Promotion Floor* and the per-Entity edge
+  bound. (ADR-0019, ADR-0028)
 - **TrackedTopic / Notification / change-detection** — Monitoring mini-product (alert on what
   changed), cut from graded build. Distinct from the Timeline *view*, which ships. (ADR-0011, ADR-0020)
 - **Refresh-token rotation** — Deferred security hardening; plain JWT ships. (ADR-0013)
@@ -249,7 +284,7 @@ Terms are canonical: use these words in code, docs, and conversation.
 
 ## Decision index
 
-All decisions are recorded in `docs/adr/0001`–`0027`. The 2026-08-31 additions open Phase 3:
+All decisions are recorded in `docs/adr/0001`–`0029`. The 2026-09-01 additions open Phase 3.5: ADR-0028 corrects ADR-0019's Story-scoping clause after measuring zero cross-connector overlap between the GKG firehose and the RSS feeds — the graph is firehose-derived, rolling and entity-centric, its Entities promoted on a frequency floor — and ADR-0029 opens the Curated Corpus to entity resolution while ADR-0026 keeps it closed to clustering. The 2026-08-31 additions open Phase 3:
 ADR-0025 puts embeddings and synthesis behind one OpenAI-compatible transport with
 NVIDIA-hosted defaults (superseding ADR-0023's hosted-default clause, not its `vector(1024)`
 decision), ADR-0026 fixes clustering as a single similarity knob with no singleton Stories and
