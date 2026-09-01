@@ -11,7 +11,10 @@ import { IngestionConnector } from "./entities/IngestionConnector";
 import { DEFAULT_ARTICLE_CAPACITY_LIMIT, IntelligenceBrief } from "./entities/IntelligenceBrief";
 import type { StoryCategory } from "./entities/Story";
 import { createEmbeddingProvider } from "./embeddings";
+import type { EmbeddingProvider } from "./embeddings/EmbeddingProvider";
 import { toVectorLiteral } from "./embeddings/pgvector";
+import { stageAnnotations } from "./ingestion/runConnector";
+import { seedAnnotationsFor } from "./seedData/annotations";
 import { SEED_CONNECTORS, SEED_PUBLISHERS, SEED_STORIES } from "./seedData/corpus";
 import { seedCoverImagePng } from "./seedData/coverImage";
 import { LocalDiskFileStorageProvider } from "./storage/LocalDiskFileStorageProvider";
@@ -74,7 +77,25 @@ async function seedCorpus(): Promise<void> {
 
   for (const seedStory of SEED_STORIES) {
     if (await stories.findOne({ where: { slug: seedStory.slug } })) {
-      console.log(`= story ${seedStory.slug} already seeded`);
+      // #62 extended every fixture body so it names the entities annotated against
+      // it, and offsets are located in that text at seed time — so a database
+      // seeded before this ticket holds bodies whose anchors do not resolve, and
+      // the annotation pass below would throw rather than catch up. Converge the
+      // text and re-embed exactly the Articles that changed, the same way the
+      // terms class converges above.
+      const changed: { id: string; text: string }[] = [];
+      for (const seedArticle of seedStory.articles) {
+        const held = await articles.findOne({ where: { url: seedArticle.url } });
+        if (!held || held.analysisText === seedArticle.analysisText) continue;
+        await articles.update({ id: held.id }, { analysisText: seedArticle.analysisText });
+        changed.push({ id: held.id, text: `${seedArticle.title}\n${seedArticle.analysisText}` });
+      }
+      await embedInto(changed, embedder);
+      console.log(
+        changed.length === 0
+          ? `= story ${seedStory.slug} already seeded`
+          : `~ story ${seedStory.slug} text converged (${changed.length} articles)`,
+      );
       continue;
     }
 
@@ -108,18 +129,24 @@ async function seedCorpus(): Promise<void> {
       pending.push({ id: saved.id, text: `${seedArticle.title}\n${seedArticle.analysisText}` });
     }
 
-    // One request for the whole story rather than one per article. Hosted
-    // providers meter *requests* — NVIDIA's free tier is ~40/min across the
-    // key — so batching is the difference between seeding in seconds and
-    // tripping a rate limiter.
-    const vectors = await embedder.embedBatch(pending.map((p) => p.text), "passage");
-    for (const [i, row] of pending.entries()) {
-      await AppDataSource.query(`UPDATE "articles" SET "embedding" = $1::vector WHERE "id" = $2`, [
-        toVectorLiteral(vectors[i]),
-        row.id,
-      ]);
-    }
+    // One request for the whole story rather than one per article.
+    await embedInto(pending, embedder);
     console.log(`+ story ${seedStory.slug} (${seedStory.articles.length} articles)`);
+  }
+}
+
+// Hosted providers meter *requests* — NVIDIA's free tier is ~40/min across the key
+// — so batching is the difference between seeding in seconds and tripping a rate
+// limiter. Shared by the insert and the convergence path above, which re-embeds
+// only the rows whose text it just replaced.
+async function embedInto(pending: { id: string; text: string }[], embedder: EmbeddingProvider): Promise<void> {
+  if (pending.length === 0) return;
+  const vectors = await embedder.embedBatch(pending.map((p) => p.text), "passage");
+  for (const [i, row] of pending.entries()) {
+    await AppDataSource.query(`UPDATE "articles" SET "embedding" = $1::vector WHERE "id" = $2`, [
+      toVectorLiteral(vectors[i]),
+      row.id,
+    ]);
   }
 }
 
@@ -218,6 +245,26 @@ async function seedBrief(): Promise<void> {
   console.log(`+ brief "${SEED_BRIEF_TITLE}" (${attached.length} articles, cover image)`);
 }
 
+// #62. The Curated Corpus's own GKG Annotations. A separate pass rather than part
+// of seedCorpus, because seedCorpus skips a Story it already holds — a database
+// seeded before this ticket would otherwise never get them, the same reason the
+// cover image and the connector endpoints converge above.
+//
+// Idempotent for free: occurrences are the row identity (migration 1755751000000)
+// and stageAnnotations inserts with ORIGNORE, so re-seeding stages nothing twice
+// and deletes nothing.
+async function seedAnnotations(): Promise<void> {
+  const articles = AppDataSource.getRepository(Article);
+  let staged = 0;
+  for (const seedStory of SEED_STORIES) {
+    for (const seedArticle of seedStory.articles) {
+      const held = await articles.findOneOrFail({ where: { url: seedArticle.url } });
+      staged += await stageAnnotations(AppDataSource.manager, held.id, seedAnnotationsFor(seedArticle));
+    }
+  }
+  console.log(staged === 0 ? "= GKG annotations already seeded" : `+ ${staged} GKG annotations`);
+}
+
 // Exported without the connection lifecycle around it so a test can run the
 // real seed against an already-initialized DataSource (see tests/seed.test.ts)
 // — the exit criterion in #23 is "a fresh clone reaches a populated demo", and
@@ -225,6 +272,7 @@ async function seedBrief(): Promise<void> {
 export async function seedAll(): Promise<void> {
   await seedUsers();
   await seedCorpus();
+  await seedAnnotations();
   await seedConnectors();
   await seedBrief();
 }

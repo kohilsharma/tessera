@@ -5,10 +5,13 @@ import { User, USER_ROLES } from "../src/entities/User";
 import { Story } from "../src/entities/Story";
 import { BriefArticle } from "../src/entities/BriefArticle";
 import { IngestionConnector } from "../src/entities/IngestionConnector";
+import { GkgAnnotation } from "../src/entities/GkgAnnotation";
+import { Article } from "../src/entities/Article";
+import { pruneExpiredGdeltArticles } from "../src/ingestion/retention";
 import { DEFAULT_PROMPT_PARAMS, PromptTemplate } from "../src/entities/PromptTemplate";
 import { PROMPT_VERSION } from "../src/generation/config";
 import { LocalDiskFileStorageProvider } from "../src/storage/LocalDiskFileStorageProvider";
-import { SEED_CONNECTORS } from "../src/seedData/corpus";
+import { SEED_CONNECTORS, SEED_STORIES } from "../src/seedData/corpus";
 import { seedAll } from "../src/seed";
 
 const SEED_BRIEF_TITLE = "AI Accelerator Supply Chain Watch";
@@ -143,15 +146,73 @@ describe("npm run seed", () => {
     expect(attached).toBeLessThanOrEqual(brief.articleCapacityLimit);
   });
 
+  // #62: the Curated Corpus's own annotations are the permanent half of the graph
+  // (ADR-0029), so they are asserted against the seeded bodies themselves — an
+  // occurrence whose offset does not land on its surface name is one a reviewer
+  // reading the Article beside the graph would catch, and this is cheaper.
+  it("annotates every fixture Article on all four kinds, at offsets in its own text", async () => {
+    const rows = await AppDataSource.query(
+      `SELECT a."id", a."analysisText", g."kind", g."surfaceName", g."charOffset", g."locationDetail"
+       FROM gkg_annotations g JOIN articles a ON a."id" = g."articleId"
+       WHERE a."analysisTextMode" = 'manual_fixture'`,
+    );
+    const fixtureArticles = SEED_STORIES.flatMap((story) => story.articles);
+    expect(rows.length).toBeGreaterThanOrEqual(fixtureArticles.length * 4);
+
+    const kindsByArticle = new Map<string, Set<string>>();
+    for (const row of rows) {
+      kindsByArticle.set(row.id, (kindsByArticle.get(row.id) ?? new Set()).add(row.kind));
+      if (row.kind === "theme") {
+        // A theme's surface name is GDELT's code, which the body never contains —
+        // only its offset is checkable, and it has to be inside the text.
+        expect(row.charOffset).toBeLessThan(row.analysisText.length);
+      } else {
+        expect(row.analysisText.slice(row.charOffset, row.charOffset + row.surfaceName.length)).toBe(row.surfaceName);
+      }
+      if (row.kind === "location") {
+        expect(row.locationDetail).toMatchObject({
+          featureId: expect.any(String),
+          countryCode: expect.any(String),
+          latitude: expect.any(Number),
+          longitude: expect.any(Number),
+        });
+      } else {
+        expect(row.locationDetail).toBeNull();
+      }
+    }
+    expect(kindsByArticle.size).toBe(fixtureArticles.length);
+    for (const kinds of kindsByArticle.values()) {
+      expect([...kinds].sort()).toEqual(["location", "organization", "person", "theme"]);
+    }
+  });
+
+  // ADR-0019's graph is worth nothing if every node is isolated, and a name that
+  // appears in one Story only produces no edge across the corpus.
+  it("repeats annotated names across Articles and across Stories", async () => {
+    const [{ shared }] = await AppDataSource.query(
+      `SELECT COUNT(*)::int AS shared FROM (
+         SELECT g."surfaceName"
+         FROM gkg_annotations g JOIN articles a ON a."id" = g."articleId"
+         WHERE a."analysisTextMode" = 'manual_fixture' AND g."kind" IN ('person', 'organization', 'location')
+         GROUP BY g."surfaceName"
+         HAVING COUNT(DISTINCT a."storyId") > 1
+       ) recurring`,
+    );
+    expect(shared).toBeGreaterThanOrEqual(5);
+  });
+
   it("is idempotent — a re-run after a migration must not duplicate or throw", async () => {
     const repo = AppDataSource.getRepository(IntelligenceBrief);
     const before = await repo.findOneOrFail({ where: { title: SEED_BRIEF_TITLE } });
+    const annotations = await AppDataSource.getRepository(GkgAnnotation).count();
 
     await expect(seedAll()).resolves.not.toThrow();
 
     expect(await repo.count()).toBe(1);
     expect(await AppDataSource.getRepository(User).count()).toBe(USER_ROLES.length);
     expect(await AppDataSource.getRepository(IngestionConnector).count()).toBe(SEED_CONNECTORS.length);
+    // Occurrences are the row identity, so a second pass inserts nothing (#62).
+    expect(await AppDataSource.getRepository(GkgAnnotation).count()).toBe(annotations);
     // A second cover image would orphan the first file on disk and churn the key
     // the frontend just cached, so the backfill must not fire on a Brief that
     // already has one.
@@ -168,6 +229,28 @@ describe("npm run seed", () => {
 
     const backfilled = await repo.findOneOrFail({ where: { title: SEED_BRIEF_TITLE } });
     expect(backfilled.coverImageKey).toMatch(/\.png$/);
+  });
+
+  // #62 extended every fixture body so it names the entities annotated against it,
+  // and offsets are located in that text rather than written by hand — so a database
+  // seeded before this ticket holds bodies the authored anchors are not in. A re-seed
+  // has to converge the text (and the embedding over it), not throw on the first
+  // anchor it cannot find.
+  it("converges a fixture body seeded before the annotated text existed", async () => {
+    const articles = AppDataSource.getRepository(Article);
+    const seedArticle = SEED_STORIES[0].articles[0];
+    const before = await articles.findOneByOrFail({ url: seedArticle.url });
+    await articles.update({ id: before.id }, { analysisText: seedArticle.analysisText.split(". ")[0] + "." });
+    await AppDataSource.query(`UPDATE articles SET "embedding" = NULL WHERE "id" = $1`, [before.id]);
+
+    await expect(seedAll()).resolves.not.toThrow();
+
+    const after = await articles.findOneByOrFail({ url: seedArticle.url });
+    expect(after.analysisText).toBe(seedArticle.analysisText);
+    const [{ count }] = await AppDataSource.query(
+      `SELECT COUNT(*)::int AS count FROM articles WHERE "embedding" IS NULL`,
+    );
+    expect(count).toBe(0);
   });
 
   // #46: a database seeded before the DOC connector had a query would hold an
@@ -200,5 +283,22 @@ describe("npm run seed", () => {
       await repo.update({ name: docSeed.name }, { enabled: docSeed.enabled });
       await repo.update({ name: rssSeed.name }, { enabled: rssSeed.enabled });
     }
+  });
+
+  // #62/ADR-0028: the firehose half of the graph ages out, the curated half does
+  // not. Retention already excludes a fixture Article three times over (no
+  // discovering connector, `manual_fixture`, a storyId), so this asserts the
+  // consequence rather than the clause — backdate every row past the window and
+  // the curated corpus and its annotations are still there.
+  it("leaves fixture Articles and their annotations out of the retention window", async () => {
+    const articles = AppDataSource.getRepository(Article);
+    const annotations = AppDataSource.getRepository(GkgAnnotation);
+    const before = { articles: await articles.count(), annotations: await annotations.count() };
+    await AppDataSource.query(`UPDATE articles SET "createdAt" = '2020-01-01T00:00:00Z'`);
+
+    expect(await pruneExpiredGdeltArticles()).toBe(0);
+
+    expect(await articles.count()).toBe(before.articles);
+    expect(await annotations.count()).toBe(before.annotations);
   });
 });

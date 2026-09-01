@@ -99,6 +99,21 @@ the count is raised to admit a real feed, while the three bounds that actually s
 amplification (one entity's size, nesting depth, total expanded characters) are restated at their
 documented defaults, because passing the object form defaults two of them to Infinity. An
 untouched 153 KB capture of the live feed drives it offline.
+The **Curated Corpus now carries its own GKG Annotations** (#62), the permanent half of a graph
+whose firehose half rolls over weekly (ADR-0028, ADR-0029): every fixture Article's body was
+extended to name people, organizations and places, and `src/seedData/annotations.ts` authors
+person/organization/location/theme occurrences against it — anchored on a substring rather than a
+hand-written offset, so the offset is *derived* at seed time and an annotation naming something the
+body does not say throws instead of seeding. Persons and organizations are invented like the
+reporting they sit in; locations are real, because a location annotation carries gazetteer detail
+and inventing coordinates would make the map view lie (the FeatureIDs are invented and stable —
+nothing resolves against a real gazetteer yet). Names recur across Articles and Stories on purpose.
+Staged through the connector's own `stageAnnotations`, now exported, so occurrence identity is one
+implementation and a re-seed stages nothing twice; retention was already excluding fixture rows
+three times over and the seed suite now asserts that consequence directly. Because a body is now
+load-bearing for its own annotations, `seedCorpus` converges the text of a Story it already holds
+— re-embedding only the Articles it replaced — so a database seeded before this ticket catches up
+rather than throwing on the first anchor it cannot find.
 **Readability extraction** (#47) closes ADR-0018's fourth surface and is a connector kind of
 its own (`readability`, `src/ingestion/readability.ts` over `@mozilla/readability` + `linkedom`):
 it discovers nothing, it re-reads pages Tessera already holds an excerpt for and raises them to

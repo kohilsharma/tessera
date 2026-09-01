@@ -161,7 +161,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "meridianwire.example",
         publishedAt: "2026-08-02T09:15:00Z",
         analysisText:
-          "The company said the facility will add capacity for the advanced packaging techniques used in AI accelerators, with output expected in 2028.",
+          "The company said the facility will add capacity for the advanced packaging techniques used in AI accelerators, with output expected in 2028. Halcyon Semiconductor broke ground at its Hsinchu site, where chief executive Dana Ilves said the line would supply accelerator customers directly.",
       },
       {
         title: "Rival foundry accelerates packaging investment",
@@ -169,7 +169,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "latticedaily.example",
         publishedAt: "2026-08-03T14:40:00Z",
         analysisText:
-          "A competing foundry confirmed it is moving up its own packaging expansion timeline, citing sustained demand from AI accelerator customers.",
+          "A competing foundry confirmed it is moving up its own packaging expansion timeline, citing sustained demand from AI accelerator customers. Tessellate Foundry said work at its Dresden campus would start a quarter early, a decision operations director Ana Ruiz described as demand-led.",
       },
       {
         title: "Analysts flag packaging as the new bottleneck",
@@ -177,7 +177,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "outpostjournal.example",
         publishedAt: "2026-08-05T11:00:00Z",
         analysisText:
-          "Industry analysts said advanced packaging, not wafer fabrication, is now the tightest constraint on AI accelerator supply through 2027.",
+          "Industry analysts said advanced packaging, not wafer fabrication, is now the tightest constraint on AI accelerator supply through 2027. Cardinal Research analyst Marisol Vance, briefing clients in Taipei, said Halcyon Semiconductor and Tessellate Foundry account for most of the planned capacity, with Northwind Cloud among the buyers competing for it.",
       },
     ],
   },
@@ -193,7 +193,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "harborpress.example",
         publishedAt: "2026-08-06T13:00:00Z",
         analysisText:
-          "The company raised its full-year capital spending guidance, attributing the increase to inference infrastructure for AI workloads.",
+          "The company raised its full-year capital spending guidance, attributing the increase to inference infrastructure for AI workloads. Northwind Cloud finance chief Peter Lindqvist gave the figure to analysts in Seattle, and said Halcyon Semiconductor had committed additional accelerator supply.",
       },
       {
         title: "Second cloud provider echoes higher inference spend",
@@ -201,7 +201,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "veritynews.example",
         publishedAt: "2026-08-07T10:20:00Z",
         analysisText:
-          "A second major provider reported similar increases in inference-related spending during its earnings call, describing demand as durable.",
+          "A second major provider reported similar increases in inference-related spending during its earnings call, describing demand as durable. Aurora Compute chief executive Neve Halloran told analysts from Dublin that inference demand was outpacing the company's own build-out.",
       },
     ],
   },
@@ -217,7 +217,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "northfieldrecord.example",
         publishedAt: "2026-08-08T08:00:00Z",
         analysisText:
-          "Trade ministers began a two-day session aimed at revising tariff schedules that have not been updated in over a decade.",
+          "Trade ministers began a two-day session aimed at revising tariff schedules that have not been updated in over a decade. Ingrid Solberg, who chairs the Adriatic Economic Council, opened the session in Geneva as the bloc's lead negotiator.",
       },
       {
         title: "Officials describe cautious optimism after first session",
@@ -225,7 +225,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "cascadebulletin.example",
         publishedAt: "2026-08-08T19:30:00Z",
         analysisText:
-          "Officials leaving the first session described the tone as cautiously optimistic, though several delegations flagged unresolved sticking points.",
+          "Officials leaving the first session described the tone as cautiously optimistic, though several delegations flagged unresolved sticking points. Ingrid Solberg told reporters in Geneva that the Adriatic Economic Council would circulate a revised schedule in Brussels within the week.",
       },
     ],
   },
@@ -241,7 +241,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "fieldingtimes.example",
         publishedAt: "2026-08-09T12:00:00Z",
         analysisText:
-          "The proposal would shorten the window for disclosing large campaign expenditures from 30 days to 10.",
+          "The proposal would shorten the window for disclosing large campaign expenditures from 30 days to 10. The Fairwater Electoral Commission published it in Wellington, where commissioner Priya Raman said the current window predates online fundraising.",
       },
       {
         title: "Campaign finance groups split on proposed rules",
@@ -249,7 +249,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "meridianwire.example",
         publishedAt: "2026-08-10T09:45:00Z",
         analysisText:
-          "Reaction from campaign finance advocacy groups was mixed, with some calling the timeline still too slow and others warning of compliance burdens.",
+          "Reaction from campaign finance advocacy groups was mixed, with some calling the timeline still too slow and others warning of compliance burdens. The Civic Ledger Project called the ten-day window inadequate, while Priya Raman said the Fairwater Electoral Commission would take comment in Wellington until October.",
       },
     ],
   },
@@ -265,7 +265,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "harborpress.example",
         publishedAt: "2026-08-11T15:00:00Z",
         analysisText:
-          "The central bank left its benchmark interest rate unchanged, noting that recent inflation readings had been inconsistent month to month.",
+          "The central bank left its benchmark interest rate unchanged, noting that recent inflation readings had been inconsistent month to month. Bank of Halden governor Kofi Mensah said in Frankfurt that the committee wanted two more months of data before moving.",
       },
       {
         title: "Markets read rate hold as a dovish signal",
@@ -273,7 +273,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "latticedaily.example",
         publishedAt: "2026-08-11T21:10:00Z",
         analysisText:
-          "Traders interpreted the decision and accompanying statement as a dovish signal, pushing short-term yields lower in after-hours trading.",
+          "Traders interpreted the decision and accompanying statement as a dovish signal, pushing short-term yields lower in after-hours trading. Desks in Zurich read Kofi Mensah's language as a shift, and Bank of Halden watchers moved their first-cut forecasts forward.",
       },
       {
         title: "Economists split on how long the pause lasts",
@@ -281,7 +281,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "outpostjournal.example",
         publishedAt: "2026-08-12T10:00:00Z",
         analysisText:
-          "Economists surveyed after the decision disagreed on whether the pause would extend through year-end or give way to a cut as soon as next quarter.",
+          "Economists surveyed after the decision disagreed on whether the pause would extend through year-end or give way to a cut as soon as next quarter. Cardinal Research economist Marisol Vance, speaking at a Frankfurt conference, was among those expecting the Bank of Halden to hold into the fourth quarter.",
       },
     ],
   },
@@ -297,7 +297,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "veritynews.example",
         publishedAt: "2026-08-13T13:30:00Z",
         analysisText:
-          "The discount retailer reported same-store sales growth well above estimates, citing increased foot traffic from higher-income shoppers.",
+          "The discount retailer reported same-store sales growth well above estimates, citing increased foot traffic from higher-income shoppers. Bellmark Stores said traffic rose fastest in Chicago, and chief executive Rosa Aguilar credited trade-down from mid-market rivals such as the Ardenne Group.",
       },
       {
         title: "Mid-market chain cuts full-year outlook",
@@ -305,7 +305,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "northfieldrecord.example",
         publishedAt: "2026-08-13T18:00:00Z",
         analysisText:
-          "A mid-market retail chain lowered its full-year sales outlook, pointing to softer demand for discretionary categories.",
+          "A mid-market retail chain lowered its full-year sales outlook, pointing to softer demand for discretionary categories. The Ardenne Group, based in Atlanta, said the softness began in July; Cardinal Research analyst Marisol Vance called the gap with Bellmark Stores the widest in three years.",
       },
     ],
   },
@@ -321,7 +321,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "cascadebulletin.example",
         publishedAt: "2026-08-14T08:30:00Z",
         analysisText:
-          "Researchers said they observed a resistance drop consistent with part of the original claim, but could not confirm the reported critical temperature.",
+          "Researchers said they observed a resistance drop consistent with part of the original claim, but could not confirm the reported critical temperature. The measurements were made at the Meridian Institute of Technology in Uppsala by a group led by Amara Okonjo.",
       },
       {
         title: "Independent physicists urge caution on new results",
@@ -329,7 +329,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "fieldingtimes.example",
         publishedAt: "2026-08-15T11:15:00Z",
         analysisText:
-          "Physicists not involved in the study cautioned that partial replication does not confirm room-temperature superconductivity and called for further review.",
+          "Physicists not involved in the study cautioned that partial replication does not confirm room-temperature superconductivity and called for further review. Halvard Reyes, a condensed-matter physicist in Zurich, said the Meridian Institute of Technology data was too noisy to settle the question, and Amara Okonjo agreed further runs were needed.",
       },
     ],
   },
@@ -345,7 +345,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "meridianwire.example",
         publishedAt: "2026-08-16T07:00:00Z",
         analysisText:
-          "The agency confirmed a two-week launch window for its next uncrewed resupply mission to the lunar surface outpost.",
+          "The agency confirmed a two-week launch window for its next uncrewed resupply mission to the lunar surface outpost. The Continental Space Agency set the window from its Kourou launch site, with mission director Elena Marchetti confirming the vehicle had cleared review.",
       },
       {
         title: "Mission will carry expanded science payload",
@@ -353,7 +353,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "harborpress.example",
         publishedAt: "2026-08-16T16:45:00Z",
         analysisText:
-          "Beyond routine resupply cargo, the mission will carry an expanded set of science instruments for surface radiation monitoring.",
+          "Beyond routine resupply cargo, the mission will carry an expanded set of science instruments for surface radiation monitoring. The instruments were built by the Meridian Institute of Technology and integrated in Toulouse, where mission director Elena Marchetti said the Continental Space Agency had added a second dosimeter.",
       },
     ],
   },
@@ -369,7 +369,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "latticedaily.example",
         publishedAt: "2026-08-17T09:00:00Z",
         analysisText:
-          "The review will assess updated strain targeting ahead of the fall vaccination season, with a decision expected within six weeks.",
+          "The review will assess updated strain targeting ahead of the fall vaccination season, with a decision expected within six weeks. The Federal Medicines Board opened it in Basel, where medical director Yusuf Haddad said Vantis Biologics had met the filing deadline.",
       },
       {
         title: "Manufacturer submits updated trial data",
@@ -377,7 +377,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "outpostjournal.example",
         publishedAt: "2026-08-18T13:20:00Z",
         analysisText:
-          "The manufacturer submitted additional trial data on the updated formulation's immune response in older adults as part of the review.",
+          "The manufacturer submitted additional trial data on the updated formulation's immune response in older adults as part of the review. Vantis Biologics filed the data from Amsterdam, and the Federal Medicines Board asked its clinical reviewers for an opinion by October; Yusuf Haddad said no advisory meeting was scheduled.",
       },
     ],
   },
@@ -393,7 +393,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "veritynews.example",
         publishedAt: "2026-08-19T10:00:00Z",
         analysisText:
-          "City officials moved up the completion date for a seawall project by two years, citing updated flood-risk modeling.",
+          "City officials moved up the completion date for a seawall project by two years, citing updated flood-risk modeling. The Harborline Water Authority set the new date for Rotterdam, and city engineer Lena Brandt said the revised model added half a metre to the design surge.",
       },
       {
         title: "Neighboring city commits new flood-defense funding",
@@ -401,7 +401,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "northfieldrecord.example",
         publishedAt: "2026-08-19T20:10:00Z",
         analysisText:
-          "A neighboring coastal city separately committed new funding toward flood-defense infrastructure, following similar risk-modeling updates.",
+          "A neighboring coastal city separately committed new funding toward flood-defense infrastructure, following similar risk-modeling updates. Hamburg approved the funding after the Harborline Water Authority shared its data, and city engineer Lena Brandt said the two cities would tender the works jointly.",
       },
     ],
   },
@@ -417,7 +417,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "cascadebulletin.example",
         publishedAt: "2026-08-20T07:30:00Z",
         analysisText:
-          "Mediators said both delegations had agreed to resume talks after a five-week stalemate, without disclosing what changed.",
+          "Mediators said both delegations had agreed to resume talks after a five-week stalemate, without disclosing what changed. Tomas Weller, the mediator appointed by the Levant Contact Group, convened the ceasefire round in Geneva and declined to say which side moved first.",
       },
       {
         title: "Delegations offer differing accounts of the breakthrough",
@@ -425,7 +425,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "fieldingtimes.example",
         publishedAt: "2026-08-21T12:00:00Z",
         analysisText:
-          "The two delegations offered differing public accounts of what prompted the resumption, though both confirmed talks were ongoing.",
+          "The two delegations offered differing public accounts of what prompted the resumption, though both confirmed talks were ongoing. One delegation briefed reporters in Doha, the other through the Levant Contact Group, and Tomas Weller would not reconcile the accounts.",
       },
       {
         title: "Regional bloc welcomes resumption of talks",
@@ -433,7 +433,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "meridianwire.example",
         publishedAt: "2026-08-21T18:40:00Z",
         analysisText:
-          "A regional bloc issued a statement welcoming the resumption of talks and offered to host a further round if requested.",
+          "A regional bloc issued a statement welcoming the resumption of talks and offered to host a further round if requested. The Adriatic Economic Council issued it from Brussels and said its own diplomats had informed Tomas Weller of the offer.",
       },
     ],
   },
@@ -449,7 +449,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "harborpress.example",
         publishedAt: "2026-08-22T09:00:00Z",
         analysisText:
-          "Organizers confirmed the final list of venues for next year's championship, including two newly built arenas.",
+          "Organizers confirmed the final list of venues for next year's championship, including two newly built arenas. Officials in Lisbon named the two arenas, and Lisbon Organizing Committee president Sofia Duarte said no further venue changes were planned.",
       },
       {
         title: "Ticket sales open for confirmed venues",
@@ -457,7 +457,7 @@ export const SEED_STORIES: SeedStory[] = [
         publisherDomain: "latticedaily.example",
         publishedAt: "2026-08-23T14:00:00Z",
         analysisText:
-          "Ticket sales opened for the confirmed venues, with organizers reporting high early demand for the two newly built arenas.",
+          "Ticket sales opened for the confirmed venues, with organizers reporting high early demand for the two newly built arenas. The Lisbon Organizing Committee said sales in Porto opened fastest, and Sofia Duarte confirmed a second release for the arenas in November.",
       },
     ],
   },

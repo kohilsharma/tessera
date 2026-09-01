@@ -538,7 +538,11 @@ async function reconcileWithHeld(
 // contribute annotations to an Article another connector found first.
 // Returns how many were new, because that is what distinguishes an Enrichment
 // from a Duplicate.
-async function stageAnnotations(
+// Exported for the seed (#62): the Curated Corpus's hand-authored annotations are
+// staged through this, so occurrence identity — and therefore what a re-seed does
+// twice, which is nothing — is the connector's own behaviour rather than a second
+// implementation of it.
+export async function stageAnnotations(
   manager: EntityManager,
   articleId: string,
   annotations: ParsedAnnotation[] | undefined,
