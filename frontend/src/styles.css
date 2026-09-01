@@ -411,7 +411,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    face at a quieter weight: DESIGN.md's Measurement Rule reserves the monospace face
    for values whose alignment or fixed identity matters — an evidence id, not a clause
    — and the Reading Rule keeps metadata from replacing prose hierarchy. Only the
-   citations beside them are provenance. */
+   citations beside them are provenance.
+
+   The ruled pair is reused by the Admin console's merge review queue (#67), where the
+   two sides are two candidate names and the cites under each are the reporting behind
+   them: the same "two things, not one run of links" job, so the same rule rather than a
+   second one drawn 12px to its left. */
 .claim-note { max-width: 68ch; margin: 8px 0 0; color: var(--quiet-ink); font-size: .82rem; line-height: 1.55; }
 .claim-sides { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 10px; }
 .claim-sides > li { padding-left: 12px; border-left: 2px solid var(--bureau-ink); }

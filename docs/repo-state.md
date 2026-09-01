@@ -263,8 +263,8 @@ Entities and the same edges. Operationally it is a third BullMQ queue on the sam
 ticking hourly at :20 (clear of the quarter-hour ingestion ticks, after clustering's :05), with an
 Admin-only `POST /api/v1/graph/resolution-runs` answering `202 {status:"accepted"}` and an
 `entity_resolution_runs` history table whose ledger is `promoted + belowFloor = considered`.
-Nothing *reads* the graph yet: the Cytoscape view (#68, #69) and fuzzy candidate merges with
-their review queue (#67) are still ahead — as is ADR-0028/ADR-0029's groundwork behind them, the
+Nothing *reads* the graph yet: the Cytoscape view (#68, #69) is still ahead — as is
+ADR-0028/ADR-0029's groundwork behind it, the
 restored DOC connector (#60), the fixed Guardian feed (#61) and the annotated Curated Corpus
 (#62) above.
 **A Story's timeline** (#64) is the phase's other read view, and it costs nothing per view:
@@ -309,6 +309,50 @@ itself, because the cap chooses *which* matches it carries and a route with no s
 not have that decided by a param the reader cannot see. No analytical events ride this axis — they
 are facts about one Story's history, and a lane's heading routes into that Story to read them
 (#64).
+**Candidate merges, proposed rather than applied** (#67) closes the ADR-0019 guardrail the
+resolution seam left open, and it is one new idea plus two thresholds. Candidates come from
+Postgres' own trigram matching — `similarity(a, b) >= $n` written explicitly, never the `%`
+operator, so behaviour does not depend on a `pg_trgm.similarity_threshold` GUC nobody set — over
+the *same* normalized fold promotion uses, restricted to one kind and one FeatureID: the noise
+worth fixing is mistyping and truncation (`Massachusets` for `Massachusetts`, `Australian
+Associated` for "Australian Associated Press"), while folding `Ford` the person into `Ford` the
+company is exactly the wrong merge the bar exists to prevent. Above
+`GRAPH_ENTITY_MERGE_AUTO_SIMILARITY` (0.9) the pass merges the pair itself, orienting it so the
+more-reported name survives; in the band down to `GRAPH_ENTITY_MERGE_REVIEW_SIMILARITY` (0.6) it
+writes an `entity_merge_proposals` row and changes nothing. Both numbers are measured on real GKG
+names against v3 §18.5's rule that a wrong merge is more harmful than an unresolved duplicate: the
+bar sits above every wrong merge measured (`john kennedy`/`john f kennedy` 0.867, `george bush`
+/`george w bush` 0.857, `united states`/`united states steel` 0.778) and the floor at the shortest
+right merge still reachable (`james comey`/`james coney`, 0.600). A review floor at or above the
+bar is refused at load, since an empty band would merge every candidate unseen — the one
+misconfiguration of the pair that fails silently in the harmful direction.
+The load-bearing idea is that **a merge is remembered by name**. `promote()` re-inserts every
+folded name above the floor hourly, so a merge held only as a deleted row is undone within the
+hour; `entity_aliases` is read by the fold in both `stageCandidates` and `stageMentions`, so the
+next pass folds the two names before it counts them (`considered` drops by one, which the test
+asserts). Every stored target is terminal — merging B into C repoints A→B at C — so the fold stays
+one `LEFT JOIN` rather than a recursive walk. Refusals are keyed the same way, on the ordered
+normalized pair in `entity_merge_refusals`, and therefore outlive the Entities themselves: the
+regression drives both names out of the working set, watches the pass demote them, re-stages the
+reporting, and asserts the rebuilt pair is proposed zero times. `graph/merge.ts` is the one place a
+merge happens, for both the automatic and the accepted path — alias write, terminal repoint, edge
+carry through `LEAST`/`GREATEST` with `ON CONFLICT DO NOTHING`, then the delete whose cascade takes
+the leftovers — which is what makes the Admin's accept correct with no rebuild behind it. Proposals
+are rebuilt from the candidate table on every pass, so one cannot outlive the working set it
+described; a decision locks the proposal and then both Entities in id order, and 404s three cases
+a reviewer reads as one: no such row, one another operator already decided, one a pass rebuilt
+away. The run ledger gains `merged` and `proposed`, both outside `promoted + belowFloor =
+considered` because they count *pairs* — and because both names of a merged pair were promoted by
+the same pass that then folded them.
+The queue is the Admin console's second review register, beside clustering's for the reason they
+are the same job at two scales, with the analysis register's ruled pair reused to hold the two
+sides: each labelled by its surface name and Article count, over up to three of the Articles
+behind it. The sample is read from `entity_edges` rather than the annotation window — a few
+thousand indexed rows against millions — and links *out* to the publisher's copy, because a
+firehose-derived Article may have no accepted Story membership and so no record page to open.
+Two honest ceilings, both documented in `.env.example`: `joe biden`/`joseph biden` (0.533) and
+`ibm`/`i b m` (0.111) are never proposed at all, and the upgrade path for either is a
+hand-written alias row rather than a lower floor that would propose noise by the hundred.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
 `/register`, `/account`), role dashboards (`/dashboard/:role`), browsing the corpus
@@ -366,18 +410,21 @@ the worker is what executes it, #42), and each publisher row shows its Terms
 Class beside its article count (#40). A fifth register carries **ClusteringRun** history with a
 Run-clustering command on the register itself (#49 — one pass over the whole corpus, so there is
 no row to hang it on), a sixth carries **EntityResolutionRun** history with a Run-resolution
-command for the same reason (#66 — Annotations, Articles, Considered, Promoted, Below floor,
-Demoted and Edges per row; it too states that it *queued* the pass, since the worker is what
-promotes and connects), and a seventh is the **clustering review queue** (#50) — the one register
+command for the same reason (#66, #67 — Annotations, Articles, Considered, Promoted, Below floor,
+Demoted, Merged, Proposed and Edges per row; it too states that it *queued* the pass, since the
+worker is what promotes and connects), and a seventh is the **clustering review queue** (#50) —
 with its own request, so it owns all four UI states, with Accept/Reject on each proposal row. An
-eighth is **Story merge** (#52), the console's one command *form*: two selects over the 50 most
+eighth is the **entity merge review queue** (#67), the same shape one scale down: its own request
+and four states, Accept/Refuse per row, and each row holding both surface names with the reporting
+behind each in the analysis register's ruled pair. A ninth is **Story merge** (#52), the console's
+one command *form*: two selects over the 50 most
 recent Stories (its own request, refetched after a merge since one of the pair is gone), a Merge
 command refused client-side for a Story named twice, and a stated note reporting what the merge
-did rather than what it queued. A ninth is **Prompt versions** (#57), a register and a second
+did rather than what it queued. A tenth is **Prompt versions** (#57), a register and a second
 command form: each version states its own parameters in the note line so two can be told apart
 without opening either, a Make-current command on every row but the current one, and a form whose
 fields are the whole tuning surface — there is no control for the citation check, because it is
-not configuration. Those five Phase-3 registers live in `pages/adminRegisters.tsx`, each owning
+not configuration. Those six Phase-3 registers live in `pages/adminRegisters.tsx`, each owning
 its own request and commands; `pages/AdminDashboard.tsx` is the console that lays them out and
 the two registers reading its own payload. The
 **design prototype** for the Phase-3 flagship (`src/versions/BureauPrototype.tsx` +

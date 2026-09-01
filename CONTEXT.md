@@ -115,10 +115,18 @@ Terms are canonical: use these words in code, docs, and conversation.
 - **Entity** — A canonical person, organization or location, resolved from GKG surface-name
   strings. Not every name becomes one: a name is *promoted* only once it clears the **Entity
   Promotion Floor**, and below it stays an unresolved **GKG Annotation** that expires with its
-  Article. Resolution is normalization plus fuzzy candidate matching against a confidence
-  threshold, with the band beneath it queued for Admin review — the same shape as a *Story
+  Article. Resolution is normalization plus fuzzy candidate matching — Postgres trigram
+  similarity over the normalized names — against a confidence threshold, with the band beneath
+  it queued for Admin review as a *Merge proposal*; the same shape as a *Story
   Assignment*'s review band, for the same reason. Locations reuse GKG FeatureIDs (already
   disambiguated). Themes are **not** Entities (see *Theme*). (ADR-0018, ADR-0019, ADR-0028)
+
+- **Entity alias** — A normalized surface name that resolves to another one, so the pass folds
+  the two wherever it reads names. What makes a merge outlive the run that made it: a pass
+  re-promotes every name above the *Entity Promotion Floor* hourly, so a merge remembered only
+  as a deleted row would be undone within the hour. Written by both an automatic merge and an
+  accepted *Merge proposal*, and always terminal — folding B into C repoints A's alias at C
+  rather than leaving a chain to walk. (ADR-0019, ADR-0028)
 
 - **Entity Promotion Floor** — The number of distinct Articles a surface name must appear in
   before it becomes an Entity. What makes "bounded" a property of the data rather than a
@@ -137,17 +145,30 @@ Terms are canonical: use these words in code, docs, and conversation.
 - **Entity Resolution Run** — One invocation of the entity-resolution pass, and the record of
   what it did: how many *GKG Annotations* and Articles it read, how many candidate names it
   considered, how many it *promoted*, how many fell below the *Entity Promotion Floor*, how many
-  Entities it demoted out of the working set, and how many *EntityEdges* the graph now carries.
-  Its ledger is `promoted + belowFloor = considered`. The counterpart of a *Clustering Run*, and
+  Entities it demoted out of the working set, how many pairs it merged itself, how many it left
+  as *Merge proposals*, and how many *EntityEdges* the graph now carries.
+  Its ledger is `promoted + belowFloor = considered`; the two merge counters sit outside that sum
+  because they count *pairs*, and both names of a merged pair were promoted by the same pass
+  before it folded them. The counterpart of a *Clustering Run*, and
   read from Postgres for the same reason — the Admin view must render with the worker down. A
   pass rebuilds the whole graph in one transaction, so a failed run changed nothing and says so.
   (ADR-0019, ADR-0028)
 
+- **Merge proposal** — Two surface names close enough to be one Entity but not close enough to
+  fold unseen, held for an Admin and changing nothing until decided. Generated in the band
+  between the review floor and the automatic bar, both trigram similarities read from env: v3
+  §18.5 governs where they sit, since a wrong merge is more harmful than an unresolved
+  duplicate, so the bar clears every wrong merge measured on real names and the doubt goes in
+  the band. Accepting it merges the pair and writes an *Entity alias*; refusing it records a
+  *Refused merge*. Same-kind by construction — folding `Ford` the person into `Ford` the company
+  is the wrong merge the bar exists to prevent. (ADR-0019, ADR-0028)
+
 - **Refused merge** — Two surface names an Admin declined to resolve into one Entity,
   remembered so later runs never re-propose the pair. Keyed on the *names*, not on Entity ids,
   because an Entity is a working-set row that may roll away and come back while the judgement
-  about the two names stays true. The entity-resolution counterpart of a *Rejected pairing*,
-  which keys on ids because Stories are durable. (ADR-0019, ADR-0028)
+  about the two names stays true — the pair stays unproposed across both names leaving the
+  working set and being promoted again. The entity-resolution counterpart of a *Rejected
+  pairing*, which keys on ids because Stories are durable. (ADR-0019, ADR-0028)
 
 - **Theme** — One of GDELT's controlled-vocabulary subject codes on an Article. The cleanest
   annotation Tessera receives and deliberately never a graph node: at ~48 per Article, theme

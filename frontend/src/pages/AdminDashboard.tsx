@@ -18,6 +18,7 @@ import { EmptyState, EntryList, ErrorState, PendingState } from "../components/u
 import {
   ClusteringReviewRegister,
   ClusteringRunsRegister,
+  EntityMergeReviewRegister,
   EntityResolutionRunsRegister,
   PromptVersionsRegister,
   RUN_STATUS_LABEL,
@@ -34,14 +35,14 @@ const TERMS_CLASS_LABEL: Record<TermsClass, string> = {
   licensed: "Licensed",
 };
 
-// The Admin surface (#36, #39, #49, #50, #52, #57): eight operator registers, in four
-// shapes, so they are told apart before they are read — standing totals as plates,
-// the connector fleet and the clustering review queue as registers an operator acts
-// on, ingestion and clustering history as ledgers of runs, the Story merge and prompt
-// tuning as command forms, publishers as a coverage register.
+// The Admin surface (#36, #39, #49, #50, #52, #57, #66, #67): ten operator registers, in
+// four shapes, so they are told apart before they are read — standing totals as plates,
+// the connector fleet and the two review queues as registers an operator acts on,
+// ingestion, clustering and resolution history as ledgers of runs, the Story merge and
+// prompt tuning as command forms, publishers as a coverage register.
 //
 // This page lays them out and owns the two that read the console payload it fetches;
-// the five Phase-3 registers own their own requests and commands (./adminRegisters).
+// the six Phase-3 registers own their own requests and commands (./adminRegisters).
 export default function AdminDashboard() {
   const query = useQuery({ queryKey: ["dashboard", "admin"], queryFn: getAdminDashboard });
   const queryClient = useQueryClient();
@@ -197,6 +198,11 @@ export default function AdminDashboard() {
             <EntityResolutionRunsRegister runs={data.entityResolutionRuns} />
 
             <ClusteringReviewRegister />
+
+            {/* Beside clustering's review rather than under resolution's ledger: the two
+                queues are the same job at two scales — a band beneath a threshold that
+                only a person can decide — and an operator works them together. */}
+            <EntityMergeReviewRegister />
 
             <StoryMergeRegister />
 

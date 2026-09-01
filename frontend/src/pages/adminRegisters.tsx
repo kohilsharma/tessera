@@ -3,7 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
   createPromptTemplate,
+  decideMergeProposal,
   decidePendingAssignment,
+  getMergeProposals,
   getPendingAssignments,
   getStories,
   mergeStories,
@@ -11,27 +13,31 @@ import {
   runEntityResolution,
   setPromptTemplateCurrent,
   CORE_CLAIM_TYPES,
+  ENTITY_KIND_LABELS,
   type AssignmentDecision,
   type ClusteringRunSummary,
   type CoreClaimType,
   type EntityResolutionRunSummary,
   type IngestionRunSummary,
+  type MergeProposalDecision,
+  type MergeProposalSide,
   type PromptTemplateSummary,
 } from "../api/client";
+import { DateStamp } from "../components/indexArchetype";
 import { DashboardRegister, RegisterRow } from "../components/dashboardArchetype";
 import { EmptyState, EntryList, ErrorState, PendingState, RetryableError } from "../components/uiStates";
 
 // The operator registers Phase 3 added, each one its own component beside the console
-// that lays them out (#49, #50, #52, #57). They are here rather than in AdminDashboard
-// because each has its own reason to change — a clustering ledger, a review queue, a
-// merge form, a prompt-tuning form — and a console that had to be edited for all four
-// was one file with four unrelated futures.
+// that lays them out (#49, #50, #52, #57, #66, #67). They are here rather than in
+// AdminDashboard because each has its own reason to change — a clustering ledger, two
+// review queues, a merge form, a prompt-tuning form — and a console that had to be edited
+// for all of them was one file with six unrelated futures.
 //
 // Each owns its own requests and its own commands, so a refusal is stated where it
-// happened and cannot outlive the register it belongs to. The two that fetch (the review
-// queue and the merge picker) begin their requests when the console has rendered, since
-// that is when they mount — one round trip after the payload rather than beside it, which
-// is the price of each register stating its own four states.
+// happened and cannot outlive the register it belongs to. The three that fetch (the two
+// review queues and the merge picker) begin their requests when the console has rendered,
+// since that is when they mount — one round trip after the payload rather than beside it,
+// which is the price of each register stating its own four states.
 
 // A run's own timing, in the note line rather than the ledger: a timestamp and a
 // duration are one fact about when, and two more ledger cells beside seven counters
@@ -164,6 +170,12 @@ export function EntityResolutionRunsRegister({ runs }: { runs: EntityResolutionR
                 { term: "Promoted", value: resolutionRun.promoted },
                 { term: "Below floor", value: resolutionRun.belowFloor },
                 { term: "Demoted", value: resolutionRun.demoted },
+                // #67, and pairs rather than names: a pass that merges one pair
+                // promoted both of its names first, so `Promoted 4 · Merged 1` is the
+                // honest reading. Read beside the queue below, which holds what the
+                // pass would not commit itself.
+                { term: "Merged", value: resolutionRun.merged },
+                { term: "Proposed", value: resolutionRun.proposed },
                 { term: "Edges", value: resolutionRun.edgesBuilt },
               ]}
             />
@@ -253,6 +265,135 @@ export function ClusteringReviewRegister() {
                         onClick={() => decide.mutate({ articleId: proposal.id, decision: "reject" })}
                       >
                         Reject
+                      </button>
+                    </>
+                  }
+                />
+              );
+            })}
+          </EntryList>
+        ))}
+    </DashboardRegister>
+  );
+}
+
+// One side of a candidate merge: the surface name GDELT reported, what it is cited by,
+// and a sample of that reporting. The analysis register's ruled pair (styles.css), which
+// exists to make two sides read as two things rather than one run of links — the same
+// job here, where the whole decision is whether these two stacks of reporting are about
+// one thing.
+//
+// Linked out to the original rather than in to an Article record: the graph is
+// firehose-derived (ADR-0028), so a cited Article may have no accepted Story membership
+// and therefore no record page a reader can open. The Publisher's own copy always opens.
+function ProposalSide({ role, side }: { role: string; side: MergeProposalSide }) {
+  return (
+    <li>
+      <p className="side-publisher">
+        {role} · {side.canonicalName} · {side.articleCount} Article{side.articleCount === 1 ? "" : "s"}
+      </p>
+      {side.articles.length === 0 ? (
+        // Honest rather than empty: the count above is what the pass measured over the
+        // whole annotation window, and the sample is drawn from kept edges, which a name
+        // at the bound's edge may have none of.
+        <p className="claim-note">No kept edge behind this name, so there is nothing to sample</p>
+      ) : (
+        side.articles.map((article) => (
+          <p key={article.id} className="side-cite">
+            <span>
+              <DateStamp iso={article.publishedAt} />
+            </span>{" "}
+            ·{" "}
+            <a href={article.url} target="_blank" rel="noreferrer">
+              {article.title}
+            </a>
+          </p>
+        ))
+      )}
+    </li>
+  );
+}
+
+// #67: the band beneath the automatic merge bar, the same shape clustering's review queue
+// has one register above — a threshold with a band under it, decided by a person,
+// remembered afterwards. Every row is a pair the pass would not fold itself, and until
+// somebody decides it the pair stays two Entities in the graph.
+//
+// Which name survives is not the Admin's to choose here: the pass fixed it on the more
+// reported side, so the row states the fold rather than offering an orientation.
+export function EntityMergeReviewRegister() {
+  const queryClient = useQueryClient();
+  const review = useQuery({ queryKey: ["graph", "merge-proposals"], queryFn: getMergeProposals });
+  // Only its own queue is refetched, unlike clustering's review: a decision here changes
+  // the graph, and nothing on this console states the graph — the run rows above are
+  // history, and history does not change because a name was folded after the fact.
+  const decide = useMutation({
+    mutationFn: ({ proposalId, decision }: { proposalId: string; decision: MergeProposalDecision }) =>
+      decideMergeProposal(proposalId, decision),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["graph", "merge-proposals"] }),
+  });
+
+  return (
+    <DashboardRegister
+      heading="Entity merge review"
+      folio={review.data ? `${review.data.total} awaiting a decision` : "Candidate merges"}
+    >
+      {review.isPending && <PendingState>Loading the candidate merges…</PendingState>}
+      {review.isError && (
+        <RetryableError
+          message={review.error.message}
+          onRetry={() => void review.refetch()}
+          retrying={review.isFetching}
+        />
+      )}
+      {decide.error && <ErrorState>{decide.error.message}</ErrorState>}
+      {review.data &&
+        (review.data.items.length === 0 ? (
+          <EmptyState>
+            <p>
+              No candidate merge is waiting on a decision. A pass holds a pair here when two names are close enough to
+              be one thing but not close enough to fold without somebody looking.
+            </p>
+          </EmptyState>
+        ) : (
+          <EntryList>
+            {review.data.items.map((proposal) => {
+              const deciding = decide.isPending && decide.variables?.proposalId === proposal.id;
+              return (
+                <RegisterRow
+                  key={proposal.id}
+                  // The decision, not the pair: an Entity has no record page of its own
+                  // yet, and the two names are stated again below with the reporting
+                  // that is the whole of what this rests on.
+                  name={`Fold “${proposal.merged.canonicalName}” into “${proposal.survivor.canonicalName}”`}
+                  body={
+                    <ul className="claim-sides">
+                      <ProposalSide role="Kept" side={proposal.survivor} />
+                      <ProposalSide role="Folded in" side={proposal.merged} />
+                    </ul>
+                  }
+                  meta={[
+                    { term: "Similarity", value: proposal.similarity.toFixed(2) },
+                    // The kind both names share, stated once: two names that look
+                    // identical are two different things when their kinds differ, and
+                    // `Ford` the person is never folded into `Ford` the company.
+                    { term: "Kind", value: ENTITY_KIND_LABELS[proposal.kind] },
+                  ]}
+                  action={
+                    <>
+                      <button
+                        type="button"
+                        disabled={deciding}
+                        onClick={() => decide.mutate({ proposalId: proposal.id, decision: "accept" })}
+                      >
+                        Accept
+                      </button>
+                      <button
+                        type="button"
+                        disabled={deciding}
+                        onClick={() => decide.mutate({ proposalId: proposal.id, decision: "refuse" })}
+                      >
+                        Refuse
                       </button>
                     </>
                   }

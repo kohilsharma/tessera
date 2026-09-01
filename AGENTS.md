@@ -19,8 +19,8 @@ Each pointer names the branch that reaches it. Read what your task hits.
 ## Repo state
 
 Phases 1 and 2 are complete; Phase 3 through #58; Phase 3.5 in flight — entity resolution (#66),
-a Story's timeline (#64) and the search timeline (#65) are in, candidate merges (#67) and the
-Cytoscape view (#68, #69) are ahead. `docs/repo-state.md` carries the per-ticket detail.
+a Story's timeline (#64), the search timeline (#65) and candidate merges (#67) are in, the
+Cytoscape view (#68, #69) is ahead. `docs/repo-state.md` carries the per-ticket detail.
 
 **backend/** — one seam per module. Extend the seam rather than adding a parallel path.
 
@@ -29,7 +29,7 @@ Cytoscape view (#68, #69) are ahead. `docs/repo-state.md` carries the per-ticket
 | `src/ingestion/` | `runConnector` | RSS, GKG 15-min firehose, DOC, Readability. Canonical-URL identity, dedup, cross-connector enrichment, Terms-Class rights checks, window cursor + 7-day GDELT retention, GKG Annotation staging |
 | `src/clustering/` | `runClustering` | Embed → centroid → nearest-Story assignment. No singleton Stories, model-named new Stories, a pending-review band beneath the threshold, Story merge |
 | `src/generation/` | `runGeneration` | Deterministic evidence selection → frozen EvidenceSet (`A1…` ids, SHA-256) → cited claims under one Lens. Validation below the prompt, repair ×2, Admin-tunable `prompt_templates` |
-| `src/graph/` | `runEntityResolution` | Normalized-name folding, promotion floor, rolling co-occurrence graph, edges bounded from both ends, whole pass in one transaction |
+| `src/graph/` | `runEntityResolution` | Normalized-name folding, promotion floor, rolling co-occurrence graph, edges bounded from both ends, trigram merge candidates above a bar and a review band beneath it, merges and refusals remembered by name, whole pass in one transaction |
 | `src/timeline/` | `buildTimeline` | Takes a **set of Articles**, never a query. Reporting and analytical events on one axis, granularity chosen from the span, one lane per Story over a set drawn from many |
 | `src/lib/storyMembership.ts` | — | The one accepted-membership predicate every reader surface tests |
 
@@ -47,7 +47,7 @@ four shared UI states, and states "nothing here" differently from a failed reque
 Shared registers, reused rather than redrawn per page: `components/timelineRegister.tsx` (Story
 detail's coverage register, and the axis and bars every `/search/timeline` lane draws) and
 `components/analysisRegister.tsx` (claims, read differently under
-each Lens, on both Story detail and Brief detail). The Admin console's five Phase-3 registers
+each Lens, on both Story detail and Brief detail). The Admin console's six Phase-3 registers
 live in `pages/adminRegisters.tsx`, each owning its own request and commands, laid out by
 `pages/AdminDashboard.tsx`. `src/versions/BureauPrototype.tsx` at `/design-prototype` sits
 outside the app path.
@@ -100,6 +100,8 @@ One line each, so a decided area is never re-litigated by accident. Full rationa
 - Every **EntityEdge** carries its source Article; an uncited edge is a bug. One row per (pair,
   Article) with `ON DELETE CASCADE`, so weight is a count at read time.
 - Entity resolution uses a **confidence threshold**; borderline merges queue for Admin review.
+  A merge and a refusal are both remembered **by normalized name**, never by Entity id: a pass
+  re-promotes every name above the floor hourly, so an id-keyed decision is undone within the hour.
 - EntityEdges are **co-occurrence**, not typed relations.
 - Cache LLM calls by content hash; batch where possible.
 - Every public read path joins through accepted Story membership

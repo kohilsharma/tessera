@@ -162,6 +162,44 @@ describe("Admin dashboard", () => {
     ...overrides,
   });
 
+  // #67: a candidate merge in the band beneath the automatic bar. Both sides carry the
+  // reporting behind them, which is the whole of what the reviewer decides on — the
+  // survivor is the more-reported side, fixed by the pass rather than chosen here.
+  const mergeProposal = (overrides: Record<string, unknown> = {}) => ({
+    id: "mp1",
+    similarity: 0.78,
+    kind: "organization",
+    survivor: {
+      id: "e1",
+      kind: "organization",
+      canonicalName: "Australian Associated Press",
+      articleCount: 9,
+      articles: [
+        {
+          id: "a2",
+          title: "Wire service reports grid delay",
+          url: "https://ledger.example/wire-grid",
+          publishedAt: "2026-08-30T07:00:00.000Z",
+        },
+      ],
+    },
+    merged: {
+      id: "e2",
+      kind: "organization",
+      canonicalName: "Australian Associated",
+      articleCount: 3,
+      articles: [
+        {
+          id: "a3",
+          title: "Truncated byline on interconnector filing",
+          url: "https://ledger.example/byline",
+          publishedAt: "2026-08-29T07:00:00.000Z",
+        },
+      ],
+    },
+    ...overrides,
+  });
+
   const storySummary = (id: string, title: string) => ({
     id,
     slug: title.toLowerCase().replace(/\W+/g, "-"),
@@ -173,19 +211,21 @@ describe("Admin dashboard", () => {
     articleCount: 3,
   });
 
-  // Three requests feed this console since #52 — the payload, the review queue, and
+  // Four requests feed this console since #67 — the payload, the two review queues, and
   // the merge picker's Stories — so the mock answers by URL and method rather than by
   // call order, which is not something any of these tests mean to assert. `command`
-  // is what a mutation gets back; `pending` is null to leave the queue's own request
-  // hanging.
+  // is what a mutation gets back; `pending` and `proposals` are null to leave a queue's
+  // own request hanging.
   function mockConsole({
     payload = adminPayload(),
     pending = [] as Record<string, unknown>[] | null,
+    proposals = [] as Record<string, unknown>[] | null,
     stories = [storySummary("s1", "Grid interconnector delayed"), storySummary("s2", "Interconnector timetable slips")],
     command = jsonResponse({ status: "accepted" }, 202),
   }: {
     payload?: unknown;
     pending?: Record<string, unknown>[] | null;
+    proposals?: Record<string, unknown>[] | null;
     stories?: Record<string, unknown>[];
     command?: Response;
   } = {}) {
@@ -196,6 +236,11 @@ describe("Admin dashboard", () => {
         return pending === null
           ? new Promise<Response>(() => {})
           : Promise.resolve(jsonResponse(listEnvelope(pending)));
+      }
+      if (String(input).startsWith("/api/v1/graph/merge-proposals")) {
+        return proposals === null
+          ? new Promise<Response>(() => {})
+          : Promise.resolve(jsonResponse(listEnvelope(proposals)));
       }
       if (String(input).startsWith("/api/v1/stories")) return Promise.resolve(jsonResponse(listEnvelope(stories)));
       return Promise.resolve(jsonResponse(payload));
@@ -346,6 +391,9 @@ describe("Admin dashboard", () => {
       if (String(input).startsWith("/api/v1/clustering/pending")) {
         return Promise.resolve(jsonResponse(listEnvelope([])));
       }
+      if (String(input).startsWith("/api/v1/graph/merge-proposals")) {
+        return Promise.resolve(jsonResponse(listEnvelope([])));
+      }
       if (String(input).startsWith("/api/v1/stories")) return Promise.resolve(jsonResponse(listEnvelope([])));
       return Promise.resolve(jsonResponse(adminPayload({ connectors })));
     });
@@ -443,6 +491,8 @@ describe("Admin dashboard", () => {
             promoted: 12,
             belowFloor: 28,
             demoted: 3,
+            merged: 2,
+            proposed: 5,
             edgesBuilt: 57,
             errorSummary: null,
           },
@@ -466,6 +516,10 @@ describe("Admin dashboard", () => {
     expect(within(row).getByText("Articles").closest("div")).toHaveTextContent("968");
     expect(within(row).getByText("Demoted").closest("div")).toHaveTextContent("3");
     expect(within(row).getByText("Edges").closest("div")).toHaveTextContent("57");
+    // #67 counts pairs, not names, so these two are outside the sum for a second reason:
+    // both names of a merged pair were promoted by this same pass before it folded them.
+    expect(within(row).getByText("Merged").closest("div")).toHaveTextContent("2");
+    expect(within(row).getByText("Proposed").closest("div")).toHaveTextContent("5");
   });
 
   it("queues the resolution pass and says so, rather than claiming it resolved", async () => {
@@ -512,6 +566,9 @@ describe("Admin dashboard", () => {
     vi.mocked(fetch).mockImplementation((input) => {
       if (String(input).startsWith("/api/v1/clustering/pending")) {
         return Promise.resolve(jsonResponse({ error: "Review queue unavailable" }, 500));
+      }
+      if (String(input).startsWith("/api/v1/graph/merge-proposals")) {
+        return Promise.resolve(jsonResponse(listEnvelope([])));
       }
       if (String(input).startsWith("/api/v1/stories")) return Promise.resolve(jsonResponse(listEnvelope([])));
       return Promise.resolve(jsonResponse(adminPayload()));
@@ -583,6 +640,110 @@ describe("Admin dashboard", () => {
 
     const review = await screen.findByRole("region", { name: "Clustering review" });
     expect(within(review).getByRole("alert")).toHaveTextContent("Pending assignment not found");
+    expect(screen.getByRole("region", { name: "Publishers" })).toBeInTheDocument();
+  });
+
+  // #67: the second review queue, and the same four states for the same reason — an
+  // operator has to be able to tell "no candidate is waiting" from "the queue would not
+  // load", and it fetches separately from the console around it.
+  it("states that the merge queue is loading while the rest of the console is not", async () => {
+    mockConsole({ proposals: null });
+
+    renderWithProviders(<AdminDashboard />);
+
+    const review = await screen.findByRole("region", { name: "Entity merge review" });
+    expect(within(review).getByRole("status")).toHaveTextContent(/Loading the candidate merges/);
+    expect(screen.getByRole("region", { name: "Publishers" })).toBeInTheDocument();
+  });
+
+  it("offers a retry when the merge queue alone cannot be loaded", async () => {
+    vi.mocked(fetch).mockImplementation((input) => {
+      if (String(input).startsWith("/api/v1/graph/merge-proposals")) {
+        return Promise.resolve(jsonResponse({ error: "Merge queue unavailable" }, 500));
+      }
+      if (String(input).startsWith("/api/v1/clustering/pending")) {
+        return Promise.resolve(jsonResponse(listEnvelope([])));
+      }
+      if (String(input).startsWith("/api/v1/stories")) return Promise.resolve(jsonResponse(listEnvelope([])));
+      return Promise.resolve(jsonResponse(adminPayload()));
+    });
+
+    renderWithProviders(<AdminDashboard />);
+
+    const review = await screen.findByRole("region", { name: "Entity merge review" });
+    expect(await within(review).findByRole("alert")).toHaveTextContent("Merge queue unavailable");
+    expect(within(review).getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  it("distinguishes an empty merge queue from a broken one", async () => {
+    mockConsole();
+
+    renderWithProviders(<AdminDashboard />);
+
+    const review = await screen.findByRole("region", { name: "Entity merge review" });
+    expect(await within(review).findByText(/No candidate merge is waiting on a decision/)).toBeInTheDocument();
+  });
+
+  it("registers a candidate merge with both names, their kind, and the reporting behind each", async () => {
+    mockConsole({ proposals: [mergeProposal()] });
+
+    renderWithProviders(<AdminDashboard />);
+
+    const review = await screen.findByRole("region", { name: "Entity merge review" });
+    // Which name survives is the pass's decision, not the reviewer's, so the row states
+    // the fold rather than offering an orientation to choose.
+    expect(
+      await within(review).findByText("Fold “Australian Associated” into “Australian Associated Press”"),
+    ).toBeInTheDocument();
+    expect(within(review).getByText("Similarity").closest("div")).toHaveTextContent("0.78");
+    // One kind for the pair: same-kind by construction, and it is what tells two
+    // identical strings apart when they are a person and a company.
+    expect(within(review).getByText("Kind").closest("div")).toHaveTextContent("organization");
+    // Each side labelled by the name its reporting belongs to — which stack is whose is
+    // the decision, so the pair is never one undifferentiated run of links.
+    expect(within(review).getByText("Kept · Australian Associated Press · 9 Articles")).toBeInTheDocument();
+    expect(within(review).getByText("Folded in · Australian Associated · 3 Articles")).toBeInTheDocument();
+    // Out to the publisher's own copy rather than in to an Article record: the graph is
+    // firehose-derived, so a cited Article may have no readable record page (ADR-0028).
+    expect(within(review).getByRole("link", { name: "Wire service reports grid delay" })).toHaveAttribute(
+      "href",
+      "https://ledger.example/wire-grid",
+    );
+    expect(within(review).getByRole("link", { name: /Truncated byline/ })).toHaveAttribute("target", "_blank");
+  });
+
+  it.each([
+    ["Accept", "accept"],
+    ["Refuse", "refuse"],
+  ])("sends the %s decision for the candidate merge it sits beside", async (label, decision) => {
+    mockConsole({
+      proposals: [mergeProposal()],
+      command: jsonResponse({ proposalId: "mp1", decision, survivorEntityId: "e1", mergedEntityId: "e2" }),
+    });
+
+    renderWithProviders(<AdminDashboard />);
+
+    const review = await screen.findByRole("region", { name: "Entity merge review" });
+    await userEvent.click(await within(review).findByRole("button", { name: label }));
+
+    expect(callTo("/api/v1/graph/merge-proposals/mp1")?.[1]).toMatchObject({
+      method: "PATCH",
+      body: JSON.stringify({ decision }),
+    });
+  });
+
+  it("states a decision another operator already made in the merge register alone", async () => {
+    mockConsole({
+      proposals: [mergeProposal()],
+      command: jsonResponse({ error: "Merge proposal not found" }, 404),
+    });
+
+    renderWithProviders(<AdminDashboard />);
+
+    const review = await screen.findByRole("region", { name: "Entity merge review" });
+    await userEvent.click(await within(review).findByRole("button", { name: "Refuse" }));
+
+    expect(await within(review).findByRole("alert")).toHaveTextContent("Merge proposal not found");
     expect(screen.getByRole("region", { name: "Publishers" })).toBeInTheDocument();
   });
 

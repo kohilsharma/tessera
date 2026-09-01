@@ -10,6 +10,19 @@ function envNumber(key: string, fallback: number, { min, max }: { min: number; m
   return value;
 }
 
+// Separate from envNumber because a similarity is not an integer, and `Number.isInteger`
+// would reject every value in range. Exclusive of 0: a threshold of zero would propose
+// every pair of names of the same kind.
+function envFraction(key: string, fallback: number): number {
+  const raw = process.env[key];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0 || value > 1) {
+    throw new Error(`${key} must be a number greater than 0 and at most 1, got "${raw}"`);
+  }
+  return value;
+}
+
 // CONTEXT.md "Entity Promotion Floor" (ADR-0028): the number of distinct Articles a
 // surface name must appear in before it is an Entity at all. This is the knob that
 // makes "bounded" a property of the data rather than a cleanup job — measured on
@@ -32,6 +45,53 @@ export const ENTITY_PROMOTION_FLOOR = envNumber("GRAPH_ENTITY_PROMOTION_FLOOR", 
 // Applied from *both* ends — a pair inside either Entity's strongest 25 is kept — so a
 // node's own strongest neighbour is never missing because it was that neighbour's 26th.
 export const EDGES_PER_ENTITY = envNumber("GRAPH_EDGES_PER_ENTITY", 25, { min: 1, max: 500 });
+
+// The two bars #67 turns on, both read by pg_trgm's `similarity()` over normalized
+// surface names. v3 §18.5's rule sets them: a wrong merge is more harmful than an
+// unresolved duplicate, so the automatic bar sits above every wrong merge measured and
+// the band beneath it is where the doubt goes.
+//
+// Measured on 2026-09-01 against real GKG names, right merges against wrong ones:
+//
+//   0.923  massachusetts institute of technology / massachusets…   right — one typo
+//   0.917  securities and exchange commission / …commision         right — one typo
+//   0.867  donald trump / donald j trump                           right — middle initial
+//   0.867  john kennedy / john f kennedy                           WRONG — JFK, and a senator
+//   0.857  george bush / george w bush                             WRONG — two presidents
+//   0.778  australian associated / australian associated press     right — truncation
+//   0.778  united states / united states steel                     WRONG — same score
+//   0.600  james comey / james coney                               right — one typo
+//   0.533  joe biden / joseph biden                                right — missed, see below
+//
+// 0.90 for the automatic bar: above every wrong merge measured (0.867), and what
+// survives it is a single mistyped character in a long name. The middle-initial and
+// truncation families straddle the line — `donald j trump` scores exactly what
+// `john f kennedy` does, and the two 0.778 rows are a right merge and a wrong one at
+// identical scores — so no numeric bar separates them and they all go to a person.
+//
+// 0.60 for the review floor: `james comey`/`james coney` is the shortest right merge
+// still reachable, and beneath it sit `kansas city`/`kansas` (0.583), `niger`/`nigeria`
+// (0.556) and `austria`/`australia` (0.500), which are pairs a queue would only waste an
+// Admin's attention on.
+//
+// The honest limit: `joe biden`/`joseph biden` (0.533), `ibm`/`i b m` (0.111) and any
+// other initialism are below the floor and are never proposed. Trigrams do not see them
+// and no threshold recovers them without the wrong merges above coming too. The upgrade
+// path is a hand-written row in `entity_aliases`, which the merge memory already
+// supports — ponytail: no route writes one yet, add it when a demo needs `IBM` folded.
+export const ENTITY_MERGE_AUTO_SIMILARITY = envFraction("GRAPH_ENTITY_MERGE_AUTO_SIMILARITY", 0.9);
+
+export const ENTITY_MERGE_REVIEW_SIMILARITY = envFraction("GRAPH_ENTITY_MERGE_REVIEW_SIMILARITY", 0.6);
+
+// Checked at load, not per pass: a review floor at or above the automatic bar leaves the
+// band empty, so every candidate generated would be merged without anybody seeing it —
+// the one misconfiguration of this pair that fails silently in the harmful direction.
+if (ENTITY_MERGE_REVIEW_SIMILARITY >= ENTITY_MERGE_AUTO_SIMILARITY) {
+  throw new Error(
+    `GRAPH_ENTITY_MERGE_REVIEW_SIMILARITY (${ENTITY_MERGE_REVIEW_SIMILARITY}) must be below ` +
+      `GRAPH_ENTITY_MERGE_AUTO_SIMILARITY (${ENTITY_MERGE_AUTO_SIMILARITY}), or nothing is ever reviewed.`,
+  );
+}
 
 // ADR-0028: Themes are never Entities. They are 46,787 of the 66,229 measured
 // occurrences over 2,072 controlled-vocabulary values — roughly 48 per Article, so

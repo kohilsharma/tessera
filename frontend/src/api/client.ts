@@ -199,6 +199,11 @@ export type EntityResolutionRunSummary = {
   belowFloor: number;
   demoted: number;
   edgesBuilt: number;
+  // #67: what the pass did about names that look like each other — pairs it merged
+  // itself above the automatic bar, and pairs it held for review beneath it. Both count
+  // pairs, so neither belongs to the `promoted + belowFloor = considered` ledger.
+  merged: number;
+  proposed: number;
   errorSummary: string | null;
 };
 
@@ -610,6 +615,68 @@ export function decidePendingAssignment(
   decision: AssignmentDecision,
 ): Promise<DecidedAssignment> {
   return sendJson("PATCH", `/api/v1/clustering/pending/${articleId}`, { decision }, "Could not record this decision");
+}
+
+// #67: the merge review queue. CONTEXT.md "Merge proposal" — a candidate merge in the
+// band beneath the automatic bar, which changes nothing until an Admin decides it. A row
+// is both surface names, the kind they share, and the reporting behind each side, which
+// is the whole of what the decision rests on.
+//
+// One `kind` on the proposal rather than one per side: candidate pairs are same-kind by
+// construction, so two identical values would only invite a reader to compare them.
+//
+// The three kinds that promote (ADR-0028 — a Theme is never an Entity), mirroring
+// PROMOTABLE_KINDS in backend/src/graph/config.ts. A labelled vocabulary rather than a
+// bare string, because it is displayed.
+export const ENTITY_KINDS = ["person", "organization", "location"] as const;
+export type EntityKind = (typeof ENTITY_KINDS)[number];
+
+export const ENTITY_KIND_LABELS: Record<EntityKind, string> = {
+  person: "person",
+  organization: "organization",
+  location: "place",
+};
+
+export type MergeProposalSide = {
+  id: string;
+  kind: EntityKind;
+  // The surface form GDELT reported, not the fold the similarity was measured over.
+  canonicalName: string;
+  articleCount: number;
+  // A sample, not the side's whole reporting: enough to recognise which name this is.
+  articles: { id: string; title: string; url: string; publishedAt: string }[];
+};
+
+export type MergeProposal = {
+  id: string;
+  similarity: number;
+  kind: EntityKind;
+  survivor: MergeProposalSide;
+  merged: MergeProposalSide;
+};
+
+export type MergeProposalDecision = "accept" | "refuse";
+export type DecidedMergeProposal = {
+  proposalId: string;
+  decision: MergeProposalDecision;
+  survivorEntityId: string;
+  mergedEntityId: string;
+};
+
+export function getMergeProposals(): Promise<ListEnvelope<MergeProposal>> {
+  return getJson("/api/v1/graph/merge-proposals", "Could not load the merge review queue");
+}
+
+export function decideMergeProposal(
+  proposalId: string,
+  decision: MergeProposalDecision,
+): Promise<DecidedMergeProposal> {
+  return sendJson(
+    "PATCH",
+    `/api/v1/graph/merge-proposals/${proposalId}`,
+    { decision },
+    "Could not record this decision",
+  );
 }
 
 // #53: the flagship. Mirrors backend/src/entities/GenerationRun.ts and

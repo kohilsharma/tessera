@@ -1,7 +1,15 @@
 import type { EntityManager } from "typeorm";
 import { AppDataSource } from "../data-source";
 import { EntityResolutionRun } from "../entities/EntityResolutionRun";
-import { EDGES_PER_ENTITY, ENTITY_PROMOTION_FLOOR, PROMOTABLE_KINDS } from "./config";
+import {
+  EDGES_PER_ENTITY,
+  ENTITY_MERGE_AUTO_SIMILARITY,
+  ENTITY_MERGE_REVIEW_SIMILARITY,
+  ENTITY_PROMOTION_FLOOR,
+  PROMOTABLE_KINDS,
+  type PromotableKind,
+} from "./config";
+import { applyEntityMerge } from "./merge";
 
 // The fold identity is decided on: case, punctuation and whitespace. One SQL
 // expression rather than a TypeScript function, because the retained window holds
@@ -31,6 +39,21 @@ export const normalizedNameSql = (column: string) =>
 // the firehose's.
 const featureKeySql = `COALESCE(CASE WHEN ga."kind" = 'location' THEN ga."locationDetail" ->> 'featureId' END, '')`;
 
+// The merge memory, read into the fold: a name that has been merged away resolves to the
+// name it folds into, everywhere the pass decides identity (#67). One LEFT JOIN and not a
+// recursive walk, because every stored target is terminal — see ../entities/EntityAlias.
+//
+// This is what makes a merge outlast the pass that made it. Applied in *both* places
+// identity is decided: in the candidate staging, so the merged name is never a candidate
+// and never promotes again, and in the mention staging, so its occurrences count towards
+// the survivor's edges rather than falling out of the graph.
+const aliasJoinSql = `LEFT JOIN "entity_aliases" al
+         ON al."kind" = ga."kind"
+        AND al."normalizedName" = ${normalizedNameSql('ga."surfaceName"')}
+        AND al."featureKey" = ${featureKeySql}`;
+
+const resolvedNameSql = `COALESCE(al."targetNormalizedName", ${normalizedNameSql('ga."surfaceName"')})`;
+
 type Counted = { count: number };
 
 // Every promotable occurrence, folded and grouped into the candidate names a floor can
@@ -42,11 +65,12 @@ async function stageCandidates(manager: EntityManager): Promise<void> {
     `CREATE TEMP TABLE "resolution_candidate" ON COMMIT DROP AS
      WITH folded AS (
        SELECT ga."kind",
-              ${normalizedNameSql('ga."surfaceName"')} AS "normalizedName",
+              ${resolvedNameSql} AS "normalizedName",
               ${featureKeySql} AS "featureKey",
               ga."surfaceName",
               ga."articleId"
          FROM "gkg_annotations" ga
+         ${aliasJoinSql}
         WHERE ga."kind" = ANY($1::varchar[])
      ),
      named AS (SELECT * FROM folded WHERE "normalizedName" <> ''),
@@ -123,13 +147,141 @@ async function stageMentions(manager: EntityManager): Promise<void> {
     `CREATE TEMP TABLE "resolution_mention" ON COMMIT DROP AS
      SELECT DISTINCT ga."articleId", e."id" AS "entityId"
        FROM "gkg_annotations" ga
+       ${aliasJoinSql}
        JOIN "entities" e
          ON e."kind" = ga."kind"
-        AND e."normalizedName" = ${normalizedNameSql('ga."surfaceName"')}
+        AND e."normalizedName" = ${resolvedNameSql}
         AND COALESCE(e."featureId", '') = ${featureKeySql}
       WHERE ga."kind" = ANY($1::varchar[])`,
     [PROMOTABLE_KINDS],
   );
+}
+
+// Names that look like each other, above the review floor, oriented and filtered down to
+// the pairs still open to a decision (#67). Staged rather than returned because both the
+// automatic merges and the proposals read the same answer, and the second must see what
+// the first did.
+//
+// Pairs are same-kind and same-FeatureID only. Cross-kind mistyping — `Los Angeles`
+// reported as a person — is what the promotion floor already removes, and merging across
+// kinds would fold `Ford` the company into `Ford` the person on a perfect name match. Two
+// same-named places are two nodes by design, so their gazetteer ids have to agree too.
+//
+// `similarity(a, b) >= $1` and not the `%` operator: `%` reads the
+// `pg_trgm.similarity_threshold` GUC, which would put half the decision in a session
+// setting nothing in this repo sets. The bar belongs in config.ts and nowhere else.
+//
+// ponytail: no trigram index, and the join is every promoted pair of a kind — ~200 nodes
+// is ~40k comparisons of short strings, well under the cost of the annotation reads either
+// side of it. Add a GIN index on the normalized name if the working set ever grows a
+// digit.
+async function stageMergeCandidates(manager: EntityManager): Promise<void> {
+  await manager.query(
+    `CREATE TEMP TABLE "resolution_merge_candidate" ON COMMIT DROP AS
+     WITH promoted AS (
+       SELECT e."id", e."kind", e."normalizedName",
+              COALESCE(e."featureId", '') AS "featureKey", c."articleCount"
+         FROM "entities" e
+         JOIN "resolution_candidate" c
+           ON c."kind" = e."kind"
+          AND c."normalizedName" = e."normalizedName"
+          AND c."featureKey" = COALESCE(e."featureId", '')
+     )
+     SELECT s."id" AS "survivorEntityId", m."id" AS "mergedEntityId",
+            s."kind", s."featureKey",
+            s."normalizedName" AS "survivorName", m."normalizedName" AS "mergedName",
+            s."articleCount" AS "survivorArticleCount", m."articleCount" AS "mergedArticleCount",
+            similarity(s."normalizedName", m."normalizedName") AS "similarity"
+       FROM promoted s
+       JOIN promoted m
+         ON m."kind" = s."kind" AND m."featureKey" = s."featureKey"
+        -- Each unordered pair appears once, already oriented: the better-attested name
+        -- survives, ties by name so the choice is stable across passes rather than
+        -- decided by whichever row Postgres returned first.
+        AND (s."articleCount" > m."articleCount"
+             OR (s."articleCount" = m."articleCount" AND s."normalizedName" < m."normalizedName"))
+      WHERE similarity(s."normalizedName", m."normalizedName") >= $1
+        AND NOT EXISTS (
+          SELECT 1 FROM "entity_merge_refusals" r
+           WHERE r."kind" = s."kind" AND r."featureKey" = s."featureKey"
+             AND r."normalizedNameA" = LEAST(s."normalizedName", m."normalizedName")
+             AND r."normalizedNameB" = GREATEST(s."normalizedName", m."normalizedName")
+        )`,
+    [ENTITY_MERGE_REVIEW_SIMILARITY],
+  );
+}
+
+// The two halves of the same decision: above the automatic bar the pass merges, and in the
+// band beneath it the pair is held for an Admin and nothing changes.
+//
+// The merges run one at a time in Node rather than as one statement, because they compose:
+// three near-identical names give A~B and A~C, and folding both into A means the second
+// merge has to see the first — including the alias repointing that keeps targets terminal.
+// A handful of pairs a pass clear the bar (two of sixty measured), so a loop of small
+// statements costs nothing next to the annotation reads either side of it.
+async function resolveMerges(manager: EntityManager): Promise<{ merged: number; proposed: number }> {
+  await stageMergeCandidates(manager);
+
+  const automatic = (await manager.query(
+    `SELECT "survivorEntityId", "mergedEntityId", "kind", "featureKey", "survivorName", "mergedName"
+       FROM "resolution_merge_candidate"
+      WHERE "similarity" >= $1
+      ORDER BY "similarity" DESC, "survivorName", "mergedName"`,
+    [ENTITY_MERGE_AUTO_SIMILARITY],
+  )) as {
+    survivorEntityId: string;
+    mergedEntityId: string;
+    kind: PromotableKind;
+    featureKey: string;
+    survivorName: string;
+    mergedName: string;
+  }[];
+
+  let merged = 0;
+  for (const pair of automatic) {
+    // A name merged away earlier in this loop is gone, so a later pair naming it has
+    // already been decided. Skipped rather than re-oriented: whichever Entity it folded
+    // into is the survivor now, and the next pass proposes the remaining pair afresh
+    // against the name that is actually there.
+    const [{ live }] = (await manager.query(
+      `SELECT COUNT(*)::int AS live FROM "entities" WHERE "id" = ANY($1::uuid[])`,
+      [[pair.survivorEntityId, pair.mergedEntityId]],
+    )) as { live: number }[];
+    if (live !== 2) continue;
+
+    await applyEntityMerge(
+      manager,
+      { id: pair.survivorEntityId, kind: pair.kind, normalizedName: pair.survivorName, featureKey: pair.featureKey },
+      { id: pair.mergedEntityId, kind: pair.kind, normalizedName: pair.mergedName, featureKey: pair.featureKey },
+    );
+    merged += 1;
+  }
+
+  // Rebuilt whole, like the edges: a proposal is derived state, so the queue states what
+  // the graph looks like *now* rather than accumulating pairs whose names have since
+  // moved. An Admin's undecided proposal survives this — the same pair is re-derived from
+  // the same names — while one whose Entity was merged or demoted does not, which is the
+  // right answer to "decide this" for a row that is no longer there.
+  //
+  // The join back to `entities` is what excludes the pairs the loop above just merged
+  // away; their proposals would name a deleted row.
+  await manager.query(`DELETE FROM "entity_merge_proposals"`);
+  await manager.query(
+    `INSERT INTO "entity_merge_proposals"
+       ("survivorEntityId", "mergedEntityId", "similarity", "survivorArticleCount", "mergedArticleCount")
+     SELECT c."survivorEntityId", c."mergedEntityId", c."similarity",
+            c."survivorArticleCount", c."mergedArticleCount"
+       FROM "resolution_merge_candidate" c
+       JOIN "entities" s ON s."id" = c."survivorEntityId"
+       JOIN "entities" m ON m."id" = c."mergedEntityId"
+      WHERE c."similarity" < $1`,
+    [ENTITY_MERGE_AUTO_SIMILARITY],
+  );
+  const [{ count: proposed }] = (await manager.query(
+    `SELECT COUNT(*)::int AS count FROM "entity_merge_proposals"`,
+  )) as Counted[];
+
+  return { merged, proposed };
 }
 
 // The co-occurrence graph, rebuilt whole: one citation row per pair per Article, for
@@ -195,12 +347,22 @@ async function rebuildEdges(manager: EntityManager): Promise<number> {
 export async function runEntityResolution(): Promise<EntityResolutionRun> {
   const runs = AppDataSource.getRepository(EntityResolutionRun);
   const run = await runs.save({ status: "running" as const, startedAt: new Date() });
-  const tally = { annotationsRead: 0, articlesRead: 0, considered: 0, promoted: 0, demoted: 0, edgesBuilt: 0 };
+  const tally = {
+    annotationsRead: 0,
+    articlesRead: 0,
+    considered: 0,
+    promoted: 0,
+    demoted: 0,
+    edgesBuilt: 0,
+    merged: 0,
+    proposed: 0,
+  };
   // What the pass *read* is true whether or not it committed, so a failed run still states the
   // size of the input it failed on. What it *wrote* is not: the transaction rolled back, so
-  // those three counters are assigned only once it commits. A failed run therefore reports
-  // nothing promoted, nothing demoted, no edges — and every candidate below the floor, which is
-  // what the graph now says about them — rather than Entities the graph does not have.
+  // those counters are assigned only once it commits. A failed run therefore reports nothing
+  // promoted, nothing demoted, nothing merged or proposed, no edges — and every candidate below
+  // the floor, which is what the graph now says about them — rather than Entities the graph does
+  // not have.
   const ledger = () => ({ ...tally, belowFloor: tally.considered - tally.promoted });
 
   try {
@@ -219,9 +381,15 @@ export async function runEntityResolution(): Promise<EntityResolutionRun> {
 
       await promote(manager);
       const demoted = await demote(manager);
+      // Between promotion and the edges, and in that order for two reasons: candidate
+      // generation compares names that are Entities, which is only true after promote,
+      // and the graph is bounded per Entity, so merging first is what keeps
+      // EDGES_PER_ENTITY a bound on the nodes that actually remain. A merged name's
+      // occurrences reach the survivor because `stageMentions` reads the same aliases.
+      const { merged, proposed } = await resolveMerges(manager);
       await stageMentions(manager);
       const edgesBuilt = await rebuildEdges(manager);
-      return { promoted: counts.promoted, demoted, edgesBuilt };
+      return { promoted: counts.promoted, demoted, edgesBuilt, merged, proposed };
     });
     Object.assign(tally, written);
     await runs.update({ id: run.id }, { status: "succeeded", completedAt: new Date(), ...ledger(), errorSummary: null });

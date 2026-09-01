@@ -5,8 +5,15 @@ import request from "supertest";
 import { createApp } from "../src/app";
 import { AppDataSource } from "../src/data-source";
 import { signToken } from "../src/auth/jwt";
-import { EDGES_PER_ENTITY, ENTITY_PROMOTION_FLOOR, PROMOTABLE_KINDS } from "../src/graph/config";
+import {
+  EDGES_PER_ENTITY,
+  ENTITY_MERGE_AUTO_SIMILARITY,
+  ENTITY_MERGE_REVIEW_SIMILARITY,
+  ENTITY_PROMOTION_FLOOR,
+  PROMOTABLE_KINDS,
+} from "../src/graph/config";
 import { runGraphJob } from "../src/graph/jobs";
+import { applyEntityMerge, type MergeSide } from "../src/graph/merge";
 import { GRAPH_RUN_JOB, GRAPH_TICK_JOB } from "../src/graph/queue";
 import { runEntityResolution } from "../src/graph/runEntityResolution";
 import { Article } from "../src/entities/Article";
@@ -139,6 +146,64 @@ async function registerAndLogin(email: string, role: "student" | "investor"): Pr
   return res.body.token as string;
 }
 
+// Proposals by the names on either end, for the same reason edges are: a uuid pair
+// asserts nothing a reader of the test can check. Survivor first, as stored.
+type StoredProposal = { survivor: string; merged: string; similarity: number };
+
+function proposals(): Promise<StoredProposal[]> {
+  return AppDataSource.query(
+    `SELECT s."canonicalName" AS survivor, m."canonicalName" AS merged, p."similarity"
+       FROM "entity_merge_proposals" p
+       JOIN "entities" s ON s."id" = p."survivorEntityId"
+       JOIN "entities" m ON m."id" = p."mergedEntityId"
+      ORDER BY p."similarity" DESC, 1, 2`,
+  ) as Promise<StoredProposal[]>;
+}
+
+function aliases(): Promise<{ normalizedName: string; targetNormalizedName: string }[]> {
+  return AppDataSource.query(
+    `SELECT "normalizedName", "targetNormalizedName" FROM "entity_aliases" ORDER BY 1`,
+  ) as Promise<{ normalizedName: string; targetNormalizedName: string }[]>;
+}
+
+function refusals(): Promise<{ normalizedNameA: string; normalizedNameB: string; refusedByUserId: string | null }[]> {
+  return AppDataSource.query(
+    `SELECT "normalizedNameA", "normalizedNameB", "refusedByUserId" FROM "entity_merge_refusals" ORDER BY 1, 2`,
+  ) as Promise<{ normalizedNameA: string; normalizedNameB: string; refusedByUserId: string | null }[]>;
+}
+
+// The fixtures the two bars are tested against, and Postgres's own reading of them.
+// Every merge test asserts the band its pair falls in before asserting what the pass
+// did about it: the thresholds are configurable, so a test that only asserted the
+// outcome would start passing for the wrong reason if a default moved.
+const AUTO_PAIR = ["Massachusetts Institute of Technology", "Massachusets Institute of Technology"] as const;
+const BAND_PAIR = ["Australian Associated Press", "Australian Associated"] as const;
+
+async function nameSimilarity(one: string, other: string): Promise<number> {
+  const [row] = (await AppDataSource.query(`SELECT similarity(lower($1), lower($2))::float AS score`, [
+    one,
+    other,
+  ])) as { score: number }[];
+  return row.score;
+}
+
+// The two sides of a candidate pair, each in enough Articles to promote and each
+// alongside its own second name, so the survivor's and the merged side's edges are
+// distinguishable after a merge carries them over. Both sides organizations: a
+// candidate pair is same-kind by construction, and these are organization names.
+//
+// The survivor is the better-attested side, so the first name gets one Article more —
+// which is what fixes the orientation, and what the test then reads back.
+async function stageMergePair(publisherId: string, [survivor, merged]: readonly [string, string]): Promise<void> {
+  await coMention(publisherId, [survivor, "Global Newswire"], ENTITY_PROMOTION_FLOOR + 1, `survivor`, "organization");
+  await coMention(publisherId, [merged, "Regional Press Club"], ENTITY_PROMOTION_FLOOR, `merged`, "organization");
+}
+
+async function onlyProposalId(): Promise<string> {
+  const [row] = (await AppDataSource.query(`SELECT "id" FROM "entity_merge_proposals"`)) as { id: string }[];
+  return row.id;
+}
+
 // One Article per name pair, `count` times over, which is the cheapest way to put a
 // name above or below the floor: the floor counts distinct Articles.
 async function coMention(
@@ -146,13 +211,14 @@ async function coMention(
   names: string[],
   count: number,
   label = names.join("+"),
+  kind: GkgAnnotationKind = "person",
 ): Promise<Article[]> {
   const created: Article[] = [];
   for (let index = 0; index < count; index += 1) {
     const article = await createArticle(publisherId, `${label} ${index}`);
     await annotate(
       article.id,
-      names.map((name) => ({ name })),
+      names.map((name) => ({ kind, name })),
     );
     created.push(article);
   }
@@ -176,7 +242,7 @@ async function starCluster(publisherId: string, hub: string, prefix: string, cou
 beforeEach(async () => {
   await AppDataSource.query(
     `TRUNCATE "articles", "publishers", "stories", "entities", "entity_edges",
-              "entity_resolution_runs" CASCADE`,
+              "entity_resolution_runs", "entity_aliases", "entity_merge_refusals" CASCADE`,
   );
   enqueued.length = 0;
 });
@@ -458,6 +524,148 @@ describe("runEntityResolution", () => {
     const citing = (await AppDataSource.query(`SELECT "articleId" FROM "entity_edges"`)) as { articleId: string }[];
     expect(citing.map((row) => row.articleId)).toContain(curated.id);
   });
+
+  it("merges a pair above the automatic bar itself, and remembers it by name", async () => {
+    const publisher = await createPublisher("auto.example");
+    const [survivorName, mergedName] = AUTO_PAIR;
+    await stageMergePair(publisher.id, AUTO_PAIR);
+    expect(await nameSimilarity(survivorName, mergedName)).toBeGreaterThanOrEqual(ENTITY_MERGE_AUTO_SIMILARITY);
+
+    const run = await runEntityResolution();
+
+    // One name where the annotations hold two, and it is the better-attested spelling.
+    const names = (await entities()).map((entity) => entity.canonicalName);
+    expect(names).toContain(survivorName);
+    expect(names).not.toContain(mergedName);
+    // The alias is the merge: without it the next pass promotes the typo again.
+    expect(await aliases()).toEqual([
+      { normalizedName: mergedName.toLowerCase(), targetNormalizedName: survivorName.toLowerCase() },
+    ]);
+    // Nothing to review — the pass decided this one.
+    expect(await proposals()).toEqual([]);
+    expect(run.merged).toBe(1);
+    expect(run.proposed).toBe(0);
+    // Both spellings were promoted before either was merged, which is why the merge
+    // counter sits outside the ledger sum rather than inside it.
+    expect(run.promoted).toBe(4);
+  });
+
+  it("carries a merged name's reporting onto the survivor's edges", async () => {
+    const publisher = await createPublisher("carry.example");
+    await stageMergePair(publisher.id, AUTO_PAIR);
+
+    await runEntityResolution();
+
+    // The merged spelling was reported alongside a different organization from the
+    // survivor's. Both neighbours are now the survivor's, each still cited by the
+    // Articles that observed it — a merge folds two names together, it does not
+    // discard half the reporting.
+    expect(await edges()).toEqual([
+      { pair: `Global Newswire — ${AUTO_PAIR[0]}`, citations: ENTITY_PROMOTION_FLOOR + 1 },
+      { pair: `${AUTO_PAIR[0]} — Regional Press Club`, citations: ENTITY_PROMOTION_FLOOR },
+    ]);
+    expect(await uncitedEdges()).toEqual([]);
+  });
+
+  it("keeps a merge across the next pass instead of promoting the merged name again", async () => {
+    const publisher = await createPublisher("lasting.example");
+    await stageMergePair(publisher.id, AUTO_PAIR);
+    const first = await runEntityResolution();
+
+    const second = await runEntityResolution();
+
+    expect((await entities()).map((entity) => entity.canonicalName)).not.toContain(AUTO_PAIR[1]);
+    // The merged spelling is not a candidate name of its own any more: it folds into the
+    // survivor before the floor is applied, so the second pass considers one name fewer
+    // and has nothing left to merge.
+    expect(second.considered).toBe(first.considered - 1);
+    expect(second.merged).toBe(0);
+    expect(second.proposed).toBe(0);
+    // And the survivor now stands on both spellings' reporting.
+    expect(await edges()).toEqual([
+      { pair: `Global Newswire — ${AUTO_PAIR[0]}`, citations: ENTITY_PROMOTION_FLOOR + 1 },
+      { pair: `${AUTO_PAIR[0]} — Regional Press Club`, citations: ENTITY_PROMOTION_FLOOR },
+    ]);
+  });
+
+  it("holds a pair in the band beneath the bar as a proposal, and changes nothing", async () => {
+    const publisher = await createPublisher("band.example");
+    const [survivorName, mergedName] = BAND_PAIR;
+    await stageMergePair(publisher.id, BAND_PAIR);
+    const similarity = await nameSimilarity(survivorName, mergedName);
+    expect(similarity).toBeGreaterThanOrEqual(ENTITY_MERGE_REVIEW_SIMILARITY);
+    expect(similarity).toBeLessThan(ENTITY_MERGE_AUTO_SIMILARITY);
+
+    const run = await runEntityResolution();
+
+    // v3 §18.5: a wrong merge is more harmful than an unresolved duplicate, so the graph
+    // reads exactly as it would without the proposal — both names, both sets of edges.
+    expect((await entities()).map((entity) => entity.canonicalName)).toEqual([
+      mergedName,
+      survivorName,
+      "Global Newswire",
+      "Regional Press Club",
+    ]);
+    expect(await aliases()).toEqual([]);
+    expect(await edges()).toEqual([
+      { pair: `${survivorName} — Global Newswire`, citations: ENTITY_PROMOTION_FLOOR + 1 },
+      { pair: `${mergedName} — Regional Press Club`, citations: ENTITY_PROMOTION_FLOOR },
+    ]);
+    // Oriented by attestation, so the queue and an accept agree on which name remains.
+    expect(await proposals()).toEqual([
+      { survivor: survivorName, merged: mergedName, similarity: expect.closeTo(similarity, 5) },
+    ]);
+    expect(run.merged).toBe(0);
+    expect(run.proposed).toBe(1);
+  });
+
+  it("proposes nothing for two names that merely share a kind", async () => {
+    const publisher = await createPublisher("distinct.example");
+    await coMention(publisher.id, ["Ada Lovelace", "Grace Hopper"], ENTITY_PROMOTION_FLOOR);
+    expect(await nameSimilarity("Ada Lovelace", "Grace Hopper")).toBeLessThan(ENTITY_MERGE_REVIEW_SIMILARITY);
+
+    const run = await runEntityResolution();
+
+    expect(await proposals()).toEqual([]);
+    expect(run.proposed).toBe(0);
+  });
+
+  it("never merges across kinds, however alike the two names are", async () => {
+    const publisher = await createPublisher("kinds.example");
+    // The same string reported as a person and as an organization: a perfect name match,
+    // and exactly the merge that would fold `Ford` the company into `Ford` the person.
+    await coMention(publisher.id, ["Bloomberg", "Ada Lovelace"], ENTITY_PROMOTION_FLOOR, "person side", "person");
+    await coMention(publisher.id, ["Bloomberg", "Global Newswire"], ENTITY_PROMOTION_FLOOR, "org side", "organization");
+
+    const run = await runEntityResolution();
+
+    expect((await entities()).filter((entity) => entity.canonicalName === "Bloomberg")).toHaveLength(2);
+    expect(run.merged).toBe(0);
+    expect(run.proposed).toBe(0);
+  });
+
+  it("refuses a cross-kind fold at the seam, not only in the pairs the pass stages", async () => {
+    const publisher = await createPublisher("seam.example");
+    await coMention(publisher.id, ["Bloomberg", "Ada Lovelace"], ENTITY_PROMOTION_FLOOR, "person side", "person");
+    await coMention(publisher.id, ["Bloomberg", "Global Newswire"], ENTITY_PROMOTION_FLOOR, "org side", "organization");
+    await runEntityResolution();
+
+    // Both `Bloomberg` nodes stand, so the two sides are a pair only a caller that skipped
+    // the staging could hold — an alias route or a later graph surface. The one place a
+    // merge is written down refuses it rather than folding two kinds into one node.
+    // `organization` before `person`, so the better-attested-looking side is named first
+    // only by the sort — the point is that the two kinds differ at all.
+    const [asOrg, asPerson] = (await AppDataSource.query(
+      `SELECT "id", "kind", "normalizedName", COALESCE("featureId", '') AS "featureKey"
+         FROM "entities" WHERE "canonicalName" = 'Bloomberg' ORDER BY "kind"`,
+    )) as MergeSide[];
+
+    await expect(
+      AppDataSource.transaction((manager) => applyEntityMerge(manager, asOrg, asPerson)),
+    ).rejects.toThrow(/across kinds or FeatureIDs/);
+    expect((await entities()).filter((entity) => entity.canonicalName === "Bloomberg")).toHaveLength(2);
+    expect(await aliases()).toEqual([]);
+  });
 });
 
 // Seam 2: the worker's side of the queue. The tick only enqueues, so a scheduled pass
@@ -522,6 +730,196 @@ describe("POST /api/v1/graph/resolution-runs", () => {
   });
 });
 
+// Seam 3b: the review queue and its one decision. The band is where ADR-0019's guardrail
+// lives, so this is the surface the guardrail is actually enforced on.
+describe("the merge review queue", () => {
+  // Every test here starts from a pass that held one proposal, which is the only state a
+  // decision is ever made from.
+  async function stageOneProposal(domain: string): Promise<string> {
+    const publisher = await createPublisher(domain);
+    await stageMergePair(publisher.id, BAND_PAIR);
+    await runEntityResolution();
+    return createAdminToken(`${domain}-admin@example.com`);
+  }
+
+  it("shows both surface names, their kind, and the reporting behind each side", async () => {
+    const token = await stageOneProposal("queue.example");
+
+    const res = await request(app()).get("/api/v1/graph/merge-proposals").set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ page: 1, total: 1, totalPages: 1 });
+    const [proposal] = res.body.items;
+    expect(proposal.kind).toBe("organization");
+    expect(proposal.similarity).toBeGreaterThanOrEqual(ENTITY_MERGE_REVIEW_SIMILARITY);
+    expect(proposal.similarity).toBeLessThan(ENTITY_MERGE_AUTO_SIMILARITY);
+    // The surface forms GDELT used, not the fold the similarity was measured over.
+    expect(proposal.survivor).toMatchObject({
+      canonicalName: BAND_PAIR[0],
+      kind: "organization",
+      articleCount: ENTITY_PROMOTION_FLOOR + 1,
+    });
+    expect(proposal.merged).toMatchObject({
+      canonicalName: BAND_PAIR[1],
+      kind: "organization",
+      articleCount: ENTITY_PROMOTION_FLOOR,
+    });
+    // The Articles behind each side — sampled, so a reviewer can recognise the name
+    // without the queue reading the whole retained window.
+    expect(proposal.survivor.articles.length).toBeGreaterThan(0);
+    expect(proposal.merged.articles.length).toBeGreaterThan(0);
+    for (const article of [...proposal.survivor.articles, ...proposal.merged.articles]) {
+      expect(article).toMatchObject({ id: expect.any(String), title: expect.any(String), url: expect.any(String) });
+    }
+    // Each side's sample is that side's own reporting, not the pair's.
+    expect(proposal.survivor.articles.map((a: { title: string }) => a.title)).not.toEqual(
+      proposal.merged.articles.map((a: { title: string }) => a.title),
+    );
+  });
+
+  it("merges both names on an accept, carrying their edges with the citations intact", async () => {
+    const token = await stageOneProposal("accept.example");
+    const proposalId = await onlyProposalId();
+
+    const res = await request(app())
+      .patch(`/api/v1/graph/merge-proposals/${proposalId}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ decision: "accept" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ proposalId, decision: "accept" });
+    // One name where there were two, and the survivor is the side the pass oriented to.
+    const names = (await entities()).map((entity) => entity.canonicalName);
+    expect(names).toContain(BAND_PAIR[0]);
+    expect(names).not.toContain(BAND_PAIR[1]);
+    // Both neighbours are the survivor's now, each still cited by every Article that
+    // observed it. No pass has run since the accept, so these are the carried rows.
+    expect(await edges()).toEqual([
+      { pair: `${BAND_PAIR[0]} — Global Newswire`, citations: ENTITY_PROMOTION_FLOOR + 1 },
+      { pair: `${BAND_PAIR[0]} — Regional Press Club`, citations: ENTITY_PROMOTION_FLOOR },
+    ]);
+    expect(await uncitedEdges()).toEqual([]);
+    // The decided proposal is gone with the Entity it named, and the merge is remembered.
+    expect(await proposals()).toEqual([]);
+    expect(await aliases()).toEqual([
+      { normalizedName: BAND_PAIR[1].toLowerCase(), targetNormalizedName: BAND_PAIR[0].toLowerCase() },
+    ]);
+  });
+
+  it("leaves both names standing on a refusal, and records it against the reviewer", async () => {
+    const token = await stageOneProposal("refuse.example");
+    const proposalId = await onlyProposalId();
+    const before = await edges();
+
+    const res = await request(app())
+      .patch(`/api/v1/graph/merge-proposals/${proposalId}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ decision: "refuse" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ proposalId, decision: "refuse" });
+    expect((await entities()).map((entity) => entity.canonicalName)).toEqual([
+      BAND_PAIR[1],
+      BAND_PAIR[0],
+      "Global Newswire",
+      "Regional Press Club",
+    ]);
+    expect(await edges()).toEqual(before);
+    expect(await aliases()).toEqual([]);
+    // Keyed on the normalized names, ordered, and attributed to the Admin who refused it.
+    const [refusal] = await refusals();
+    expect(refusal).toMatchObject({
+      normalizedNameA: BAND_PAIR[1].toLowerCase(),
+      normalizedNameB: BAND_PAIR[0].toLowerCase(),
+    });
+    expect(refusal.refusedByUserId).not.toBeNull();
+    // Only the proposal goes; nothing about the graph did.
+    expect(await proposals()).toEqual([]);
+  });
+
+  it("never proposes a refused pair again, even after both names leave the working set", async () => {
+    const publisher = await createPublisher("remembered.example");
+    await stageMergePair(publisher.id, BAND_PAIR);
+    await runEntityResolution();
+    const token = await createAdminToken("remembered-admin@example.com");
+    await request(app())
+      .patch(`/api/v1/graph/merge-proposals/${await onlyProposalId()}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ decision: "refuse" });
+
+    // The immediate case: the very next pass re-derives the same candidate pair.
+    const next = await runEntityResolution();
+    expect(next.proposed).toBe(0);
+    expect(await proposals()).toEqual([]);
+
+    // And the case the refusal is keyed by name for. Every Article ages out, both
+    // Entities are demoted under their ids, and the same names are then reported again
+    // from scratch — new Article rows, new Entity ids, nothing left that a refusal keyed
+    // on rows could have matched.
+    await AppDataSource.query(`DELETE FROM "articles"`);
+    const emptied = await runEntityResolution();
+    expect(emptied.demoted).toBe(4);
+    expect(await entities()).toEqual([]);
+
+    await stageMergePair(publisher.id, BAND_PAIR);
+    const rebuilt = await runEntityResolution();
+
+    expect(rebuilt.promoted).toBe(4);
+    expect(rebuilt.proposed).toBe(0);
+    expect(await proposals()).toEqual([]);
+  });
+
+  it("answers 404 for a proposal that is not there to decide, and 422 for a decision it does not know", async () => {
+    const token = await stageOneProposal("unknown.example");
+    const proposalId = await onlyProposalId();
+
+    const unknownDecision = await request(app())
+      .patch(`/api/v1/graph/merge-proposals/${proposalId}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ decision: "maybe" });
+    expect(unknownDecision.status).toBe(422);
+
+    // Decided once, then again: the second caller is deciding a row that is gone, which
+    // is the same answer as a proposal that never existed or an id that is not one.
+    await request(app())
+      .patch(`/api/v1/graph/merge-proposals/${proposalId}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ decision: "refuse" });
+    const second = await request(app())
+      .patch(`/api/v1/graph/merge-proposals/${proposalId}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ decision: "refuse" });
+    expect(second.status).toBe(404);
+    const notAnId = await request(app())
+      .patch("/api/v1/graph/merge-proposals/not-a-uuid")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ decision: "refuse" });
+    expect(notAnId.status).toBe(404);
+  });
+
+  it("distinguishes an empty queue from one nobody is allowed to read", async () => {
+    const token = await createAdminToken("empty-queue-admin@example.com");
+
+    const empty = await request(app()).get("/api/v1/graph/merge-proposals").set("Authorization", `Bearer ${token}`);
+    expect(empty.status).toBe(200);
+    expect(empty.body).toMatchObject({ items: [], total: 0 });
+
+    for (const role of ["student", "investor"] as const) {
+      const roleToken = await registerAndLogin(`${role}-merge-queue@example.com`, role);
+      const read = await request(app())
+        .get("/api/v1/graph/merge-proposals")
+        .set("Authorization", `Bearer ${roleToken}`);
+      expect(read.status).toBe(403);
+      const decide = await request(app())
+        .patch(`/api/v1/graph/merge-proposals/${crypto.randomUUID()}`)
+        .set("Authorization", `Bearer ${roleToken}`)
+        .send({ decision: "accept" });
+      expect(decide.status).toBe(403);
+    }
+    expect((await request(app()).get("/api/v1/graph/merge-proposals")).status).toBe(401);
+  });
+});
+
 // Seam 4: the read path the Admin console renders. Postgres, never the queue — which
 // is why this passes with no Redis in the test stack at all.
 describe("GET /api/v1/dashboard/admin", () => {
@@ -541,6 +939,8 @@ describe("GET /api/v1/dashboard/admin", () => {
       promoted: 2,
       belowFloor: 0,
       demoted: 0,
+      merged: 0,
+      proposed: 0,
       edgesBuilt: 1,
       errorSummary: null,
     });

@@ -93,6 +93,12 @@ export function DashboardRegister({
 // slower than comparing eight lengths. Omitted where the row's facts are not
 // one quantity.
 //
+// `body` is the row's evidence, under the note: the merge queue's two candidate
+// names and the reporting behind each (#67) is a list, not a sentence, so it
+// cannot go in the note's paragraph and it is too long for a ledger cell — a
+// title in a 32ch `dd` sets the ledger's width from its own length. In the name
+// column because it is what the row's name is asserting.
+//
 // `action` is what an operator can do to the thing this row names — running a
 // connector, disabling it (#39). It takes the Index archetype's third ruled
 // column, so a register that offers actions keeps the geometry of one that does
@@ -103,6 +109,7 @@ export function RegisterRow({
   to,
   note,
   measure,
+  body,
   meta,
   action,
 }: {
@@ -110,6 +117,7 @@ export function RegisterRow({
   to?: string;
   note?: ReactNode;
   measure?: number;
+  body?: ReactNode;
   meta: { term: string; value: ReactNode }[];
   action?: ReactNode;
 }) {
@@ -129,6 +137,7 @@ export function RegisterRow({
             <i />
           </div>
         )}
+        {body}
       </div>
       <EntryLedger meta={meta} />
       {action && <div className="entry-action">{action}</div>}

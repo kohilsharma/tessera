@@ -56,6 +56,17 @@ export class EntityResolutionRun {
   @Column({ type: "integer", default: 0 })
   edgesBuilt!: number;
 
+  // What the pass did about names that look like each other (#67): pairs it merged
+  // itself, above the automatic bar, and pairs left standing as proposals in the band
+  // beneath it. Both count *pairs*, so both sit outside the ledger sum — and both
+  // names in an automatically merged pair were promoted by this same pass before it
+  // merged them, so `promoted 2 / merged 1` is the honest reading, not a broken one.
+  @Column({ type: "integer", default: 0 })
+  merged!: number;
+
+  @Column({ type: "integer", default: 0 })
+  proposed!: number;
+
   @Column({ type: "text", nullable: true })
   errorSummary!: string | null;
 }

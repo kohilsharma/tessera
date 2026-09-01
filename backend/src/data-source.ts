@@ -25,6 +25,7 @@ import { CreatePromptTemplates1755760000000 } from "./migrations/1755760000000-C
 import { CreateFlashcards1755761000000 } from "./migrations/1755761000000-CreateFlashcards";
 import { RecordFlashcardReviewsAndCacheQuestions1755762000000 } from "./migrations/1755762000000-RecordFlashcardReviewsAndCacheQuestions";
 import { CreateEntityResolution1755763000000 } from "./migrations/1755763000000-CreateEntityResolution";
+import { CreateEntityMergeReview1755764000000 } from "./migrations/1755764000000-CreateEntityMergeReview";
 import { User } from "./entities/User";
 import { Publisher } from "./entities/Publisher";
 import { Story } from "./entities/Story";
@@ -46,6 +47,9 @@ import { Flashcard } from "./entities/Flashcard";
 import { Entity } from "./entities/Entity";
 import { EntityEdge } from "./entities/EntityEdge";
 import { EntityResolutionRun } from "./entities/EntityResolutionRun";
+import { EntityAlias } from "./entities/EntityAlias";
+import { EntityMergeRefusal } from "./entities/EntityMergeRefusal";
+import { EntityMergeProposal } from "./entities/EntityMergeProposal";
 
 const url = process.env.DATABASE_URL;
 
@@ -85,6 +89,9 @@ export const AppDataSource = new DataSource({
     Entity,
     EntityEdge,
     EntityResolutionRun,
+    EntityAlias,
+    EntityMergeRefusal,
+    EntityMergeProposal,
   ],
   migrations: [
     InitPgvector1755740000000,
@@ -111,6 +118,7 @@ export const AppDataSource = new DataSource({
     CreateFlashcards1755761000000,
     RecordFlashcardReviewsAndCacheQuestions1755762000000,
     CreateEntityResolution1755763000000,
+    CreateEntityMergeReview1755764000000,
   ],
   synchronize: false,
   logging: false,
