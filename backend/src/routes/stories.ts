@@ -1,5 +1,8 @@
 import { Router } from "express";
 import { AppDataSource } from "../data-source";
+import { Article } from "../entities/Article";
+import { EvidenceSet } from "../entities/EvidenceSet";
+import { GenerationRun } from "../entities/GenerationRun";
 import { Story, STORY_CATEGORIES } from "../entities/Story";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
@@ -7,6 +10,7 @@ import { toPublicArticle } from "../lib/articleView";
 import { paginate, parseListQuery, toEnvelope } from "../lib/listQuery";
 import { ACCEPTED_ASSIGNMENT, acceptedMembership } from "../lib/storyMembership";
 import { isUuid } from "../lib/uuid";
+import { buildTimeline, type TimelineEvent } from "../timeline/buildTimeline";
 
 export const storiesRouter = Router();
 
@@ -98,5 +102,64 @@ storiesRouter.get(
         .sort((a, b) => a.publishedAt.getTime() - b.publishedAt.getTime())
         .map(toPublicArticle),
     });
+  }),
+);
+
+// The Story's timeline: its accepted reporting ordered over time, with the analytical
+// events that happened to it on the same axis (#64). Its own endpoint rather than a
+// field on Story detail, because it is a different question about the same record —
+// and because the register that draws it owns its own request, and so its own four UI
+// states, exactly as the Admin console's registers do.
+//
+// Every reader may read it: it is the corpus' own history, and it carries no body text
+// and no claims.
+storiesRouter.get(
+  "/stories/:id/timeline",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    if (!isUuid(req.params.id)) {
+      res.status(404).json({ error: "Story not found" });
+      return;
+    }
+    const story = await storyRepo().findOne({ where: { id: req.params.id } });
+    if (!story) {
+      res.status(404).json({ error: "Story not found" });
+      return;
+    }
+
+    // Accepted members only, by the one predicate every reader surface tests (#50):
+    // a proposal is a machine's borderline guess, and a timeline is the record of
+    // what this Story *is*, not of what was suggested for it.
+    const [articles, evidenceSets, runs] = await Promise.all([
+      AppDataSource.getRepository(Article).find({
+        where: { storyId: story.id, storyAssignmentStatus: ACCEPTED_ASSIGNMENT },
+        relations: { publisher: true },
+      }),
+      AppDataSource.getRepository(EvidenceSet).find({ where: { storyId: story.id } }),
+      // Completed runs only: a failed run produced no analysis, and an axis point for
+      // one would put a thing that did not happen on the record's history.
+      AppDataSource.getRepository(GenerationRun).find({ where: { storyId: story.id, status: "completed" } }),
+    ]);
+
+    res.json(
+      buildTimeline(articles, [
+        ...evidenceSets.map(
+          (set): TimelineEvent => ({
+            kind: "evidence_frozen",
+            id: set.id,
+            at: set.createdAt,
+            articleCount: set.articleCount,
+          }),
+        ),
+        ...runs.map(
+          (run): TimelineEvent => ({
+            kind: "analysis_completed",
+            id: run.id,
+            at: run.completedAt,
+            lens: run.lens,
+          }),
+        ),
+      ]),
+    );
   }),
 );

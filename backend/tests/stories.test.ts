@@ -6,6 +6,9 @@ import { AppDataSource } from "../src/data-source";
 import { Publisher } from "../src/entities/Publisher";
 import { Story } from "../src/entities/Story";
 import { Article } from "../src/entities/Article";
+import { EvidenceSet } from "../src/entities/EvidenceSet";
+import { GenerationRun } from "../src/entities/GenerationRun";
+import { buildTimeline } from "../src/timeline/buildTimeline";
 import { setupTestDb } from "./setupTestDb";
 
 setupTestDb();
@@ -23,6 +26,7 @@ let internalTextArticleId: string;
 let licensedFullTextArticleId: string;
 let extractedTextArticleId: string;
 let tiedStoryIds: string[];
+let timelineStoryId: string;
 
 beforeAll(async () => {
   const registerRes = await request(app())
@@ -238,6 +242,84 @@ beforeAll(async () => {
     analysisTextMode: "manual_fixture",
     publishedAt: new Date("2025-11-15T18:30:00Z"),
   });
+
+  // #64's own Story, so the timeline's fixtures — a pending proposal, a frozen
+  // EvidenceSet, one completed analysis and one failed one — sit clear of the
+  // browse tests that assert on exact Article lists.
+  const storyTimeline = await stories.save({
+    slug: "story-timeline",
+    title: "Story Timeline",
+    summary: null,
+    category: "world",
+    firstSeenAt: new Date("2026-02-01T00:00:00Z"),
+    lastSeenAt: new Date("2026-02-05T00:00:00Z"),
+  });
+  timelineStoryId = storyTimeline.id;
+  await articles.save({
+    storyId: storyTimeline.id,
+    storyAssignmentStatus: "auto_accepted" as const,
+    publisherId: publisherA.id,
+    title: "Timeline, first report",
+    url: "https://publisher-a.example/timeline-first",
+    analysisText: "First timeline report.",
+    analysisTextMode: "manual_fixture",
+    publishedAt: new Date("2026-02-01T00:00:00Z"),
+  });
+  await articles.save({
+    storyId: storyTimeline.id,
+    storyAssignmentStatus: "auto_accepted" as const,
+    publisherId: publisherB.id,
+    title: "Timeline, second report",
+    url: "https://publisher-b.example/timeline-second",
+    analysisText: "Second timeline report.",
+    analysisTextMode: "manual_fixture",
+    publishedAt: new Date("2026-02-05T00:00:00Z"),
+  });
+  // A proposal, not a member (#50): it carries this Story's id and must never reach
+  // a reader surface, this one included.
+  await articles.save({
+    storyId: storyTimeline.id,
+    storyAssignmentStatus: "pending_review" as const,
+    publisherId: publisherA.id,
+    title: "Timeline, merely proposed",
+    url: "https://publisher-a.example/timeline-proposed",
+    analysisText: "A proposal awaiting review.",
+    analysisTextMode: "manual_fixture",
+    publishedAt: new Date("2026-02-03T00:00:00Z"),
+  });
+  const evidenceSet = await AppDataSource.getRepository(EvidenceSet).save({
+    storyId: storyTimeline.id,
+    contentHash: "timeline-evidence-hash",
+    articleCount: 2,
+    distinctPublisherCount: 2,
+    dataMode: "manual_fixture" as const,
+    createdAt: new Date("2026-02-05T06:00:00Z"),
+  });
+  const generationRuns = AppDataSource.getRepository(GenerationRun);
+  await generationRuns.save({
+    storyId: storyTimeline.id,
+    evidenceSetId: evidenceSet.id,
+    lens: "student_context" as const,
+    promptVersion: "test",
+    status: "completed" as const,
+    provider: "mock",
+    model: "mock",
+    startedAt: new Date("2026-02-05T06:59:00Z"),
+    completedAt: new Date("2026-02-05T07:00:00Z"),
+  });
+  // A failed run put nothing on the record's history, so it puts nothing on its axis.
+  await generationRuns.save({
+    storyId: storyTimeline.id,
+    evidenceSetId: evidenceSet.id,
+    lens: "student_context" as const,
+    promptVersion: "test",
+    status: "failed" as const,
+    failureCode: "provider_error" as const,
+    provider: "mock",
+    model: "mock",
+    startedAt: new Date("2026-02-05T08:00:00Z"),
+    completedAt: new Date("2026-02-05T08:00:01Z"),
+  });
 });
 
 describe("GET /api/v1/stories", () => {
@@ -305,7 +387,8 @@ describe("GET /api/v1/stories", () => {
       .set("Authorization", `Bearer ${token}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.items.slice(0, 5).map((s: { title: string }) => s.title)).toEqual([
+    expect(res.body.items.slice(0, 6).map((s: { title: string }) => s.title)).toEqual([
+      "Story Timeline",
       "Story Delta",
       "Story Echo",
       "Story Beta",
@@ -325,7 +408,7 @@ describe("GET /api/v1/stories", () => {
       .set("Authorization", `Bearer ${token}`);
 
     expect(page1.status).toBe(200);
-    expect(page1.body).toMatchObject({ page: 1, pageSize: 2, total: 11, totalPages: 6 });
+    expect(page1.body).toMatchObject({ page: 1, pageSize: 2, total: 12, totalPages: 6 });
     expect(page1.body.items.map((s: { title: string }) => s.title)).toEqual(["Story Alpha", "Story Beta"]);
 
     expect(page2.status).toBe(200);
@@ -512,5 +595,141 @@ describe("GET /api/v1/articles/:id", () => {
   it("returns 404 rather than 500 for a malformed id", async () => {
     const res = await request(app()).get("/api/v1/articles/not-a-uuid").set("Authorization", `Bearer ${token}`);
     expect(res.status).toBe(404);
+  });
+});
+
+// #64 — the timeline seam. Pure, and tested pure: it takes a *set of Articles* rather
+// than a query precisely so the search timeline (#65) can hand it a set drawn from many
+// Stories, and that contract is worth holding down without a database in the way.
+function pointOf(id: string, publishedAt: string, storyId: string | null = "story-1") {
+  return {
+    id,
+    storyId,
+    title: `Article ${id}`,
+    url: `https://publisher-a.example/${id}`,
+    publishedAt: new Date(publishedAt),
+    analysisTextMode: "manual_fixture",
+    publisher: { id: "pub-1", name: "Publisher A", domain: "publisher-a.example" },
+  } as unknown as Article;
+}
+
+describe("buildTimeline", () => {
+  it("orders the reporting and echoes each point's Story, so a second consumer can lay out lanes", () => {
+    const timeline = buildTimeline(
+      [
+        pointOf("c", "2026-01-03T00:00:00Z", "story-2"),
+        pointOf("a", "2026-01-01T00:00:00Z", "story-1"),
+        pointOf("b", "2026-01-02T00:00:00Z", "story-1"),
+      ],
+      [],
+    );
+    expect(timeline.points.map((point) => point.id)).toEqual(["a", "b", "c"]);
+    expect(timeline.points.map((point) => point.storyId)).toEqual(["story-1", "story-1", "story-2"]);
+  });
+
+  it("counts reporting per period and keeps the periods with none", () => {
+    const timeline = buildTimeline(
+      [
+        pointOf("a", "2026-01-01T01:00:00Z"),
+        pointOf("b", "2026-01-01T20:00:00Z"),
+        // Nothing on the 2nd or the 3rd: the lull is a fact about the Story.
+        pointOf("c", "2026-01-04T09:00:00Z"),
+      ],
+      [],
+    );
+    expect(timeline.granularity).toBe("day");
+    expect(timeline.volume).toEqual([
+      { periodStart: new Date("2026-01-01T00:00:00Z"), count: 2 },
+      { periodStart: new Date("2026-01-02T00:00:00Z"), count: 0 },
+      { periodStart: new Date("2026-01-03T00:00:00Z"), count: 0 },
+      { periodStart: new Date("2026-01-04T00:00:00Z"), count: 1 },
+    ]);
+  });
+
+  it("buckets a short burst by the hour", () => {
+    const timeline = buildTimeline(
+      [pointOf("a", "2026-01-01T01:10:00Z"), pointOf("b", "2026-01-01T03:40:00Z")],
+      [],
+    );
+    expect(timeline.granularity).toBe("hour");
+    expect(timeline.volume.map((bucket) => bucket.count)).toEqual([1, 0, 1]);
+  });
+
+  it("coarsens the period rather than drawing more bars than can be read", () => {
+    const timeline = buildTimeline(
+      [pointOf("a", "2026-01-01T00:00:00Z"), pointOf("b", "2026-06-01T00:00:00Z")],
+      [],
+    );
+    expect(timeline.granularity).toBe("week");
+    expect(timeline.volume.length).toBeLessThanOrEqual(60);
+    expect(timeline.volume.at(-1)!.count).toBe(1);
+  });
+
+  it("spans an analytical event that happened after the last Article", () => {
+    const timeline = buildTimeline([pointOf("a", "2026-01-01T00:00:00Z")], [
+      { kind: "analysis_completed", id: "run-1", at: new Date("2026-01-04T00:00:00Z"), lens: "student_context" },
+    ]);
+    expect(timeline.to).toEqual(new Date("2026-01-04T00:00:00Z"));
+    expect(timeline.volume.map((bucket) => bucket.count)).toEqual([1, 0, 0, 0]);
+  });
+
+  it("returns an empty timeline, not a broken axis, for a Story with no datable reporting", () => {
+    const timeline = buildTimeline([], []);
+    expect(timeline).toMatchObject({ from: null, to: null, points: [], events: [], volume: [] });
+  });
+});
+
+describe("GET /api/v1/stories/:id/timeline", () => {
+  it("rejects an unauthenticated request with 401", async () => {
+    const res = await request(app()).get(`/api/v1/stories/${storyAlphaId}/timeline`);
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 404 for a well-formed but unknown Story id", async () => {
+    const res = await request(app())
+      .get(`/api/v1/stories/${unknownStoryId}/timeline`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 404 rather than 500 for a malformed id", async () => {
+    const res = await request(app()).get("/api/v1/stories/not-a-uuid/timeline").set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(404);
+  });
+
+  it("orders the Story's accepted reporting and leaves a pending proposal off the axis", async () => {
+    const res = await request(app())
+      .get(`/api/v1/stories/${timelineStoryId}/timeline`)
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.points.map((point: { title: string }) => point.title)).toEqual([
+      "Timeline, first report",
+      "Timeline, second report",
+    ]);
+    expect(res.body.points[0].publisher.name).toBe("Publisher A");
+    expect(res.body.granularity).toBe("day");
+    expect(res.body.volume.map((bucket: { count: number }) => bucket.count)).toEqual([1, 0, 0, 0, 1]);
+  });
+
+  it("carries the frozen evidence and the completed analysis, and not the failed one", async () => {
+    const res = await request(app())
+      .get(`/api/v1/stories/${timelineStoryId}/timeline`)
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(res.body.events).toEqual([
+      {
+        kind: "evidence_frozen",
+        id: expect.any(String),
+        at: "2026-02-05T06:00:00.000Z",
+        articleCount: 2,
+      },
+      {
+        kind: "analysis_completed",
+        id: expect.any(String),
+        at: "2026-02-05T07:00:00.000Z",
+        lens: "student_context",
+      },
+    ]);
   });
 });

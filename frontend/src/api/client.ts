@@ -347,6 +347,32 @@ export function getStory(id: string): Promise<StoryDetail> {
   return getJson(`/api/v1/stories/${id}`, "Could not load this Story");
 }
 
+// CONTEXT.md "Timeline" — mirrors backend/src/timeline/buildTimeline.ts. A *computed*
+// read view: nothing here is generated, so it is a plain fetch on render, unlike the
+// analysis on the same record.
+export type TimelineGranularity = "hour" | "day" | "week";
+
+// `storyId` is on every point because the seam is shared: a Story's timeline knows
+// whose points these are, and the search timeline (#65) groups by it into lanes.
+export type TimelinePoint = ArticleSummary & { storyId: string | null };
+
+export type TimelineEvent =
+  | { kind: "evidence_frozen"; id: string; at: string; articleCount: number }
+  | { kind: "analysis_completed"; id: string; at: string; lens: GenerationLens };
+
+export type Timeline = {
+  from: string | null;
+  to: string | null;
+  granularity: TimelineGranularity;
+  points: TimelinePoint[];
+  events: TimelineEvent[];
+  volume: { periodStart: string; count: number }[];
+};
+
+export function getStoryTimeline(id: string): Promise<Timeline> {
+  return getJson(`/api/v1/stories/${id}/timeline`, "Could not load this Story's timeline");
+}
+
 export function getArticle(id: string): Promise<ArticleDetail> {
   return getJson(`/api/v1/articles/${id}`, "Could not load this Article");
 }

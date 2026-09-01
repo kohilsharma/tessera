@@ -274,10 +274,25 @@ Entities and the same edges. Operationally it is a third BullMQ queue on the sam
 ticking hourly at :20 (clear of the quarter-hour ingestion ticks, after clustering's :05), with an
 Admin-only `POST /api/v1/graph/resolution-runs` answering `202 {status:"accepted"}` and an
 `entity_resolution_runs` history table whose ledger is `promoted + belowFloor = considered`.
-Nothing *reads* the graph yet: the Cytoscape view (#68, #69), fuzzy candidate merges and their
-review queue (#67), and the timeline (#64, #65) are still ahead — as is ADR-0028/ADR-0029's
-groundwork behind them, the restored DOC connector (#60), the fixed Guardian feed (#61) and the
-annotated Curated Corpus (#62) above.
+Nothing *reads* the graph yet: the Cytoscape view (#68, #69) and fuzzy candidate merges with
+their review queue (#67) are still ahead — as is ADR-0028/ADR-0029's groundwork behind them, the
+restored DOC connector (#60), the fixed Guardian feed (#61) and the annotated Curated Corpus
+(#62) above.
+**A Story's timeline** (#64) is the phase's other read view, and it costs nothing per view:
+`GET /api/v1/stories/:id/timeline` assembles it from rows that already exist, so no model writes
+any part of it (ADR-0020). The seam is `src/timeline/buildTimeline.ts`, and it takes a **set of
+Articles**, never a query — the search timeline (#65) lays Articles drawn from many Stories on
+one axis grouped into a lane per Story, and bucketing each lane against its own span would stop
+parallel events reading as parallel, so `storyId` rides on every point. The axis spans the
+reporting *and* the analytical events on it — an EvidenceSet freeze and a completed
+GenerationRun, the two things that happen *to* a Story — and its granularity is chosen from that
+span (hour, then day, then week, the finest that keeps the volume overlay under 60 bars), with
+zero-count periods kept, because a lull in coverage is a fact about the Story. Only accepted
+members reach it, by the same `lib/storyMembership.ts` predicate every other reader surface
+tests; a failed GenerationRun is left off, having produced nothing. Tone is deliberately not an
+axis: `articles.tone` is GDELT's and reaches a clustered Story only by cross-connector
+enrichment, which measured zero, so the register says so in a line rather than drawing an empty
+one.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
 `/register`, `/account`), role dashboards (`/dashboard/:role`), browsing the corpus
@@ -292,7 +307,14 @@ cover-image control (#35), and the Dashboard archetype across all three roles (#
 The cross-route responsive and accessibility sweep (#37) closed it out: `/account` and
 `/status` became stated pages in the same vocabulary, and every route's screenshots at both
 breakpoints sit in `docs/verification/bureau-rollout/`. `/` redirects to the caller's own
-dashboard. Story detail carries the **analysis surface** (#53): a Request-analysis command (a
+dashboard. Story detail's coverage register *is* the **timeline** (#64):
+`components/timelineRegister.tsx` — shared, because #65 draws the same thing over a search — is
+the volume overlay over the reporting and the analytical events interleaved in time order, each
+Article row still the Index archetype's own entry opening its Article, each event row naming
+itself over its ledger. It folds in the Articles register #33 shipped rather than listing the
+same rows twice, and owns its own request and so its own four states: a Story with no datable
+reporting says that, and a failed request says *that* while still listing the Articles off the
+record this page already loaded. Story detail carries the **analysis surface** (#53): a Request-analysis command (a
 mutation, never a fetch on render, since an analysis may cost money), a Lens select for an Admin
 only — a reader's Lens is their role, and the API refuses one from them — claims grouped by kind
 in the record's note register with each citation an `A1 · Publisher` link to the Article it

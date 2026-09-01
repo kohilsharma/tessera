@@ -154,13 +154,17 @@ Terms are canonical: use these words in code, docs, and conversation.
   co-occurrence is close to a complete graph and says nothing. A Theme is a **facet** — what
   the graph and the timeline are filtered *by*. (ADR-0028)
 
-- **Timeline** — A **computed** read view of Articles ordered over time, with GKG tone/volume
-  overlays, reached two ways: as a register on a Story, and as its own route over any search.
+- **Timeline** — A **computed** read view of Articles ordered over time, with the analytical
+  events that happened to them — an *EvidenceSet* freeze, a completed *GenerationRun* — on the
+  same axis. Reached two ways: as a register on a Story, and as its own route over any search.
   Over a search it groups the matching Articles into one lane per Story, so parallel events
-  read as parallel. Showing evolution only — NOT change-detection/alerting. _Avoid_:
-  "generated timeline". *Generation* in Tessera means the cited-synthesis pipeline; a timeline
-  is assembled from rows that already exist, costs nothing per view, and no model writes any
-  part of it. (ADR-0020, ADR-0028)
+  read as parallel. The one overlay is **volume**, reporting per period. Tone is **not** an
+  axis, ADR-0020's "for free" notwithstanding: `articles.tone` is GDELT's, and it reaches a
+  clustered Story only by cross-connector *Enrichment*, which measured zero on 2026-09-01 — so
+  the register states that in a line rather than drawing an empty axis. Showing evolution only
+  — NOT change-detection/alerting. _Avoid_: "generated timeline". *Generation* in Tessera means
+  the cited-synthesis pipeline; a timeline is assembled from rows that already exist, costs
+  nothing per view, and no model writes any part of it. (ADR-0020, ADR-0028)
 
 ## Roles
 

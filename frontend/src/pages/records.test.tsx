@@ -9,6 +9,7 @@ import type {
   ArticleDetail as ArticleRecord,
   BriefDetail as BriefRecord,
   StoryAnalysis,
+  Timeline,
 } from "../api/client";
 
 // The Record archetype is presentation, and jsdom judges no presentation. What
@@ -42,8 +43,36 @@ const story = {
   articles: [article, { ...article, id: "a2", title: "Subsidy timing still unresolved" }],
 };
 
-function renderStory() {
-  vi.mocked(fetch).mockResolvedValue(jsonResponse(story));
+// #64. The timeline is a second GET on the same record, so every Story-detail render
+// answers two — the record and its timeline — and `storyGet` is the one place that
+// splits them.
+const timeline: Timeline = {
+  from: "2026-01-04T00:00:00Z",
+  to: "2026-01-08T00:00:00Z",
+  granularity: "day",
+  points: [
+    { ...article, storyId: story.id },
+    { ...article, id: "a2", title: "Subsidy timing still unresolved", publishedAt: "2026-01-06T00:00:00Z", storyId: story.id },
+  ],
+  events: [
+    { kind: "evidence_frozen", id: "e1", at: "2026-01-07T00:00:00Z", articleCount: 2 },
+    { kind: "analysis_completed", id: "g1", at: "2026-01-08T00:00:00Z", lens: "student_context" },
+  ],
+  volume: [
+    { periodStart: "2026-01-04T00:00:00Z", count: 1 },
+    { periodStart: "2026-01-05T00:00:00Z", count: 0 },
+    { periodStart: "2026-01-06T00:00:00Z", count: 1 },
+    { periodStart: "2026-01-07T00:00:00Z", count: 0 },
+    { periodStart: "2026-01-08T00:00:00Z", count: 0 },
+  ],
+};
+
+function storyGet(input: unknown, overrides: Partial<Timeline> = {}) {
+  return jsonResponse(String(input).includes("/timeline") ? { ...timeline, ...overrides } : story);
+}
+
+function renderStory(overrides: Partial<Timeline> = {}) {
+  vi.mocked(fetch).mockImplementation(async (input) => storyGet(input, overrides));
   return renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
 }
 
@@ -69,12 +98,13 @@ describe("Story detail — the record masthead", () => {
     expect(screen.getByText(new Date(story.lastSeenAt).toLocaleDateString())).toBeInTheDocument();
   });
 
+  // #64 folded the Articles register into the timeline: same rows, same provenance,
+  // same link into each Article, now ordered against what was done with them.
   it("lists each Article with its Publisher and publication date", async () => {
     renderStory();
 
-    const entries = await screen.findAllByRole("listitem");
-    expect(entries).toHaveLength(2);
-    const entry = within(entries[0]);
+    const register = within(await screen.findByRole("region", { name: "Timeline" }));
+    const entry = within(register.getAllByRole("listitem")[0]);
     expect(entry.getByRole("link", { name: article.title })).toHaveAttribute("href", "/articles/a1");
     expect(entry.getByText(publisher.name)).toBeInTheDocument();
     expect(entry.getByText(new Date(article.publishedAt).toLocaleDateString())).toBeInTheDocument();
@@ -87,6 +117,93 @@ describe("Story detail — the record masthead", () => {
       "href",
       "/stories",
     );
+  });
+});
+
+// #64. The timeline's content contract: the Story's accepted reporting ordered
+// against the analytical events that happened to it, each point still opening the
+// Article behind it — and the two empty screens told apart, since "this Story has no
+// datable reporting" and "the request failed" are different facts.
+describe("Story detail — the timeline", () => {
+  it("orders the reporting against the analysis the Story has been through", async () => {
+    renderStory();
+
+    const register = within(await screen.findByRole("region", { name: "Timeline" }));
+    const rows = register.getAllByRole("listitem").map((row) => row.textContent);
+    expect(rows).toHaveLength(4);
+    expect(rows[0]).toContain(article.title);
+    expect(rows[1]).toContain("Subsidy timing still unresolved");
+    expect(rows[2]).toContain("Evidence frozen");
+    expect(rows[3]).toContain("Analysis completed");
+    expect(rows[3]).toContain("Student context");
+    // Each point still opens the Article behind it — a timeline is a way into the
+    // reporting, not a picture of it.
+    expect(register.getByRole("link", { name: article.title })).toHaveAttribute("href", "/articles/a1");
+    // The volume overlay is the only reading of the axis a screen-reader user gets,
+    // so it states what it draws.
+    expect(register.getByRole("img")).toHaveAccessibleName(/across 5 periods, at most 1 in one/);
+  });
+
+  it("says in a line why tone is not on the axis", async () => {
+    renderStory();
+
+    const register = within(await screen.findByRole("region", { name: "Timeline" }));
+    expect(register.getByText(/Tone is not shown/)).toHaveTextContent(/GDELT firehose also saw/);
+  });
+
+  it("states the wait while the timeline is being assembled", async () => {
+    let answer: (value: Response) => void = () => {};
+    vi.mocked(fetch).mockImplementation(async (input) =>
+      String(input).includes("/timeline")
+        ? new Promise<Response>((resolve) => {
+            answer = resolve;
+          })
+        : jsonResponse(story),
+    );
+    renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
+
+    const register = within(await screen.findByRole("region", { name: "Timeline" }));
+    expect(register.getByRole("status")).toHaveTextContent(/Assembling this Story's timeline/);
+    answer(jsonResponse(timeline));
+    expect(await register.findByText("Evidence frozen")).toBeInTheDocument();
+  });
+
+  // A merge (#52) moves a Story's members away and repoints its runs, so a Story can
+  // hold analytical events with no accepted reporting left. The API puts those on the
+  // axis; saying "nothing here" over them would be saying it while holding them.
+  it("keeps the analytical events on the axis when no reporting is left under them", async () => {
+    renderStory({ points: [], volume: [], from: timeline.events[0].at, to: timeline.events[1].at });
+
+    const register = within(await screen.findByRole("region", { name: "Timeline" }));
+    expect(await register.findByText("Evidence frozen")).toBeInTheDocument();
+    expect(register.getByText("Analysis completed")).toBeInTheDocument();
+    expect(register.queryByText("This Story has no datable reporting yet.")).not.toBeInTheDocument();
+  });
+
+  it("distinguishes a Story with no datable reporting from a request that failed", async () => {
+    renderStory({ from: null, to: null, points: [], events: [], volume: [] });
+
+    const register = within(await screen.findByRole("region", { name: "Timeline" }));
+    expect(await register.findByText("This Story has no datable reporting yet.")).toBeInTheDocument();
+    expect(register.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("offers a retry when the timeline itself could not be loaded", async () => {
+    vi.mocked(fetch).mockImplementation(async (input) =>
+      String(input).includes("/timeline")
+        ? jsonResponse({ error: "Timeline unavailable" }, 500)
+        : jsonResponse(story),
+    );
+    renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
+
+    const register = within(await screen.findByRole("region", { name: "Timeline" }));
+    expect(await register.findByRole("alert")).toHaveTextContent("Timeline unavailable");
+    expect(register.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    // And the coverage list survives it: the Articles are on the record this page
+    // already loaded, so a failed second request costs the ordering and the events,
+    // never the reporting itself.
+    expect(register.getByRole("link", { name: article.title })).toHaveAttribute("href", "/articles/a1");
+    expect(screen.getByRole("heading", { level: 1, name: story.title })).toBeInTheDocument();
   });
 });
 
@@ -148,8 +265,8 @@ const analysis: StoryAnalysis = {
 };
 
 function renderStoryWithAnalysis(produced: StoryAnalysis) {
-  vi.mocked(fetch).mockImplementation(async (_input, init) =>
-    init?.method === "POST" ? jsonResponse(produced) : jsonResponse(story),
+  vi.mocked(fetch).mockImplementation(async (input, init) =>
+    init?.method === "POST" ? jsonResponse(produced) : storyGet(input),
   );
   return renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
 }
@@ -203,7 +320,9 @@ describe("Story detail — the analysis", () => {
         expect(init.body).toBe(JSON.stringify({ lens: "investor_implication" }));
         return jsonResponse({ ...analysis, lens: "investor_implication" });
       }
-      return jsonResponse(String(input).includes("/auth/me") ? { id: "u1", email: "a@b.c", role: "admin" } : story);
+      return String(input).includes("/auth/me")
+        ? jsonResponse({ id: "u1", email: "a@b.c", role: "admin" })
+        : storyGet(input);
     });
     renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
 
@@ -221,7 +340,9 @@ describe("Story detail — the analysis", () => {
         expect(init.body).toBe("{}");
         return jsonResponse(analysis);
       }
-      return jsonResponse(String(input).includes("/auth/me") ? { id: "u2", email: "s@b.c", role: "student" } : story);
+      return String(input).includes("/auth/me")
+        ? jsonResponse({ id: "u2", email: "s@b.c", role: "student" })
+        : storyGet(input);
     });
     renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
 
@@ -240,7 +361,9 @@ describe("Story detail — the analysis", () => {
         posted.push(init.body);
         return jsonResponse(String(input).includes("/briefs") ? { ...brief, id: "b9" } : analysis);
       }
-      return jsonResponse(String(input).includes("/auth/me") ? { id: "u2", email: "s@b.c", role: "student" } : story);
+      return String(input).includes("/auth/me")
+        ? jsonResponse({ id: "u2", email: "s@b.c", role: "student" })
+        : storyGet(input);
     });
     renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
 
@@ -257,7 +380,9 @@ describe("Story detail — the analysis", () => {
   it("offers an Admin no way to own the analysis they asked for", async () => {
     vi.mocked(fetch).mockImplementation(async (input, init) => {
       if (init?.method === "POST") return jsonResponse(analysis);
-      return jsonResponse(String(input).includes("/auth/me") ? { id: "u1", email: "a@b.c", role: "admin" } : story);
+      return String(input).includes("/auth/me")
+        ? jsonResponse({ id: "u1", email: "a@b.c", role: "admin" })
+        : storyGet(input);
     });
     renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
 
@@ -398,12 +523,12 @@ describe("Story detail — the Investor reading", () => {
   // The error treatment is the failed-run test above.
   it("states the wait while the evidence is being read", async () => {
     let answer: (value: Response) => void = () => {};
-    vi.mocked(fetch).mockImplementation(async (_input, init) =>
+    vi.mocked(fetch).mockImplementation(async (input, init) =>
       init?.method === "POST"
         ? new Promise<Response>((resolve) => {
             answer = resolve;
           })
-        : jsonResponse(story),
+        : storyGet(input),
     );
     renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
 
@@ -426,13 +551,13 @@ describe("Story detail — the Investor reading", () => {
   // several mastheads is one source, and the API says so rather than comparing it
   // with itself (#54).
   it("states a refusal to compare reporting that is one newsroom's", async () => {
-    vi.mocked(fetch).mockImplementation(async (_input, init) =>
+    vi.mocked(fetch).mockImplementation(async (input, init) =>
       init?.method === "POST"
         ? jsonResponse(
             { error: "This Story needs independent reporting from at least two publishers to analyse" },
             422,
           )
-        : jsonResponse(story),
+        : storyGet(input),
     );
     renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
 

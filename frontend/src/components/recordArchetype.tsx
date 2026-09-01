@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
 // The Record archetype: a masthead (folio, way back, title, dek) over a ledger
@@ -79,10 +79,16 @@ export function RecordMasthead({
 // One section of the record's body, under a heading in the register the mast's
 // title is not: the mast is the record's identity, a section is one part of its
 // substance.
+//
+// Labelled by its own heading, for the same reason a dashboard register is: a Story
+// record now carries three of these — its analysis, its timeline (#64) and its
+// Articles — and three unnamed runs of rows is one undifferentiated page to a
+// screen-reader user.
 export function RecordSection({ heading, children }: { heading: string; children: ReactNode }) {
+  const headingId = useId();
   return (
-    <section className="record-section">
-      <h2>{heading}</h2>
+    <section className="record-section" aria-labelledby={headingId}>
+      <h2 id={headingId}>{heading}</h2>
       {children}
     </section>
   );

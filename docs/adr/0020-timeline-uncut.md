@@ -35,3 +35,10 @@ from simply *showing* a Story's evolution.
 - A visually strong "how this story evolved" view for near-zero incremental cost.
 - Reinforces the evidence model: each timeline point ties back to Articles/EvidenceSets.
 - Clear boundary preserved: showing evolution ≠ monitoring/alerting (still cut).
+- **Tone was not free after all** (measured 2026-09-01, #59, shipped in #64). `articles.tone`
+  is GDELT's, and it reaches a *clustered* Story only where a GKG sighting and a feed sighting
+  land on the same canonical URL — cross-connector *Enrichment*, which measured zero over a
+  window of 968 GKG Articles against 210 feed ones. So the shipped timeline carries the volume
+  overlay alone and states in a line why tone is absent, rather than drawing a structurally
+  empty axis. If the enrichment rate ever stops being zero, tone becomes an overlay again with
+  no change to the seam: the column is already there.

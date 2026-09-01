@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   getMe,
   getStory,
+  getStoryTimeline,
   requestStoryAnalysis,
   saveAnalysisToBrief,
   type GenerationFailureCode,
@@ -12,6 +13,7 @@ import {
 import { AnalysisRegister } from "../components/analysisRegister";
 import { ArticleEntry } from "../components/indexArchetype";
 import { RecordMasthead, RecordSection } from "../components/recordArchetype";
+import { TimelineRegister } from "../components/timelineRegister";
 import { EmptyState, EntryList, ErrorState, PendingState, RetryableError } from "../components/uiStates";
 
 // A failed run says so plainly (ADR-0010: never silently serve invalid
@@ -41,6 +43,15 @@ export default function StoryDetail() {
   // request: an Admin is the one caller who has to say which Lens they are reading
   // through, because they are neither audience (ADR-0027).
   const me = useQuery({ queryKey: ["me"], queryFn: getMe });
+  // A fetch on render, unlike the analysis above it: a timeline is computed from rows
+  // that already exist (ADR-0020), so reading one spends nothing and creates nothing.
+  // Its own request, so this register owns its own four states — the Story loading and
+  // the timeline loading are two different waits.
+  const timeline = useQuery({
+    queryKey: ["story-timeline", id],
+    queryFn: () => getStoryTimeline(id!),
+    enabled: !!id,
+  });
   const isAdmin = me.data?.role === "admin";
   const [adminLens, setAdminLens] = useState<GenerationLens>("student_context");
   // A mutation, not a query: asking for an analysis may spend money and create a
@@ -178,20 +189,40 @@ export default function StoryDetail() {
           ))}
       </RecordSection>
 
-      <RecordSection heading="Articles">
-        {story.articles.length === 0 ? (
-          <EmptyState>No Articles yet.</EmptyState>
-        ) : (
-          // The index's entry, not a second list vocabulary: an Article listed
-          // under its Story is the same kind of row as one listed anywhere else,
-          // and its Publisher and date belong in the same provenance register.
-          // No pagination here — a Story's Articles arrive whole.
-          <EntryList>
-            {story.articles.map((article) => (
-              <ArticleEntry key={article.id} article={article} />
-            ))}
-          </EntryList>
+      {/* #64: the record's one coverage register. It is the Articles list #33 shipped —
+          same rows, same provenance, same link into each Article — ordered against the
+          analysis this Story has been through, so keeping a second register of the same
+          rows beside it would be listing the Story's reporting twice. */}
+      <RecordSection heading="Timeline">
+        {timeline.isPending && <PendingState>Assembling this Story's timeline…</PendingState>}
+        {timeline.isError && (
+          <>
+            <RetryableError
+              message={`Could not load this Story's timeline: ${(timeline.error as Error).message}`}
+              onRetry={() => timeline.refetch()}
+              retrying={timeline.isFetching}
+            />
+            {/* The coverage list is on the record this page already loaded, so a second
+                request failing costs the reader the ordering and the events — never the
+                reporting itself. */}
+            <EntryList>
+              {story.articles.map((article) => (
+                <ArticleEntry key={article.id} article={article} />
+              ))}
+            </EntryList>
+          </>
         )}
+        {/* Empty is a fact about the Story, not a failure of the request: a Story with
+            nothing datable on it has nothing to put on an axis. Both halves are tested,
+            because a Story can hold analytical events with no accepted members left — a
+            merge (#52) moves members and repoints the runs — and telling that reader
+            there is nothing would be saying so while the API returned events. */}
+        {timeline.data &&
+          (timeline.data.points.length === 0 && timeline.data.events.length === 0 ? (
+            <EmptyState>This Story has no datable reporting yet.</EmptyState>
+          ) : (
+            <TimelineRegister timeline={timeline.data} />
+          ))}
       </RecordSection>
     </main>
   );
