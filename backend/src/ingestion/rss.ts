@@ -16,6 +16,29 @@ const parser = new XMLParser({
   // value is never silently coerced.
   parseTagValue: false,
   htmlEntities: true,
+  // #61. fast-xml-parser's entity guard defaults to 1,000 expansions *per
+  // document*, and that number is a function of a feed's legitimate size rather
+  // than of anything hostile: the Guardian World feed carries 2,024 ordinary
+  // `&amp;`/`&#8217;` references across 45 items, tripped the cap at 1,008, and so
+  // failed every run since it was seeded. The count is raised to admit a real feed
+  // — several times the largest of the ten curated ones — and stays finite so a
+  // pathological document still terminates.
+  //
+  // The guard against entity *amplification* (billion laughs) is the other three
+  // bounds, none of which grow with a longer feed: one entity's declared size, how
+  // deeply entities may nest, and the total expanded characters. A feed is
+  // untrusted input from the open internet, so they are restated explicitly at
+  // fast-xml-parser's own documented defaults — passing an object here defaults
+  // `maxExpansionDepth` to 10,000 and `maxTotalExpansions` to Infinity, which would
+  // remove the protection this comment is about.
+  processEntities: {
+    enabled: true,
+    maxTotalExpansions: 100_000,
+    maxExpansionDepth: 10,
+    maxEntitySize: 10_000,
+    maxExpandedLength: 100_000,
+    maxEntityCount: 1_000,
+  },
 });
 
 export type FeedItem = {

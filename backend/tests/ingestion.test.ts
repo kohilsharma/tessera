@@ -500,6 +500,36 @@ describe("runConnector over an RSS feed", () => {
     expect(run!.errorSummary).toMatch(/not an absolute http\(s\) URL/);
   });
 
+  // #61. An untouched capture of the live Guardian World feed (2026-09-01): 45
+  // items, 153 KB and 2,024 entity references — more than twice fast-xml-parser's
+  // default cap on entity expansions *per document*, which is what had failed every
+  // run of one of the ten curated feeds since it was seeded. Committed rather than
+  // fetched, so the bound that admits it is proven offline.
+  it("parses a curated feed carrying more entity references than the parser's default cap", async () => {
+    const connector = await createRssConnector("https://www.theguardian.com/world/rss");
+
+    const run = await runConnector(connector, { fetchText: fixture("guardian-world.xml") });
+
+    expect(run!.status).toBe("succeeded");
+    expect(run!.errorSummary).toBeNull();
+    expect(run!.discovered).toBe(45);
+    expect(run!.inserted).toBe(45);
+    expect(run!.failed).toBe(0);
+    expect(countersSumToDiscovered(run!)).toBe(true);
+
+    const articles = await AppDataSource.getRepository(Article).find({
+      where: { discoveredByConnectorId: connector.id },
+      relations: { publisher: true },
+    });
+    expect(articles).toHaveLength(45);
+    // The entities the cap was counting are ordinary punctuation in ordinary
+    // headlines, so what proves they were expanded is that none survives raw.
+    for (const article of articles) {
+      expect(article.title).not.toMatch(/&(amp|#8217|#x27|quot);/);
+      expect(article.publisher.domain).toBe("theguardian.com");
+    }
+  });
+
   it("loses nothing when two runs race on the same feed", async () => {
     const connector = await createRssConnector("https://race.example/feed.xml");
     const fetchText = fixture("bbc-world.xml");

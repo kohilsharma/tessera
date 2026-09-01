@@ -91,6 +91,14 @@ which clears the lag with a third of the record cap spare. A missing `articles` 
 zero-match answer, not the block signal the parser read it as; refusal still arrives as a
 non-JSON body and still fails the run loudly. The live run behind `GDELT_LIVE_SMOKE=1` now
 asserts a completed run that inserted Articles, since neither cause is expressible in a fixture.
+The **Guardian feed** is fixed alongside it (#61): fast-xml-parser caps entity expansions at 1,000
+*per document*, which is a function of a feed's legitimate size — the Guardian World feed carries
+2,024 ordinary `&amp;`/`&#8217;` references across 45 items and tripped it at 1,008, so one of the
+ten curated feeds had failed every run. `processEntities` is now explicit in `src/ingestion/rss.ts`:
+the count is raised to admit a real feed, while the three bounds that actually stop entity
+amplification (one entity's size, nesting depth, total expanded characters) are restated at their
+documented defaults, because passing the object form defaults two of them to Infinity. An
+untouched 153 KB capture of the live feed drives it offline.
 **Readability extraction** (#47) closes ADR-0018's fourth surface and is a connector kind of
 its own (`readability`, `src/ingestion/readability.ts` over `@mozilla/readability` + `linkedom`):
 it discovers nothing, it re-reads pages Tessera already holds an excerpt for and raises them to
