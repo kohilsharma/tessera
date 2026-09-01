@@ -209,7 +209,10 @@ model call writes only the questions; unusable output falls back to deterministi
 the same cited answers. `POST /api/v1/flashcards {generationRunId}` makes or re-reads a deck from
 either a Story analysis or a saved Brief analysis without resetting prior reviews, `GET
 /api/v1/flashcards` serves the due session, and `POST /api/v1/flashcards/:id/reviews {grade}`
-advances the card with canonical SM-2. Every route is Student-only and every query is owner-scoped.
+advances the card with canonical SM-2 while persisting the submitted grade and resulting schedule.
+Question synthesis is shared through `flashcard_question_cache`, keyed by a SHA-256 of immutable
+claim type + text, so another Student studying the same analysis does not repeat the model call.
+Every route is Student-only and every query is owner-scoped.
 Phase 3.5 (graph/timeline) is not built yet.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,

@@ -23,6 +23,7 @@ import { AddBriefGenerationRun1755758000000 } from "./migrations/1755758000000-A
 import { AddClaimEvidenceRelationship1755759000000 } from "./migrations/1755759000000-AddClaimEvidenceRelationship";
 import { CreatePromptTemplates1755760000000 } from "./migrations/1755760000000-CreatePromptTemplates";
 import { CreateFlashcards1755761000000 } from "./migrations/1755761000000-CreateFlashcards";
+import { RecordFlashcardReviewsAndCacheQuestions1755762000000 } from "./migrations/1755762000000-RecordFlashcardReviewsAndCacheQuestions";
 import { User } from "./entities/User";
 import { Publisher } from "./entities/Publisher";
 import { Story } from "./entities/Story";
@@ -101,6 +102,7 @@ export const AppDataSource = new DataSource({
     AddClaimEvidenceRelationship1755759000000,
     CreatePromptTemplates1755760000000,
     CreateFlashcards1755761000000,
+    RecordFlashcardReviewsAndCacheQuestions1755762000000,
   ],
   synchronize: false,
   logging: false,

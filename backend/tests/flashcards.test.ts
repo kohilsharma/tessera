@@ -138,7 +138,7 @@ function reviewCard(token: string, cardId: string, grade: unknown) {
 
 beforeEach(async () => {
   await AppDataSource.query(
-    `TRUNCATE "articles", "publishers", "stories", "users", "evidence_sets", "generation_runs" CASCADE`,
+    `TRUNCATE "articles", "publishers", "stories", "users", "evidence_sets", "generation_runs", "flashcard_question_cache" CASCADE`,
   );
   // Taken by TRUNCATE users CASCADE, and reinstated for the same reason
   // tests/generation.test.ts does: the pipeline reads the current version on every
@@ -370,6 +370,20 @@ describe("the study session", () => {
     expect(reviewed.body.answer).toBe(made[0].answer);
     expect(reviewed.body.citations).toEqual(made[0].citations);
 
+    // "Records the outcome" means the grade survives after the card's current
+    // schedule moves again. The review row freezes both what the Student submitted
+    // and the SM-2 result that submission produced.
+    const [history] = await AppDataSource.query(
+      `SELECT "grade", "repetitions", "easeFactor", "intervalDays", "dueAt", "reviewedAt"
+         FROM "flashcard_reviews" WHERE "flashcardId" = $1`,
+      [made[0].id],
+    );
+    expect(history.grade).toBe(4);
+    expect(history.repetitions).toBe(1);
+    expect(history.intervalDays).toBe(1);
+    expect(new Date(history.dueAt).toISOString()).toBe(new Date(reviewed.body.dueAt).toISOString());
+    expect(new Date(history.reviewedAt).toISOString()).toBe(new Date(reviewed.body.lastReviewedAt).toISOString());
+
     const after = await studyDeck(student.token);
     expect(after.body.items.map((card: { id: string }) => card.id)).not.toContain(made[0].id);
     expect(after.body.dueCount).toBe(made.length - 1);
@@ -417,10 +431,13 @@ describe("whose cards these are", () => {
     expect(reviewed.status).toBe(404);
 
     // And the same analysis makes the stranger their *own* deck, rather than handing
-    // them the owner's cards.
+    // them the owner's cards. Its question is already cached by claim content, so
+    // ownership does not turn one shared analysis into one model bill per Student.
+    synth.requests.length = 0;
     const own = await makeDeck(stranger.token, runId);
     expect(own.status).toBe(201);
     expect(own.body.cards.map((card: { id: string }) => card.id)).not.toContain(made[0].id);
+    expect(synth.requests.filter((call) => call.task === "flashcard_questions")).toHaveLength(0);
   });
 
   it("is a Student surface — an Investor and an Admin are refused every route", async () => {
