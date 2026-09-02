@@ -116,7 +116,7 @@ that arrived without a body and have never been attempted (`articles.extractionA
 kind *and* by rung, and so is any Article whose Publisher already had its excerpt cleared for
 serving. A paywall, a bot block, or a body no longer than the excerpt it would replace is a
 counted failure that leaves the Article where it was, so a run's ledger still sums to
-`discovered`.
+`discovered`. Its transport was broken from the day it shipped and was repaired in #70, below.
 Phase 3 has started with the **clustering tracer bullet** (#49): `src/clustering/`
 (`runClustering` is the one new seam, over `config.ts`'s two tunables) embeds eligible Articles
 in batches, recomputes every Story's centroid from its members, assigns an Article to the
@@ -459,6 +459,49 @@ they can share. The two empty neighbourhoods are told apart: a facet that emptie
 keeps the control on screen, because clearing it is the way back, while the ticket's own criterion —
 every edge rolled out of the retained window — names the window and not the promotion floor, a rule
 this name has already cleared. That is also why the floor's prose sits inside the drawn branch.
+**The Extraction pass, repaired** (#70). #47's transport had never once fetched a page: 0 successes
+out of every attempt ever made, measured 2026-09-01, at every publisher, with not one paywall or bot
+block among the failures. Three defects stacked, and the first hid the other two. `package.json`
+pins `undici@8.10.0` while this Node bundles 6.24.1 (`process.versions.undici`), so the global
+`fetch` built its request handler against 6 and handed it to the npm package's `Agent`, which
+refused it — every attempt died as a bare `fetch failed`, cause `UND_ERR_INVALID_ARG: invalid
+onRequestStart method`, before any address rule could matter. One package supplies both halves now
+(`undici`'s own `fetch`), so a Node upgrade cannot re-open it. Behind that, `publicPageTarget`
+condemned a whole host over one non-public entry in its DNS answer, which on this WSL2 path is what
+NAT64 synthetic AAAAs (`64:ff9b::/96`, RFC 6052) made of `www.bbc.co.uk` and `arstechnica.com`;
+vetting now drops **entries, never hosts**, and hands every surviving address to the pin, so undici
+runs its own family selection over a set this process vetted. And the custom `connect.lookup`
+answered with a scalar where undici's `options.all` owes an array, with h2 then failing
+`NGHTTP2_INTERNAL_ERROR` until `allowH2: false` — HTTP/1.1 reaches every publisher on the curated
+list.
+The ticket offered dropping the pinned dispatcher instead. Keeping it is the choice, because
+dropping it would have to relax the address rule in the same breath: undici would then dial whatever
+the resolver answers, including the private address inside a mixed answer, through a DNS-TOCTOU
+window the 2-second pacer widens by design. The pin is what closes that window while the URL
+hostname still carries Host and TLS SNI. It costs one thing — a pinned loopback is exactly what the
+rules above refuse, so no test could reach a local server through the whole function — and that is
+why `fetchVettedPage` is now a seam of its own *below* the address rules: the suite drives the real
+dispatcher over a real socket at `pinned.invalid` (RFC 2606, resolves nowhere), so a page comes back
+only if the pin was dialled, and the vetting and hop loop above it stay injectable. The dispatcher is
+`destroy`ed rather than `close`d, since two paths deliberately leave a body unread and `close()`
+waits for it: refusing a page and then politely downloading it is the waste those checks exist to
+avoid. `maxResponseSize` is left off the Agent for the same kind of reason — it wins the race against
+`readBoundedPage` and reports `terminated`, where the run should name the ceiling it hit.
+Repairing the transport was not enough to drain what it left behind. `discoverExtraction` marks
+`extractionAttemptedAt` before it fetches — so one hanging page is not where every future run starts
+— and the candidate query requires that mark to be null, with nothing clearing it. The runs that
+could never fetch anything had therefore excluded every Article they touched, permanently.
+`1755765000000-RequeueFailedExtractionAttempts` clears the mark wherever it sits on an Article still
+on the excerpt rung, which given that no attempt ever succeeded is exactly the poisoned set; it
+re-queues a genuine refusal too, at one further attempt each under the 20-per-run cap, which is the
+price of not hand-listing which failures were which. Its `down` is deliberately empty: re-marking
+would re-create the exclusion.
+Measured after: all six extraction-eligible seeded feeds fetch and read (11 of 12 pages over the
+600-character floor — the twelfth a BBC page with no article body, the structural loss ADR-0018
+predicts), and one live NPR run attempted 10 candidates and raised 10 to `api_content` with an empty
+`errorSummary`. `EXTRACTION_LIVE_SMOKE=1` is that measurement, kept: an injected `fetchPage` passes
+whether or not the real one can reach a publisher, which is how a pass that had never fetched a page
+shipped green.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
 `/register`, `/account`), role dashboards (`/dashboard/:role`), browsing the corpus

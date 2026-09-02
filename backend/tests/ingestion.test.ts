@@ -1,6 +1,9 @@
 import "reflect-metadata";
 import { randomUUID } from "node:crypto";
+import { lookup } from "node:dns/promises";
 import { readFile } from "node:fs/promises";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import bcrypt from "bcryptjs";
 import { strToU8, zipSync } from "fflate";
@@ -24,17 +27,24 @@ import { DOC_MAX_RECORDS } from "../src/ingestion/doc";
 import { parseGkgCsv } from "../src/ingestion/gkg";
 import { runIngestionJob } from "../src/ingestion/jobs";
 import { RUN_JOB, TICK_JOB } from "../src/ingestion/queue";
+import { MIN_EXTRACTED_TEXT_LENGTH, extractArticleText } from "../src/ingestion/readability";
 import { GDELT_RETENTION_DAYS, pruneExpiredGdeltArticles } from "../src/ingestion/retention";
+import { parseRssFeed } from "../src/ingestion/rss";
 import {
   DOC_MIN_INTERVAL_MS,
   EXTRACTION_MIN_DOMAIN_INTERVAL_MS,
   MAX_EXTRACTION_ATTEMPTS,
+  fetchVettedPage,
+  httpFetchPage,
+  httpFetchText,
   runConnector,
   spaceDocRequest,
   spaceExtractionRequest,
   type FetchText,
+  type PublicPageTarget,
   type RunConnectorDeps,
 } from "../src/ingestion/runConnector";
+import { RequeueFailedExtractionAttempts1755765000000 } from "../src/migrations/1755765000000-RequeueFailedExtractionAttempts";
 import { SEED_CONNECTORS } from "../src/seedData/corpus";
 import { setupTestDb } from "./setupTestDb";
 
@@ -127,6 +137,16 @@ async function createDocConnector(endpoint = DOC_ENDPOINT): Promise<IngestionCon
     name: `Test DOC ${nextConnector}`,
     kind: "gdelt_doc",
     endpoint,
+    enabled: true,
+  });
+}
+
+async function createExtractionConnector(): Promise<IngestionConnector> {
+  nextConnector += 1;
+  return AppDataSource.getRepository(IngestionConnector).save({
+    name: `Test extraction ${nextConnector}`,
+    kind: "readability",
+    endpoint: "internal:readability",
     enabled: true,
   });
 }
@@ -1463,16 +1483,6 @@ describe("runConnector over Readability extraction", () => {
     await AppDataSource.query(`TRUNCATE "articles", "publishers", "ingestion_runs" CASCADE`);
   });
 
-  async function createExtractionConnector(): Promise<IngestionConnector> {
-    nextConnector += 1;
-    return AppDataSource.getRepository(IngestionConnector).save({
-      name: `Test extraction ${nextConnector}`,
-      kind: "readability",
-      endpoint: "internal:readability",
-      enabled: true,
-    });
-  }
-
   it("replaces a feed teaser with the page's real body, and counts the pages that refuse", async () => {
     const rss = await createRssConnector("https://feeds.npr.org/1004/rss.xml");
     expect((await runConnector(rss, { fetchText: nprFeed }))!.inserted).toBe(3);
@@ -1749,101 +1759,192 @@ describe("runConnector over Readability extraction", () => {
   });
 
   it("refuses private page addresses before fetching, including redirect destinations", async () => {
-    const { httpFetchPage } = await import("../src/ingestion/runConnector");
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      await expect(httpFetchPage("http://127.0.0.1/private")).rejects.toThrow(/public/);
-      expect(fetchMock).not.toHaveBeenCalled();
+    const fetchVetted = vi.fn<typeof fetchVettedPage>();
+    await expect(httpFetchPage("http://127.0.0.1/private", { resolve: lookup, fetchVetted })).rejects.toThrow(/public/);
+    expect(fetchVetted).not.toHaveBeenCalled();
 
-      fetchMock.mockResolvedValueOnce(
-        new Response(null, { status: 302, headers: { location: "http://169.254.169.254/latest/meta-data" } }),
-      );
-      await expect(httpFetchPage("http://93.184.216.34/start")).rejects.toThrow(/public/);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    fetchVetted.mockResolvedValueOnce({ redirectTo: "http://169.254.169.254/latest/meta-data" });
+    await expect(httpFetchPage("http://93.184.216.34/start", { resolve: lookup, fetchVetted })).rejects.toThrow(
+      /public/,
+    );
+    expect(fetchVetted).toHaveBeenCalledTimes(1);
   });
 
-  it("refuses non-global IPv6 page addresses", async () => {
-    const { httpFetchPage } = await import("../src/ingestion/runConnector");
+  it("refuses a host whose every address is non-global", async () => {
     for (const address of ["fec0::1", "100:0:0:1::1", "2001:2::1"]) {
-      const resolve = vi.fn(async () => [{ address, family: 6 }]) as unknown as typeof import("node:dns/promises").lookup;
-      await expect(
-        httpFetchPage("http://ipv6.example/story", {
-          resolve,
-          createDispatcher: () => {
-            throw new Error("a non-global address must not reach the dispatcher");
-          },
-        }),
-      ).rejects.toThrow(/public/);
+      const resolve = vi.fn(async () => [{ address, family: 6 }]) as unknown as typeof lookup;
+      const fetchVetted = vi.fn<typeof fetchVettedPage>(() => {
+        throw new Error("a non-global address must not reach the transport");
+      });
+      await expect(httpFetchPage("http://ipv6.example/story", { resolve, fetchVetted })).rejects.toThrow(/public/);
     }
   });
 
-  it("pins the vetted DNS answer so a rebinding lookup cannot change the connection", async () => {
-    const { httpFetchPage } = await import("../src/ingestion/runConnector");
-    const { Agent } = await import("undici");
-    const resolve = vi.fn(async () => [{ address: "93.184.216.36", family: 4 }]) as unknown as typeof import("node:dns/promises").lookup;
-    const createDispatcher = vi.fn(
-      (address: string, family: 4 | 6) =>
-        new Agent({ connect: { lookup: (_hostname, _options, callback) => callback(null, address, family) } }),
-    );
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response("<html><body>safe</body></html>", { headers: { "content-type": "text/html" } }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      await expect(httpFetchPage("http://rebind.example/story", { resolve, createDispatcher })).resolves.toContain(
-        "safe",
-      );
-      expect(resolve).toHaveBeenCalledTimes(1);
-      expect(createDispatcher).toHaveBeenCalledWith("93.184.216.36", 4);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
+  // #70/AC5. A resolver that names one non-public address alongside public ones — a
+  // NAT64 synthetic AAAA on this WSL2 path, a split-horizon LAN answer — used to cost
+  // the whole host. The vetting drops entries, never hosts, and what it drops never
+  // reaches a socket.
+  it("hands the transport every public address in the answer, and only those", async () => {
+    const resolve = vi.fn(async () => [
+      { address: "10.1.2.3", family: 4 },
+      { address: "93.184.216.36", family: 4 },
+      { address: "64:ff9b::5db8:d824", family: 6 },
+      { address: "2606:2800:220:1:248:1893:25c8:1946", family: 6 },
+    ]) as unknown as typeof lookup;
+    const fetchVetted = vi
+      .fn<typeof fetchVettedPage>()
+      .mockResolvedValue({ html: "<html><body>safe</body></html>" });
 
-  it("rejects an oversized chunked page while consuming its body", async () => {
-    const { httpFetchPage } = await import("../src/ingestion/runConnector");
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(new Uint8Array(4 * 1024 * 1024 + 1), { headers: { "content-type": "text/html" } }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      await expect(httpFetchPage("http://93.184.216.37/chunked")).rejects.toThrow(/exceeded 4194304 bytes/);
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    await expect(httpFetchPage("http://mixed.example/story", { resolve, fetchVetted })).resolves.toContain("safe");
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(fetchVetted.mock.calls[0]![0].addresses).toEqual([
+      { address: "93.184.216.36", family: 4 },
+      { address: "2606:2800:220:1:248:1893:25c8:1946", family: 6 },
+    ]);
   });
 
   it("paces every redirect hop on the destination publisher domain", async () => {
-    const { httpFetchPage } = await import("../src/ingestion/runConnector");
     vi.useFakeTimers();
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(null, { status: 302, headers: { location: "http://93.184.216.35/final" } }),
-      )
-      .mockResolvedValueOnce(
-        new Response("<html><body>done</body></html>", { headers: { "content-type": "text/html" } }),
-      );
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchVetted = vi
+      .fn<typeof fetchVettedPage>()
+      .mockResolvedValueOnce({ redirectTo: "http://93.184.216.35/final" })
+      .mockResolvedValueOnce({ html: "<html><body>done</body></html>" });
     try {
-      const page = httpFetchPage("http://93.184.216.35/start");
+      const page = httpFetchPage("http://93.184.216.35/start", { resolve: lookup, fetchVetted });
       await vi.advanceTimersByTimeAsync(0);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchVetted).toHaveBeenCalledTimes(1);
 
       await vi.advanceTimersByTimeAsync(EXTRACTION_MIN_DOMAIN_INTERVAL_MS - 1);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchVetted).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(1);
 
       await expect(page).resolves.toContain("done");
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchVetted).toHaveBeenCalledTimes(2);
     } finally {
-      vi.unstubAllGlobals();
       vi.useRealTimers();
     }
+  });
+
+  // #70/AC3. The check that makes "can this transport fetch a page" a fact the suite
+  // knows: the real dispatcher over a real socket, nothing injected. It has to reach a
+  // local server, and loopback is precisely what the address rules above refuse —
+  // which is why `fetchVettedPage` is a seam of its own, below them. `pinned.invalid`
+  // resolves nowhere (RFC 2606), so a page comes back only if the pin was dialled.
+  const localPages = async (handler: (req: IncomingMessage, res: ServerResponse) => void) => {
+    const server = createServer(handler);
+    await new Promise<void>((ready) => void server.listen(0, "127.0.0.1", ready));
+    const { port } = server.address() as AddressInfo;
+    return {
+      port,
+      get: (path: string, addresses: PublicPageTarget["addresses"] = [{ address: "127.0.0.1", family: 4 }]) =>
+        fetchVettedPage({ url: new URL(`http://pinned.invalid:${port}${path}`), addresses }, AbortSignal.timeout(10_000)),
+      close: () => new Promise<void>((closed) => void server.close(() => closed())),
+    };
+  };
+
+  it("fetches a page over the socket it pinned, and reports a redirect instead of following it", async () => {
+    const seen: { host?: string; ua?: string | string[] }[] = [];
+    const server = await localPages((req, res) => {
+      seen.push({ host: req.headers.host, ua: req.headers["user-agent"] });
+      if (req.url === "/moved") {
+        res.writeHead(302, { location: "https://elsewhere.example/story" });
+        res.end();
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end("<html><body><article><p>a page, fetched over a real socket</p></article></body></html>");
+    });
+    try {
+      await expect(server.get("/story")).resolves.toEqual({ html: expect.stringContaining("real socket") });
+      await expect(server.get("/moved")).resolves.toEqual({ redirectTo: "https://elsewhere.example/story" });
+      // Every vetted address is handed over, not only the first, and undici's own
+      // selection then walks them: nothing listens on 127.0.0.2, and the page still
+      // arrives. That is what lets a mixed DNS answer be used rather than refused.
+      await expect(
+        server.get("/story", [
+          { address: "127.0.0.2", family: 4 },
+          { address: "127.0.0.1", family: 4 },
+        ]),
+      ).resolves.toEqual({ html: expect.stringContaining("real socket") });
+      // The publisher is told who is asking, and sees the name from the URL — the pin
+      // moves the socket, never the Host.
+      expect(seen).toEqual(
+        Array.from({ length: 3 }, () => ({
+          host: `pinned.invalid:${server.port}`,
+          ua: expect.stringContaining("TesseraBot"),
+        })),
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("refuses a page it cannot read, and one it cannot hold", async () => {
+    const server = await localPages((req, res) => {
+      if (req.url === "/paper.pdf") {
+        res.writeHead(200, { "content-type": "application/pdf" });
+        res.end("%PDF-1.4");
+        return;
+      }
+      if (req.url === "/declared") {
+        res.writeHead(200, { "content-type": "text/html", "content-length": String(5 * 1024 * 1024) });
+        res.end(Buffer.alloc(5 * 1024 * 1024, 0x61));
+        return;
+      }
+      // Chunked, so the ceiling can only be found by reading the body.
+      res.writeHead(200, { "content-type": "text/html" });
+      for (let mib = 0; mib < 5; mib += 1) res.write(Buffer.alloc(1024 * 1024, 0x61));
+      res.end();
+    });
+    try {
+      await expect(server.get("/paper.pdf")).rejects.toThrow(/application\/pdf.*not HTML/);
+      await expect(server.get("/declared")).rejects.toThrow(/declared 5242880 bytes/);
+      await expect(server.get("/chunked")).rejects.toThrow(/exceeded 4194304 bytes/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  // #70/AC7. The predicate the re-queue migration lifts the exclusion by — explained
+  // once, in `1755765000000-RequeueFailedExtractionAttempts`.
+  it("returns a page a transport-failed run marked to the candidate queue", async () => {
+    const rss = await createRssConnector("https://example.test/feed.xml");
+    const publisher = await AppDataSource.getRepository(Publisher).save({ name: "Example", domain: "example.test" });
+    const articles = AppDataSource.getRepository(Article);
+    const marked = {
+      publisherId: publisher.id,
+      discoveredByConnectorId: rss.id,
+      storyId: null,
+      publishedAt: new Date(),
+      extractionAttemptedAt: new Date(),
+    };
+    await articles.insert([
+      // Marked by a run that never reached the page: still on the excerpt rung.
+      { ...marked, title: "Poisoned", url: "https://example.test/poisoned", analysisText: "A one-line teaser.", analysisTextMode: "feed_excerpt" as const },
+      // Marked by a run that did reach it, back when one could: already raised.
+      { ...marked, title: "Raised", url: "https://example.test/raised", analysisText: "A whole body.", analysisTextMode: "api_content" as const },
+    ]);
+
+    const connector = await createExtractionConnector();
+    const refuse = { fetchText: noFeed, fetchPage: () => Promise.reject(new Error("nothing is a candidate yet")) };
+    expect((await runConnector(connector, refuse))!.discovered).toBe(0);
+
+    const queryRunner = AppDataSource.createQueryRunner();
+    try {
+      await new RequeueFailedExtractionAttempts1755765000000().up(queryRunner);
+    } finally {
+      await queryRunner.release();
+    }
+
+    const run = await runConnector(connector, { fetchText: noFeed, fetchPage: () => page("npr-lake-ontario.html") });
+    expect(run!.discovered).toBe(1);
+    expect(run!.enriched).toBe(1);
+    expect((await articles.findOneByOrFail({ url: "https://example.test/poisoned" })).analysisTextMode).toBe(
+      "api_content",
+    );
+    // The Article a working run raised keeps its mark: this re-queues a failure, not
+    // the pass's own work.
+    expect((await articles.findOneByOrFail({ url: "https://example.test/raised" })).extractionAttemptedAt).not.toBeNull();
   });
 
   it("spaces requests to one publisher without holding up another", async () => {
@@ -1868,6 +1969,66 @@ describe("runConnector over Readability extraction", () => {
       vi.useRealTimers();
     }
   });
+});
+
+// #70/AC1–AC2. Opt-in with `EXTRACTION_LIVE_SMOKE=1`, the arrangement
+// `GDELT_LIVE_SMOKE` established. The transport is the one part of this pass no fixture
+// can vouch for: every test that injects a `fetchPage` passes whether or not the real
+// one can reach a publisher, which is how a pass that had never fetched a page shipped
+// green. The feeds come from the seed rather than a list here, so a feed added to the
+// corpus is a feed this covers.
+const EXTRACTION_FEEDS = SEED_CONNECTORS.filter(
+  ({ kind, feedProvidesFullText }) => kind === "rss" && feedProvidesFullText === false,
+);
+
+describe.runIf(process.env.EXTRACTION_LIVE_SMOKE === "1")("Readability extraction live smoke", () => {
+  beforeEach(async () => {
+    await AppDataSource.query(`TRUNCATE "articles", "publishers", "ingestion_runs" CASCADE`);
+  });
+
+  it.each(EXTRACTION_FEEDS)("fetches and reads a page from $name", async ({ endpoint }) => {
+    const feed = parseRssFeed(await httpFetchText(endpoint));
+    const links = feed.items
+      .map(({ link }) => (link === null ? null : canonicalizeUrl(link)))
+      .filter((link): link is string => link !== null)
+      .slice(0, 2);
+    expect(links.length).toBeGreaterThan(0);
+
+    // A throw is the failure this exists to catch: before #70 every one of these was
+    // a bare `fetch failed`, at every publisher, without exception.
+    const bodies: number[] = [];
+    for (const link of links) {
+      const html = await httpFetchPage(link);
+      expect(html.length).toBeGreaterThan(0);
+      bodies.push(extractArticleText(html)?.length ?? 0);
+    }
+    console.log(`${endpoint} → ${bodies.map((chars) => `${chars} chars`).join(", ")}`);
+    // Not every page yields a body — a video item or a consent wall is an expected
+    // outcome the run counts (ADR-0018) — but a publisher where none of them does is
+    // a publisher this pass cannot read.
+    expect(Math.max(...bodies)).toBeGreaterThanOrEqual(MIN_EXTRACTED_TEXT_LENGTH);
+  }, 120_000);
+
+  it("raises Articles from the excerpt rung to api_content over live pages", async () => {
+    const rss = await createRssConnector("https://feeds.npr.org/1004/rss.xml");
+    const feedRun = await runConnector(rss, { fetchText: httpFetchText });
+    expect(feedRun!.inserted).toBeGreaterThan(0);
+    const articles = AppDataSource.getRepository(Article);
+    expect(await articles.countBy({ analysisTextMode: "feed_excerpt" })).toBeGreaterThan(0);
+
+    const extraction = await createExtractionConnector();
+    // No `fetchPage`: the real transport, which is the whole point.
+    const run = await runConnector(extraction, { fetchText: httpFetchText });
+
+    expect(run!.status).toBe("succeeded");
+    expect(run!.discovered).toBeGreaterThan(0);
+    expect(countersSumToDiscovered(run!)).toBe(true);
+    console.log(`extraction run → ${run!.discovered} attempted, ${run!.enriched} raised, ${run!.errorSummary ?? ""}`);
+    expect(run!.enriched).toBeGreaterThan(0);
+    const raised = await articles.findBy({ analysisTextMode: "api_content" });
+    expect(raised.length).toBe(run!.enriched);
+    expect(raised.every(({ analysisText }) => (analysisText?.length ?? 0) >= MIN_EXTRACTED_TEXT_LENGTH)).toBe(true);
+  }, 180_000);
 });
 
 // #45. The firehose is unbounded, so what it leaves behind ages out on a rolling

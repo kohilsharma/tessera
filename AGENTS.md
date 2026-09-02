@@ -20,7 +20,7 @@ Each pointer names the branch that reaches it. Read what your task hits.
 
 Phases 1 and 2 are complete; Phase 3 through #58; Phase 3.5 in flight — entity resolution (#66),
 a Story's timeline (#64), the search timeline (#65), candidate merges (#67), the bounded global
-graph (#68) and one Entity's neighbourhood (#69) are in; the Extraction pass (#70) is ahead.
+graph (#68), one Entity's neighbourhood (#69) and the repaired Extraction pass (#70) are in.
 `docs/repo-state.md` carries the per-ticket detail.
 
 **backend/** — one seam per module. Extend the seam rather than adding a parallel path.
@@ -133,6 +133,10 @@ Backend (`backend/`, after `docker compose up -d` — see `SETUP.md`):
   them pace against one rate-limited endpoint. `SYNTHESIS_LIVE_SMOKE=1` adds the one live
   synthesis check and reads `SYNTHESIS_*` from `backend/.env` by hand — `vitest.config.ts` pins
   those keys empty so nothing else can reach a provider by accident.
+- `EXTRACTION_LIVE_SMOKE=1` adds the seven live extraction checks — one page-fetch per
+  extraction-eligible seeded feed, plus one whole run — and takes ~60s, since it paces itself at
+  one request per publisher per 2 seconds. Run it after touching the page transport: an injected
+  `fetchPage` cannot tell you the real one works (#70).
 - `npm run worker` needs `REDIS_URL` and its own terminal.
 - `npm run seed` is the only path to an Admin (ADR-0015). Switching embedding providers needs a
   fresh volume — see `SETUP.md`.

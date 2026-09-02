@@ -1,6 +1,8 @@
 import { lookup } from "node:dns/promises";
-import { BlockList } from "node:net";
-import { Agent, type Dispatcher } from "undici";
+import { BlockList, type LookupFunction } from "node:net";
+// undici's own `fetch`, deliberately, and never the global one for a request that
+// carries a dispatcher — see fetchVettedPage for the measurement that forced it.
+import { Agent, fetch as undiciFetch, type Response as UndiciResponse } from "undici";
 import { IsNull, type EntityManager } from "typeorm";
 import { AppDataSource } from "../data-source";
 import { Article, isStrongerAnalysisTextMode } from "../entities/Article";
@@ -30,7 +32,9 @@ import { extractArticleText } from "./readability";
 // and its dependencies, returning the IngestionRun it persisted. Everything below
 // it — fetching, parsing, URL normalization, duplicate matching, enrichment,
 // counter accumulation — is internal and deliberately has no seam of its own, so
-// tests survive the pipeline being reorganised.
+// tests survive the pipeline being reorganised. One exception, added in #70 and
+// argued where it sits: `fetchVettedPage`, because the address rules it sits under
+// refuse the only server a test can prove a real fetch against.
 //
 // The injected fetchers are what let the whole pipeline be tested against
 // committed real feeds and a real GKG window with no network access: text for
@@ -163,16 +167,19 @@ export const MAX_EXTRACTION_ATTEMPTS = 20;
 const EXTRACTABLE_TERMS_CLASSES = TERMS_CLASSES.filter(
   (termsClass) => mayStoreText(termsClass) && !mayServeText(termsClass, "feed_excerpt"),
 );
-// A body large enough to be a download rather than an article. Enforced both by
-// the HTTP dispatcher and while consuming the stream, including chunked bodies.
+// A body large enough to be a download rather than an article. Enforced once,
+// while consuming the stream, so a chunked body that declares no Content-Length is
+// bounded too. The dispatcher can enforce a ceiling of its own (`maxResponseSize`)
+// and used to; it is left off because it wins the race and reports `terminated`,
+// while the failure an operator reads on the run should say which ceiling was hit.
 const MAX_PAGE_BYTES = 4 * 1024 * 1024;
 const MAX_PAGE_REDIRECTS = 5;
 const PAGE_REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 // RSS links are untrusted input. Reject every address that is not globally
 // routable before a publisher-page request can reach localhost, a private LAN or
-// a cloud metadata service. Every DNS answer must be public because fetch may
-// choose any of them.
+// a cloud metadata service. The connection may use only an address vetted here,
+// because fetchVettedPage pins the ones this returns.
 const NON_PUBLIC_IPV4 = new BlockList();
 const GLOBAL_UNICAST_IPV6 = new BlockList();
 const NON_PUBLIC_GLOBAL_IPV6 = new BlockList();
@@ -202,20 +209,29 @@ NON_PUBLIC_GLOBAL_IPV6.addSubnet("2001::", 23, "ipv6");
 NON_PUBLIC_GLOBAL_IPV6.addSubnet("2002::", 16, "ipv6");
 NON_PUBLIC_GLOBAL_IPV6.addSubnet("3fff::", 20, "ipv6");
 
-type PublicPageTarget = { url: URL; address: string; family: 4 | 6 };
+type PublicAddress = { address: string; family: 4 | 6 };
+export type PublicPageTarget = { url: URL; addresses: PublicAddress[] };
+// The seam sits *below* the address rules rather than around the whole fetch: a
+// test that proves this transport can fetch a page has to reach a local HTTP
+// server, and loopback is exactly what the rules above refuse. So the request
+// itself is what a test drives directly, with its real dispatcher (#70 — the
+// first cut injected the dispatcher, which is why the only broken part was the
+// one part never exercised), while the vetting and the hop loop are driven by
+// supplying `fetchVetted`.
 type PageFetchDeps = {
   resolve: typeof lookup;
-  createDispatcher: (address: string, family: 4 | 6) => Dispatcher;
+  fetchVetted: typeof fetchVettedPage;
 };
 
-const pageFetchDeps: PageFetchDeps = {
-  resolve: lookup,
-  createDispatcher: (address, family) =>
-    new Agent({
-      connect: { lookup: (_hostname, _options, callback) => callback(null, address, family) },
-      maxResponseSize: MAX_PAGE_BYTES,
-    }),
-};
+const pageFetchDeps: PageFetchDeps = { resolve: lookup, fetchVetted: fetchVettedPage };
+
+function isPublicAddress(entry: { address: string; family: number }): entry is PublicAddress {
+  const { address, family } = entry;
+  if (family !== 4 && family !== 6) return false;
+  return family === 4
+    ? !NON_PUBLIC_IPV4.check(address, "ipv4")
+    : GLOBAL_UNICAST_IPV6.check(address, "ipv6") && !NON_PUBLIC_GLOBAL_IPV6.check(address, "ipv6");
+}
 
 async function lookupWithSignal(hostname: string, signal: AbortSignal, resolve: typeof lookup) {
   let rejectAbort!: (reason: unknown) => void;
@@ -247,21 +263,21 @@ async function publicPageTarget(
   }
 
   const hostname = url.hostname.replace(/^\[|\]$/g, "");
-  const addresses = await lookupWithSignal(hostname, signal, resolve);
-  if (
-    addresses.length === 0 ||
-    addresses.some(
-      ({ address, family }) =>
-        (family !== 4 && family !== 6) ||
-        (family === 4
-          ? NON_PUBLIC_IPV4.check(address, "ipv4")
-          : !GLOBAL_UNICAST_IPV6.check(address, "ipv6") || NON_PUBLIC_GLOBAL_IPV6.check(address, "ipv6")),
-    )
-  ) {
-    throw new Error(`${url} is not a public http(s) page URL`);
-  }
-  const selected = addresses[0] as { address: string; family: 4 | 6 };
-  return { url, ...selected };
+  // Keep every public address the resolver named, refuse the host only when it
+  // named none. Safe because the connection may use nothing but what this
+  // returns: fetchVettedPage pins the list, so an entry the resolver mentioned
+  // and this filter dropped can never reach a socket. The first cut instead
+  // refused the host if *any* address was non-public, which is stricter than the
+  // pin requires and measurably wrong (#70): on this network path `www.bbc.co.uk`
+  // and `arstechnica.com` answer with a NAT64 synthetic AAAA (`64:ff9b::/96`,
+  // RFC 6052) beside the public IPv4 the pin would then have used, so both were
+  // refused as not-public and neither was ever fetched.
+  // ponytail: a NAT64 address is dropped rather than decoded, because the A record
+  // beside it names the same host and keeps it reachable. Decode the embedded
+  // IPv4 and vet *that* if Tessera is ever run on an IPv6-only NAT64 path.
+  const addresses = (await lookupWithSignal(hostname, signal, resolve)).filter(isPublicAddress);
+  if (addresses.length === 0) throw new Error(`${url} is not a public http(s) page URL`);
+  return { url, addresses };
 }
 
 // Exported for the same reason spaceDocRequest is: the pacing is the requirement,
@@ -270,9 +286,7 @@ export async function spaceExtractionRequest(url: string): Promise<void> {
   await pace(publisherDomain(url), EXTRACTION_MIN_DOMAIN_INTERVAL_MS);
 }
 
-type DispatcherRequestInit = RequestInit & { dispatcher: Dispatcher };
-
-async function readBoundedPage(res: Response, url: URL): Promise<string> {
+async function readBoundedPage(res: UndiciResponse, url: URL): Promise<string> {
   if (!res.body) return "";
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -301,6 +315,81 @@ async function readBoundedPage(res: Response, url: URL): Promise<string> {
   return new TextDecoder().decode(body);
 }
 
+// What one request against a vetted target ends in: the page, or where the
+// publisher says to look for it instead.
+type PageResponse = { redirectTo: string } | { html: string };
+
+// The second defect: undici calls this hook as
+// `lookup(hostname, { hints, all: true }, callback)`, and with `all` the callback
+// owes an **array**. The first cut ignored the options argument and always answered
+// with a scalar, so undici read `undefined` as the address (`Invalid IP address:
+// undefined`) — a failure that only appears once the version skew below is fixed
+// and the request actually starts. Both halves of Node's `LookupFunction` contract
+// are answered rather than the one undici 8 happens to ask for: assuming a caller's
+// half is what cost this pass every page it ever tried to fetch.
+const pinnedLookup =
+  (addresses: PublicAddress[]): LookupFunction =>
+  (_hostname, options, callback) =>
+    options.all ? callback(null, addresses) : callback(null, addresses[0].address, addresses[0].family);
+
+// One request, to a target whose addresses are already vetted — `publicPageTarget`
+// is the only thing that makes one, and `httpFetchPage` is the only caller outside
+// the suite. #70: this is the part of extraction that had never once succeeded —
+// measured 2026-09-01, zero pages fetched out of every attempt ever made, for any
+// publisher — so the three reasons are named here rather than left to be re-derived.
+//
+// It calls **undici's own `fetch`**, and that is the first of them: `package.json`
+// pins undici 8 while this Node bundles 6.24.1 (`process.versions.undici`), so the
+// global `fetch` built its request handler against 6 and handed it to the npm
+// package's `Agent`, which rejected it — every attempt died with a bare `fetch
+// failed`, cause `UND_ERR_INVALID_ARG: invalid onRequestStart method`, before any
+// of the vetting above could matter. One package supplies both halves here, so a
+// Node upgrade cannot re-open it; a dispatcher must never be handed to the global
+// `fetch` again.
+export async function fetchVettedPage({ url, addresses }: PublicPageTarget, signal: AbortSignal): Promise<PageResponse> {
+  // A one-request Agent pins the vetted addresses while preserving the URL
+  // hostname for Host and TLS SNI, so a resolver that answers differently a
+  // moment later — during the pacing wait, say — cannot move the connection.
+  // All of them, not the first: undici then runs its own family selection over a
+  // set this process vetted, which is what lets a mixed answer be used rather
+  // than refused (publicPageTarget).
+  // `allowH2: false` is the third defect: h2 negotiation over the pinned socket
+  // answers `NGHTTP2_INTERNAL_ERROR`, and HTTP/1.1 reaches every publisher on the
+  // curated list.
+  const dispatcher = new Agent({ connect: { lookup: pinnedLookup(addresses) }, allowH2: false });
+  try {
+    const res = await undiciFetch(url, {
+      headers: { "User-Agent": USER_AGENT, Accept: "text/html, application/xhtml+xml" },
+      signal,
+      redirect: "manual",
+      dispatcher,
+    });
+
+    if (PAGE_REDIRECT_STATUSES.has(res.status)) {
+      const location = res.headers.get("location");
+      if (!location) throw new Error(`${url} redirected without a location`);
+      await res.body?.cancel();
+      return { redirectTo: location };
+    }
+    if (!res.ok) throw new Error(`${url} responded ${res.status}`);
+    // A PDF or a video is not something Readability can read, and reading it to
+    // find that out is the waste this avoids.
+    const contentType = res.headers.get("content-type") ?? "";
+    if (!/^\s*(text\/html|application\/xhtml\+xml)/i.test(contentType)) {
+      throw new Error(`${url} served ${contentType || "no content type"}, not HTML`);
+    }
+    const declaredBytes = Number(res.headers.get("content-length") ?? 0);
+    if (declaredBytes > MAX_PAGE_BYTES) throw new Error(`${url} declared ${declaredBytes} bytes`);
+    return { html: await readBoundedPage(res, url) };
+  } finally {
+    // destroy, not close: close() waits for every response body to finish, and two
+    // paths above deliberately leave one unread (a content type Readability cannot
+    // use, a declared length over the ceiling). Refusing a page and then politely
+    // downloading it is the waste those checks exist to avoid.
+    await dispatcher.destroy();
+  }
+}
+
 export async function httpFetchPage(rawUrl: string, deps: PageFetchDeps = pageFetchDeps): Promise<string> {
   let url = new URL(rawUrl);
   for (let redirects = 0; ; redirects += 1) {
@@ -308,42 +397,13 @@ export async function httpFetchPage(rawUrl: string, deps: PageFetchDeps = pageFe
     const target = await publicPageTarget(url, signal, deps.resolve);
     url = target.url;
     await spaceExtractionRequest(url.toString());
-    // A one-request Agent pins the DNS answer vetted above while preserving the
-    // URL hostname for Host and TLS SNI. maxResponseSize enforces the byte ceiling
-    // even when a hostile server omits Content-Length or streams chunked data.
-    const dispatcher = deps.createDispatcher(target.address, target.family);
-    try {
-      const res = await fetch(
-        url,
-        {
-          headers: { "User-Agent": USER_AGENT, Accept: "text/html, application/xhtml+xml" },
-          signal,
-          redirect: "manual",
-          dispatcher,
-        } as DispatcherRequestInit,
-      );
-
-      if (PAGE_REDIRECT_STATUSES.has(res.status)) {
-        if (redirects >= MAX_PAGE_REDIRECTS) throw new Error(`${rawUrl} exceeded ${MAX_PAGE_REDIRECTS} redirects`);
-        const location = res.headers.get("location");
-        if (!location) throw new Error(`${url} redirected without a location`);
-        await res.body?.cancel();
-        url = new URL(location, url);
-        continue;
-      }
-      if (!res.ok) throw new Error(`${url} responded ${res.status}`);
-      // A PDF or a video is not something Readability can read, and reading it to
-      // find that out is the waste this avoids.
-      const contentType = res.headers.get("content-type") ?? "";
-      if (!/^\s*(text\/html|application\/xhtml\+xml)/i.test(contentType)) {
-        throw new Error(`${url} served ${contentType || "no content type"}, not HTML`);
-      }
-      const declaredBytes = Number(res.headers.get("content-length") ?? 0);
-      if (declaredBytes > MAX_PAGE_BYTES) throw new Error(`${url} declared ${declaredBytes} bytes`);
-      return await readBoundedPage(res, url);
-    } finally {
-      await dispatcher.close();
-    }
+    const response = await deps.fetchVetted(target, signal);
+    if ("html" in response) return response.html;
+    if (redirects >= MAX_PAGE_REDIRECTS) throw new Error(`${rawUrl} exceeded ${MAX_PAGE_REDIRECTS} redirects`);
+    // Resolved against the hop it came from, then vetted from scratch at the top
+    // of the loop: a redirect is the publisher choosing the next address, so it is
+    // no more trusted than the link that started this.
+    url = new URL(response.redirectTo, url);
   }
 }
 

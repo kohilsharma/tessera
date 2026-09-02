@@ -214,7 +214,8 @@ Terms are canonical: use these words in code, docs, and conversation.
   because what an operator needs around it — enable/disable, an on-demand Run, one
   IngestionRun per invocation — is what a connector already has; but it discovers nothing,
   so its "endpoint" names the pass rather than an address. Restricted to RSS-discovered
-  Articles that arrived without full text and never yet attempted, capped per run and paced
+  Articles that arrived without full text and never yet attempted (a mark only a migration
+  repairing a broken pass has ever cleared — #70), capped per run and paced
   per publisher domain: a firehose row's page is deliberately out of reach, because following
   63k unknown domains a day would make Tessera a general-purpose crawler. An Article whose feed
   already supplied a body is left alone, as is one whose Publisher has cleared its excerpt for

@@ -26,6 +26,7 @@ import { CreateFlashcards1755761000000 } from "./migrations/1755761000000-Create
 import { RecordFlashcardReviewsAndCacheQuestions1755762000000 } from "./migrations/1755762000000-RecordFlashcardReviewsAndCacheQuestions";
 import { CreateEntityResolution1755763000000 } from "./migrations/1755763000000-CreateEntityResolution";
 import { CreateEntityMergeReview1755764000000 } from "./migrations/1755764000000-CreateEntityMergeReview";
+import { RequeueFailedExtractionAttempts1755765000000 } from "./migrations/1755765000000-RequeueFailedExtractionAttempts";
 import { User } from "./entities/User";
 import { Publisher } from "./entities/Publisher";
 import { Story } from "./entities/Story";
@@ -119,6 +120,7 @@ export const AppDataSource = new DataSource({
     RecordFlashcardReviewsAndCacheQuestions1755762000000,
     CreateEntityResolution1755763000000,
     CreateEntityMergeReview1755764000000,
+    RequeueFailedExtractionAttempts1755765000000,
   ],
   synchronize: false,
   logging: false,
