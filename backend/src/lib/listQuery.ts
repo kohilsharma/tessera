@@ -129,6 +129,22 @@ export async function paginate<T extends object>(
   return { items, total };
 }
 
-export function toEnvelope<T>(items: T[], page: number, pageSize: number, total: number): ListEnvelope<T> {
-  return { items, page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
+// `extra` is for a fact about the whole list rather than about a row of it — the corpus a
+// firehose-reading list read, so far. Spread beside the pagination rather than folded into
+// each item, which would repeat one fact per row and make it look like a row's own.
+export function toEnvelope<T, Extra extends object = Record<never, never>>(
+  items: T[],
+  page: number,
+  pageSize: number,
+  total: number,
+  extra?: Extra,
+): ListEnvelope<T> & Extra {
+  return {
+    items,
+    page,
+    pageSize,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    ...(extra ?? ({} as Extra)),
+  };
 }

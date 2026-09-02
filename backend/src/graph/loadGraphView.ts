@@ -5,12 +5,14 @@ import { acceptedMembership } from "../lib/storyMembership";
 import {
   ENTITY_PROMOTION_FLOOR,
   NEIGHBOURHOOD_DEPTH,
+  PROPOSAL_SAMPLE_ARTICLES,
   VIEW_EDGE_CITATIONS,
   VIEW_EDGES_PER_ENTITY,
   VIEW_NODE_CAP,
   VIEW_THEME_FACETS,
   type PromotableKind,
 } from "./config";
+import { bothEndsBoundSql } from "./edgeBound";
 
 // The graph's read seam (#68, #69), the one every reader surface goes through, as
 // `runEntityResolution` is the one every write goes through. One Entity's neighbourhood is
@@ -124,17 +126,16 @@ const NODES_SQL = `
    ORDER BY p."articleCount" DESC, e."canonicalName" ASC, e."id" ASC
    LIMIT $2`;
 
-// Edges among the drawn nodes only, then bounded again from both ends the way the pass
-// bounds its own (`rebuildEdges`): a pair inside either endpoint's strongest few is
-// kept, so a node is never drawn as an isolate because its one tie was its neighbour's
-// seventh. `COUNT(*)` is the weight because a unique index makes one row per (pair,
-// Article) — the count cannot disagree with the citations it counts.
+// Edges among the drawn nodes only, then bounded again from both ends by the rule the
+// pass bounds its own graph with — `bothEndsBoundSql` (./edgeBound.ts), one spelling read
+// by both seams over different numbers. `COUNT(*)` is the weight because a unique index
+// makes one row per (pair, Article) — the count cannot disagree with the citations it
+// counts.
 //
 // `alsoKeep` is the one thing a neighbourhood needs that the global view does not: a
 // clause that exempts the focus's own ties from the bound. Every neighbour on that page is
 // there *because* it ties to the focus, so a neighbour drawn without that tie is a dot
-// placed for a reason the picture no longer shows. Each pair appears in `directed` in both
-// orders, so matching the focus as `self` reaches every one of them.
+// placed for a reason the picture no longer shows.
 function boundedEdgesSql(alsoKeep = ""): string {
   return `
   WITH ${CITED_SQL},
@@ -144,20 +145,7 @@ function boundedEdgesSql(alsoKeep = ""): string {
      WHERE "entityAId" = ANY($2::uuid[]) AND "entityBId" = ANY($2::uuid[])
      GROUP BY 1, 2
   ),
-  directed AS (
-    SELECT a AS "self", b AS "other", w FROM pair
-    UNION ALL
-    SELECT b, a, w FROM pair
-  ),
-  ranked AS (
-    SELECT "self", "other",
-           ROW_NUMBER() OVER (PARTITION BY "self" ORDER BY w DESC, "other" ASC) AS "rank"
-      FROM directed
-  ),
-  kept AS (
-    SELECT DISTINCT LEAST("self", "other") AS a, GREATEST("self", "other") AS b
-      FROM ranked WHERE "rank" <= $3${alsoKeep}
-  )
+  ${bothEndsBoundSql("$3", alsoKeep)}
   SELECT p.a AS "entityAId", p.b AS "entityBId", p.w AS "weight"
     FROM pair p JOIN kept k ON k.a = p.a AND k.b = p.b
    ORDER BY p.w DESC, p.a ASC, p.b ASC`;
@@ -411,15 +399,17 @@ export type EdgeCitation = ReturnType<typeof toPublicArticle> & {
 // disagree about the pair they describe.
 export type EdgeCitations = { weight: number; citations: EdgeCitation[] };
 
-type CitationRow = Omit<ArticleProjection, "publisher"> & {
-  publisherId: string;
-  publisherName: string;
-  publisherDomain: string;
-  storyId: string | null;
-  storySlug: string | null;
-  storyTitle: string | null;
-  weight: number;
-};
+// The one LEFT JOIN through `acceptedMembership`, as it arrives on a row. Named because
+// two statements here select it and one predicate decides it.
+type StoryColumns = { storyId: string | null; storySlug: string | null; storyTitle: string | null };
+
+type CitationRow = Omit<ArticleProjection, "publisher"> &
+  StoryColumns & {
+    publisherId: string;
+    publisherName: string;
+    publisherDomain: string;
+    weight: number;
+  };
 
 // `LEAST`/`GREATEST` rather than two predicates: a pair is stored ordered by id
 // (`CHK_entity_edges_ordered`), which is storage's business, and a reader arrives from
@@ -444,8 +434,10 @@ const CITATIONS_SQL = `
    LIMIT $4`;
 
 // The three Story columns are null together or set together — they are one LEFT JOIN's row
-// — and checking all three is what says so to the compiler without an assertion.
-const storyOf = (row: CitationRow) =>
+// — and checking all three is what says so to the compiler without an assertion. Shared by
+// both surfaces that label a citation, so "which of these can open a record" is decided in
+// one place however the reader arrived.
+const storyOf = (row: StoryColumns) =>
   row.storyId && row.storySlug && row.storyTitle
     ? { id: row.storyId, slug: row.storySlug, title: row.storyTitle }
     : null;
@@ -476,4 +468,78 @@ export async function loadEdgeCitations(
       story: storyOf(row),
     })),
   };
+}
+
+// The reporting behind one side of a merge proposal (#67), read here rather than beside
+// the route it serves. AGENTS.md's membership invariant exempts *this seam*, not a route
+// that happens to ask the graph the same question: a queue reading `entity_edges` in a
+// query of its own would be a second firehose reader outside the one documented exception,
+// which is the shape the invariant names as a bug.
+//
+// Membership is joined for the reason it is joined under an edge — to **label** a
+// citation, never to filter one. The names a reviewer decides between are mostly firehose
+// reporting, so filtering to Story-backed Articles would empty the very evidence the
+// decision rests on; labelling instead lets the queue open a record where there is one and
+// the Publisher's own copy where there is not.
+//
+// Read from the citations rather than from the annotation window: `entity_edges` is a few
+// thousand rows with both endpoint columns indexed, where the annotations behind it are
+// millions. A name with no kept edge samples nothing, which is honest — its Article count
+// still states what the pass counted over the whole window.
+export type ProposalCitation = {
+  entityId: string;
+  id: string;
+  title: string;
+  url: string;
+  publishedAt: Date;
+  story: { id: string; slug: string; title: string } | null;
+};
+
+type ProposalCitationRow = Omit<ProposalCitation, "story"> & StoryColumns;
+
+const PROPOSAL_CITATIONS_SQL = `
+  SELECT ranked."entityId", ranked."id", ranked."title", ranked."url", ranked."publishedAt",
+         ranked."storyId", ranked."storySlug", ranked."storyTitle"
+    FROM (
+      SELECT cite."entityId", a."id", a."title", a."url", a."publishedAt",
+             s."id" AS "storyId", s."slug" AS "storySlug", s."title" AS "storyTitle",
+             ROW_NUMBER() OVER (PARTITION BY cite."entityId"
+                                ORDER BY a."publishedAt" DESC, a."id") AS "rank"
+        FROM (
+          SELECT "entityAId" AS "entityId", "articleId" FROM "entity_edges"
+           WHERE "entityAId" = ANY($1::uuid[])
+          UNION
+          SELECT "entityBId", "articleId" FROM "entity_edges"
+           WHERE "entityBId" = ANY($1::uuid[])
+        ) cite
+        JOIN "articles" a ON a."id" = cite."articleId"
+        LEFT JOIN "stories" s ON s."id" = a."storyId" AND ${acceptedMembership("a")}
+    ) ranked
+   WHERE ranked."rank" <= $2`;
+
+// Keyed by Entity so a caller asking about both sides of every proposal on a page makes
+// one query rather than one per side.
+export async function loadProposalCitations(entityIds: string[]): Promise<Map<string, ProposalCitation[]>> {
+  const byEntity = new Map<string, ProposalCitation[]>();
+  if (entityIds.length === 0) return byEntity;
+
+  const rows = (await AppDataSource.query(PROPOSAL_CITATIONS_SQL, [
+    entityIds,
+    PROPOSAL_SAMPLE_ARTICLES,
+  ])) as ProposalCitationRow[];
+
+  for (const row of rows) {
+    const citation: ProposalCitation = {
+      entityId: row.entityId,
+      id: row.id,
+      title: row.title,
+      url: row.url,
+      publishedAt: row.publishedAt,
+      story: storyOf(row),
+    };
+    const held = byEntity.get(row.entityId);
+    if (held) held.push(citation);
+    else byEntity.set(row.entityId, [citation]);
+  }
+  return byEntity;
 }

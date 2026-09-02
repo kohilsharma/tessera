@@ -36,6 +36,7 @@ import {
   MAX_EXTRACTION_ATTEMPTS,
   fetchVettedPage,
   httpFetchPage,
+  pinnedLookup,
   httpFetchText,
   isExtractionEligibleFeed,
   runConnector,
@@ -1878,6 +1879,28 @@ describe("runConnector over Readability extraction", () => {
     } finally {
       await server.close();
     }
+  });
+
+  // #70's second defect, asserted rather than reasoned about: undici asks for the array
+  // half (`all: true`) and the first cut answered every call with a scalar, so the socket
+  // read `undefined` as its address. The test above proves the half undici uses; this one
+  // proves the half nothing here calls, which is exactly the shape of the defect — the
+  // broken part was the part no test reached.
+  it("answers both halves of Node's lookup contract from the pinned addresses", () => {
+    const addresses: PublicPageTarget["addresses"] = [
+      { address: "93.184.216.34", family: 4 },
+      { address: "2606:2800:220:1:248:1893:25c8:1946", family: 6 },
+    ];
+    const lookupPinned = pinnedLookup(addresses);
+
+    const all = vi.fn();
+    lookupPinned("publisher.example", { all: true }, all);
+    expect(all).toHaveBeenCalledWith(null, addresses);
+
+    // The scalar half owes an address and a family as two arguments, not a record.
+    const one = vi.fn();
+    lookupPinned("publisher.example", { all: false }, one);
+    expect(one).toHaveBeenCalledWith(null, "93.184.216.34", 4);
   });
 
   it("refuses a page it cannot read, and one it cannot hold", async () => {

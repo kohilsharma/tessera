@@ -23,6 +23,7 @@ import {
   type MergeProposalSide,
   type PromptTemplateSummary,
 } from "../api/client";
+import { GraphLedger } from "../components/graphRegister";
 import { DateStamp } from "../components/indexArchetype";
 import { DashboardRegister, RegisterRow } from "../components/dashboardArchetype";
 import { EmptyState, EntryList, ErrorState, PendingState, RetryableError } from "../components/uiStates";
@@ -283,9 +284,12 @@ export function ClusteringReviewRegister() {
 // job here, where the whole decision is whether these two stacks of reporting are about
 // one thing.
 //
-// Linked out to the original rather than in to an Article record: the graph is
-// firehose-derived (ADR-0028), so a cited Article may have no accepted Story membership
-// and therefore no record page a reader can open. The Publisher's own copy always opens.
+// Each sample opens where it can actually be read, which is what the endpoint's `story`
+// label decides — the same reading the neighbourhood's citation drawer takes (#69). The
+// graph is firehose-derived (ADR-0028), so most of what it cites has no accepted Story
+// membership and therefore no Article record: `/articles/:id` 404s exactly those rows.
+// Story-backed reporting opens its record, the rest opens the original at its Publisher,
+// which is the only place there is to read it.
 function ProposalSide({ role, side }: { role: string; side: MergeProposalSide }) {
   return (
     <li>
@@ -304,9 +308,13 @@ function ProposalSide({ role, side }: { role: string; side: MergeProposalSide })
               <DateStamp iso={article.publishedAt} />
             </span>{" "}
             ·{" "}
-            <a href={article.url} target="_blank" rel="noreferrer">
-              {article.title}
-            </a>
+            {article.story ? (
+              <Link to={`/articles/${article.id}`}>{article.title}</Link>
+            ) : (
+              <a href={article.url} target="_blank" rel="noreferrer">
+                {article.title}
+              </a>
+            )}
           </p>
         ))
       )}
@@ -347,6 +355,13 @@ export function EntityMergeReviewRegister() {
         />
       )}
       {decide.error && <ErrorState>{decide.error.message}</ErrorState>}
+      {/* The corpus this queue read, in the words and the register the two reader graph
+          surfaces state it in (components/graphRegister). AGENTS.md exempts the graph's
+          read seam from the membership join on the condition that every surface drawing it
+          says which corpus it read, and a reviewer folding two names is reading the
+          firehose rather than the Curated Corpus alone. Above the queue, so it is stated in
+          the empty state too — where "nothing is waiting" is a fact about that corpus. */}
+      {review.data && <GraphLedger retainedDays={review.data.retainedDays} />}
       {review.data &&
         (review.data.items.length === 0 ? (
           <EmptyState>

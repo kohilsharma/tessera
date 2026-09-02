@@ -343,7 +343,11 @@ type PageHopOutcome = { redirectTo: string } | { html: string };
 // half is what cost this pass every page it ever tried to fetch. The scalar half is
 // the one no test reaches, which is why the target type — not a guard here — is what
 // makes `addresses[0]` safe to read.
-const pinnedLookup =
+//
+// Exported so both halves are asserted rather than reasoned about: the scalar half is
+// reached by no request this suite makes, and "the part never exercised is the part that
+// is broken" is the whole of what #70 measured.
+export const pinnedLookup =
   (addresses: PublicPageTarget["addresses"]): LookupFunction =>
   (_hostname, options, callback) =>
     options.all ? callback(null, addresses) : callback(null, addresses[0].address, addresses[0].family);

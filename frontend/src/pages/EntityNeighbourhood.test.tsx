@@ -248,7 +248,7 @@ describe("An Entity's neighbourhood — the names alongside it", () => {
     expect(within(key).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
       "person · 1",
       "organization · 1",
-      "place · 1",
+      "location · 1",
     ]);
   });
 });

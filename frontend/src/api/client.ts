@@ -642,10 +642,13 @@ export function decidePendingAssignment(
 export const ENTITY_KINDS = ["person", "organization", "location"] as const;
 export type EntityKind = (typeof ENTITY_KINDS)[number];
 
+// CONTEXT.md's own words for the three promotable kinds. Not "place" for `location`:
+// the glossary fixes these terms for code, docs and conversation alike, and a label that
+// renames one of them on screen makes the reader's word and the codebase's word differ.
 export const ENTITY_KIND_LABELS: Record<EntityKind, string> = {
   person: "person",
   organization: "organization",
-  location: "place",
+  location: "location",
 };
 
 export type MergeProposalSide = {
@@ -655,7 +658,15 @@ export type MergeProposalSide = {
   canonicalName: string;
   articleCount: number;
   // A sample, not the side's whole reporting: enough to recognise which name this is.
-  articles: { id: string; title: string; url: string; publishedAt: string }[];
+  // `story` is the membership label the graph seam attaches, never a filter: reporting a
+  // reader can open as a record, against reporting they can only open at its Publisher.
+  articles: {
+    id: string;
+    title: string;
+    url: string;
+    publishedAt: string;
+    story: { id: string; slug: string; title: string } | null;
+  }[];
 };
 
 export type MergeProposal = {
@@ -674,7 +685,10 @@ export type DecidedMergeProposal = {
   mergedEntityId: string;
 };
 
-export function getMergeProposals(): Promise<ListEnvelope<MergeProposal>> {
+// The corpus rides with the queue, as it rides with both reader surfaces: this list reads
+// the firehose through the graph's seam, and AGENTS.md exempts that seam on the condition
+// that a surface drawing it says so.
+export function getMergeProposals(): Promise<ListEnvelope<MergeProposal> & { retainedDays: number }> {
   return getJson("/api/v1/graph/merge-proposals", "Could not load the merge review queue");
 }
 

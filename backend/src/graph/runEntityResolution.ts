@@ -9,6 +9,7 @@ import {
   PROMOTABLE_KINDS,
   type PromotableKind,
 } from "./config";
+import { bothEndsBoundSql } from "./edgeBound";
 import { applyEntityMerge, refusalKeySql } from "./merge";
 
 // The fold identity is decided on: case, punctuation and whitespace. One SQL
@@ -335,9 +336,10 @@ async function resolveMerges(manager: EntityManager): Promise<{ merged: number; 
 }
 
 // The co-occurrence graph, rebuilt whole: one citation row per pair per Article, for
-// the pairs that are among the strongest EDGES_PER_ENTITY of *either* endpoint. The
-// union is the point — bounding from one side only would drop an Entity's third
-// strongest neighbour on the grounds that the Entity was that neighbour's thirtieth.
+// the pairs that are among the strongest EDGES_PER_ENTITY of *either* endpoint. That
+// rule is `bothEndsBoundSql` (./edgeBound.ts) rather than a second copy of it here,
+// because the read path bounds one screen the same way over a smaller number, and two
+// spellings of one rule drift into two different graphs without either one failing.
 //
 // Because a mention row is distinct per (Article, Entity), a pair is observed at most
 // once per Article, so the weight is a count of Articles and the citation index cannot
@@ -349,29 +351,16 @@ async function resolveMerges(manager: EntityManager): Promise<{ merged: number; 
 async function rebuildEdges(manager: EntityManager): Promise<number> {
   await manager.query(`DELETE FROM "entity_edges"`);
   await manager.query(
-    `WITH pair AS MATERIALIZED (
+    `WITH cite AS MATERIALIZED (
        SELECT m1."entityId" AS a, m2."entityId" AS b, m1."articleId"
          FROM "resolution_mention" m1
          JOIN "resolution_mention" m2
            ON m2."articleId" = m1."articleId" AND m2."entityId" > m1."entityId"
      ),
-     weight AS (SELECT a, b, COUNT(*)::int AS w FROM pair GROUP BY 1, 2),
-     directed AS (
-       SELECT a AS "self", b AS "other", w FROM weight
-       UNION ALL
-       SELECT b, a, w FROM weight
-     ),
-     ranked AS (
-       SELECT "self", "other",
-              ROW_NUMBER() OVER (PARTITION BY "self" ORDER BY w DESC, "other" ASC) AS "rank"
-         FROM directed
-     ),
-     kept AS (
-       SELECT DISTINCT LEAST("self", "other") AS a, GREATEST("self", "other") AS b
-         FROM ranked WHERE "rank" <= $1
-     )
+     pair AS (SELECT a, b, COUNT(*)::int AS w FROM cite GROUP BY 1, 2),
+     ${bothEndsBoundSql("$1")}
      INSERT INTO "entity_edges" ("entityAId", "entityBId", "articleId")
-     SELECT p.a, p.b, p."articleId" FROM pair p JOIN kept k ON k.a = p.a AND k.b = p.b`,
+     SELECT c.a, c.b, c."articleId" FROM cite c JOIN kept k ON k.a = c.a AND k.b = c.b`,
     [EDGES_PER_ENTITY],
   );
   const [row] = (await manager.query(

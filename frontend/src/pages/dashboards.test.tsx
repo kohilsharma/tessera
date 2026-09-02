@@ -180,6 +180,8 @@ describe("Admin dashboard", () => {
           title: "Wire service reports grid delay",
           url: "https://ledger.example/wire-grid",
           publishedAt: "2026-08-30T07:00:00.000Z",
+          // Accepted into a Story, so this one has a record a reviewer can open.
+          story: { id: "s1", slug: "grid-delay", title: "Grid delay" },
         },
       ],
     },
@@ -194,6 +196,8 @@ describe("Admin dashboard", () => {
           title: "Truncated byline on interconnector filing",
           url: "https://ledger.example/byline",
           publishedAt: "2026-08-29T07:00:00.000Z",
+          // Firehose reporting in no Story — the majority case the graph reads.
+          story: null,
         },
       ],
     },
@@ -240,7 +244,7 @@ describe("Admin dashboard", () => {
       if (String(input).startsWith("/api/v1/graph/merge-proposals")) {
         return proposals === null
           ? new Promise<Response>(() => {})
-          : Promise.resolve(jsonResponse(listEnvelope(proposals)));
+          : Promise.resolve(jsonResponse({ ...listEnvelope(proposals), retainedDays: 7 }));
       }
       if (String(input).startsWith("/api/v1/stories")) return Promise.resolve(jsonResponse(listEnvelope(stories)));
       return Promise.resolve(jsonResponse(payload));
@@ -392,7 +396,7 @@ describe("Admin dashboard", () => {
         return Promise.resolve(jsonResponse(listEnvelope([])));
       }
       if (String(input).startsWith("/api/v1/graph/merge-proposals")) {
-        return Promise.resolve(jsonResponse(listEnvelope([])));
+        return Promise.resolve(jsonResponse({ ...listEnvelope([]), retainedDays: 7 }));
       }
       if (String(input).startsWith("/api/v1/stories")) return Promise.resolve(jsonResponse(listEnvelope([])));
       return Promise.resolve(jsonResponse(adminPayload({ connectors })));
@@ -568,7 +572,7 @@ describe("Admin dashboard", () => {
         return Promise.resolve(jsonResponse({ error: "Review queue unavailable" }, 500));
       }
       if (String(input).startsWith("/api/v1/graph/merge-proposals")) {
-        return Promise.resolve(jsonResponse(listEnvelope([])));
+        return Promise.resolve(jsonResponse({ ...listEnvelope([]), retainedDays: 7 }));
       }
       if (String(input).startsWith("/api/v1/stories")) return Promise.resolve(jsonResponse(listEnvelope([])));
       return Promise.resolve(jsonResponse(adminPayload()));
@@ -703,13 +707,24 @@ describe("Admin dashboard", () => {
     // the decision, so the pair is never one undifferentiated run of links.
     expect(within(review).getByText("Kept · Australian Associated Press · 9 Articles")).toBeInTheDocument();
     expect(within(review).getByText("Folded in · Australian Associated · 3 Articles")).toBeInTheDocument();
-    // Out to the publisher's own copy rather than in to an Article record: the graph is
-    // firehose-derived, so a cited Article may have no readable record page (ADR-0028).
+    // Each sample opens where it can be read, which the endpoint's membership label
+    // decides: an Article a Story accepted has a record, and `/articles/:id` 404s the rest
+    // — which is most of a firehose-derived graph (ADR-0028), and opens at its Publisher.
     expect(within(review).getByRole("link", { name: "Wire service reports grid delay" })).toHaveAttribute(
       "href",
-      "https://ledger.example/wire-grid",
+      "/articles/a2",
+    );
+    expect(within(review).getByRole("link", { name: /Truncated byline/ })).toHaveAttribute(
+      "href",
+      "https://ledger.example/byline",
     );
     expect(within(review).getByRole("link", { name: /Truncated byline/ })).toHaveAttribute("target", "_blank");
+    // The price of AGENTS.md's exemption, paid on this surface as it is on the two reader
+    // graph surfaces: a queue reading the firehose says which corpus it read.
+    expect(within(review).getByText("Corpus").closest("div")).toHaveTextContent(
+      "GDELT firehose, plus Tessera’s Curated Corpus",
+    );
+    expect(within(review).getByText("Retention window").closest("div")).toHaveTextContent("Rolling 7 days");
   });
 
   it.each([

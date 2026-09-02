@@ -21,6 +21,7 @@ import { GKG_ANNOTATION_KINDS, type GkgAnnotationKind } from "../src/entities/Gk
 import { Publisher } from "../src/entities/Publisher";
 import { Story } from "../src/entities/Story";
 import { User } from "../src/entities/User";
+import { GDELT_RETENTION_DAYS } from "../src/ingestion/retention";
 import { stageAnnotations } from "../src/ingestion/runConnector";
 import { setupTestDb } from "./setupTestDb";
 
@@ -205,9 +206,22 @@ async function nameSimilarity(one: string, other: string): Promise<number> {
 //
 // The survivor is the better-attested side, so the first name gets one Article more —
 // which is what fixes the orientation, and what the test then reads back.
-async function stageMergePair(publisherId: string, [survivor, merged]: readonly [string, string]): Promise<void> {
-  await coMention(publisherId, [survivor, "Global Newswire"], ENTITY_PROMOTION_FLOOR + 1, `survivor`, "organization");
-  await coMention(publisherId, [merged, "Regional Press Club"], ENTITY_PROMOTION_FLOOR, `merged`, "organization");
+// Returns each side's own reporting, oldest first, for the tests that need to say
+// something about one Article rather than about the pair.
+async function stageMergePair(
+  publisherId: string,
+  [survivor, merged]: readonly [string, string],
+): Promise<{ survivor: Article[]; merged: Article[] }> {
+  return {
+    survivor: await coMention(
+      publisherId,
+      [survivor, "Global Newswire"],
+      ENTITY_PROMOTION_FLOOR + 1,
+      `survivor`,
+      "organization",
+    ),
+    merged: await coMention(publisherId, [merged, "Regional Press Club"], ENTITY_PROMOTION_FLOOR, `merged`, "organization"),
+  };
 }
 
 async function onlyProposalId(): Promise<string> {
@@ -808,6 +822,58 @@ describe("the merge review queue", () => {
     expect(proposal.survivor.articles.map((a: { title: string }) => a.title)).not.toEqual(
       proposal.merged.articles.map((a: { title: string }) => a.title),
     );
+  });
+
+  // AGENTS.md's membership invariant exempts the graph's read seam on the condition that
+  // every surface drawing it states the corpus it read — this queue is one of those
+  // surfaces, and it reads the firehose through `loadGraphView.ts` like the rest.
+  // Membership *labels* a citation here and never filters one: the reporting a fold is
+  // decided on is mostly firehose reporting, so a queue that showed only Story-backed
+  // Articles would hide the evidence the decision rests on.
+  it("states the corpus it read, and labels a sample the reader could open as a Story", async () => {
+    const publisher = await createPublisher("labelled.example");
+    const staged = await stageMergePair(publisher.id, BAND_PAIR);
+    const token = await createAdminToken("labelled-admin@example.com");
+    const story = await AppDataSource.getRepository(Story).save({
+      slug: "the-newswire-fold",
+      title: "The Newswire Fold",
+      category: "technology",
+      firstSeenAt: new Date("2026-08-25T00:00:00Z"),
+      lastSeenAt: new Date("2026-08-25T00:00:00Z"),
+    });
+    // Two of the survivor's Articles, dated newest so the sample is drawn from them
+    // rather than from whichever of its six rows a tie-break happened to pick: one
+    // accepted into the Story, one still under review — the second is reporting a reader
+    // can open at its Publisher and not a Story they can be sent to.
+    const articles = AppDataSource.getRepository(Article);
+    const [pending, accepted] = staged.survivor.slice(-2);
+    await articles.update(accepted.id, {
+      publishedAt: new Date("2026-09-01T10:00:00Z"),
+      storyId: story.id,
+      storyAssignmentStatus: "auto_accepted",
+    });
+    await articles.update(pending.id, {
+      publishedAt: new Date("2026-09-01T09:00:00Z"),
+      storyId: story.id,
+      storyAssignmentStatus: "pending_review",
+    });
+    await runEntityResolution();
+
+    const res = await request(app()).get("/api/v1/graph/merge-proposals").set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.retainedDays).toBe(GDELT_RETENTION_DAYS);
+    const sampled: { id: string; story: { slug: string } | null }[] = res.body.items.flatMap(
+      (proposal: { survivor: { articles: unknown[] }; merged: { articles: unknown[] } }) => [
+        ...proposal.survivor.articles,
+        ...proposal.merged.articles,
+      ],
+    );
+    const labelOf = new Map(sampled.map((article) => [article.id, article.story]));
+    expect(labelOf.get(accepted.id)).toMatchObject({ id: story.id, slug: "the-newswire-fold" });
+    // Present but unlabelled — filtered out, it would not be in the sample at all.
+    expect(labelOf.has(pending.id)).toBe(true);
+    expect(labelOf.get(pending.id)).toBeNull();
   });
 
   it("merges both names on an accept, carrying their edges with the citations intact", async () => {

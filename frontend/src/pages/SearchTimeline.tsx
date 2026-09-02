@@ -4,7 +4,8 @@ import { Link } from "react-router-dom";
 import { searchTimeline, type SearchTimelineLane, type TimelinePoint } from "../api/client";
 import { ArticleEntry, FilterRegister, IndexPage } from "../components/indexArchetype";
 import { CategoryFilter, DateRangeFilter, SearchTermFilter, useListQueryParams } from "../components/listControls";
-import { PERIOD_LABELS, TimelineAxis, TimelineVolume, peakOf } from "../components/timelineRegister";
+import { peakOf } from "../components/scale";
+import { PERIOD_LABELS, TimelineAxis, TimelineVolume } from "../components/timelineRegister";
 import { EmptyState, EntryList, PendingState, RetryableError } from "../components/uiStates";
 
 // #65: search anything, read it as a timeline. The fourth Index-archetype surface — same

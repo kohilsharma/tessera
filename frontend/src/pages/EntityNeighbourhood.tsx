@@ -7,11 +7,21 @@ import {
   type GraphNode,
 } from "../api/client";
 import { DashboardRegister, RegisterRow } from "../components/dashboardArchetype";
-import { corpusLedger, edgesOn, GraphKey, GraphPlot, otherEnd, reports } from "../components/graphRegister";
+import {
+  boundNote,
+  corpusLedger,
+  drawnOf,
+  edgesOn,
+  graphRule,
+  GraphKey,
+  GraphPlot,
+  otherEnd,
+  reports,
+} from "../components/graphRegister";
 import { DateStamp, Entry, FilterRegister } from "../components/indexArchetype";
 import { ThemeFacetFilter } from "../components/listControls";
 import { RecordMasthead, RecordSection } from "../components/recordArchetype";
-import { peakOf } from "../components/timelineRegister";
+import { peakOf } from "../components/scale";
 import { EmptyState, EntryList, PendingState, RetryableError } from "../components/uiStates";
 
 // #69: one Entity's record — the names reported alongside it, and the reporting behind every
@@ -174,12 +184,7 @@ export default function EntityNeighbourhood() {
     (linkedTo.get(focus.id) ?? []).map((edge) => [otherEnd(edge, focus.id), edge.weight]),
   );
   const heaviest = peakOf(neighbours.map((node) => ties.get(node.id) ?? 0));
-  const drawn =
-    neighbourCount === 0
-      ? "No names"
-      : neighbours.length === neighbourCount
-        ? `All ${neighbourCount} names`
-        : `${neighbours.length} of ${neighbourCount} names`;
+  const drawn = drawnOf(neighbours.length, neighbourCount);
   // The facet travels with the reader walking from name to name: a narrowed reading of the
   // graph stays narrowed until they widen it. `link` travels only where a caller names one,
   // which is a line tapped between two neighbours — the reader arrives with its evidence open.
@@ -276,13 +281,10 @@ export default function EntityNeighbourhood() {
             <p className="record-prose">
               Names reported alongside <strong>{focus.canonicalName}</strong> in the{" "}
               <strong>retained firehose</strong> — GDELT&rsquo;s Global Knowledge Graph over the last{" "}
-              {view.retainedDays} days, together with Tessera&rsquo;s Curated Corpus. A name enters the
-              graph once {view.promotionFloor} separate reports have named it; a link means two names
-              were reported together, and its weight is how many reports that was. Open a link to read
-              those reports.
+              {view.retainedDays} days, together with Tessera&rsquo;s Curated Corpus.{" "}
+              {graphRule(view.promotionFloor)} Open a link to read those reports.
               {neighbours.length < neighbourCount &&
-                ` Showing the ${neighbours.length} names most reported alongside this one, because a
-                  neighbourhood of every name at once is a picture of none of them.`}
+                boundNote(`the ${neighbours.length} names most reported alongside this one`, "neighbourhood")}
             </p>
             <GraphKey nodes={view.nodes} />
             <GraphPlot

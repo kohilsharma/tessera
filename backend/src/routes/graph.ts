@@ -1,7 +1,13 @@
 import { Router } from "express";
 import { AppDataSource } from "../data-source";
+import { GDELT_RETENTION_DAYS } from "../ingestion/retention";
 import { enqueueEntityResolutionRun } from "../graph/queue";
-import { loadEdgeCitations, loadEntityNeighbourhood, loadGraphView } from "../graph/loadGraphView";
+import {
+  loadEdgeCitations,
+  loadEntityNeighbourhood,
+  loadGraphView,
+  loadProposalCitations,
+} from "../graph/loadGraphView";
 import { MERGE_PROPOSAL_DECISIONS, decideMergeProposal, type MergeProposalDecision } from "../graph/merge";
 import type { PromotableKind } from "../graph/config";
 import { EntityMergeProposal } from "../entities/EntityMergeProposal";
@@ -87,49 +93,6 @@ graphRouter.get(
   }),
 );
 
-// Enough reporting to recognise a name, not a page of it: three Articles per side answers
-// "which stories is this the name from", which is the question a reviewer is actually
-// deciding. Sampled rather than counted here — the counts are the ones the pass measured
-// and stored on the proposal.
-const PROPOSAL_SAMPLE_ARTICLES = 3;
-
-type SampleArticle = { entityId: string; id: string; title: string; url: string; publishedAt: Date };
-
-// The Articles behind each side, read from the citations rather than from the annotation
-// window: `entity_edges` is a few thousand rows with both endpoint columns indexed, where
-// the annotations it was derived from are millions. A node with no kept edges samples
-// nothing, which is honest — its Article count still states what the pass counted.
-async function sampleArticlesByEntity(entityIds: string[]): Promise<Map<string, SampleArticle[]>> {
-  const samples = new Map<string, SampleArticle[]>();
-  if (entityIds.length === 0) return samples;
-
-  const rows = (await AppDataSource.query(
-    `SELECT ranked."entityId", ranked."id", ranked."title", ranked."url", ranked."publishedAt"
-       FROM (
-         SELECT cite."entityId", a."id", a."title", a."url", a."publishedAt",
-                ROW_NUMBER() OVER (PARTITION BY cite."entityId"
-                                   ORDER BY a."publishedAt" DESC, a."id") AS "rank"
-           FROM (
-             SELECT "entityAId" AS "entityId", "articleId" FROM "entity_edges"
-              WHERE "entityAId" = ANY($1::uuid[])
-             UNION
-             SELECT "entityBId", "articleId" FROM "entity_edges"
-              WHERE "entityBId" = ANY($1::uuid[])
-           ) cite
-           JOIN "articles" a ON a."id" = cite."articleId"
-       ) ranked
-      WHERE ranked."rank" <= $2`,
-    [entityIds, PROPOSAL_SAMPLE_ARTICLES],
-  )) as SampleArticle[];
-
-  for (const row of rows) {
-    const existing = samples.get(row.entityId);
-    if (existing) existing.push(row);
-    else samples.set(row.entityId, [row]);
-  }
-  return samples;
-}
-
 // The trigger enqueues and the worker executes, exactly as ingestion's and
 // clustering's do: the hourly scheduler feeds the same queue, so there is one
 // execution path and what is demoed is what runs. History is read back from Postgres,
@@ -178,7 +141,11 @@ graphRouter.get(
       .orderBy(`proposal.${sortBy}`, sortDir === "asc" ? "ASC" : "DESC");
 
     const { items, total } = await paginate(qb, page, pageSize);
-    const samples = await sampleArticlesByEntity(items.flatMap((p) => [p.survivorEntityId, p.mergedEntityId]));
+    // Through the graph's read seam, like every other firehose read: AGENTS.md's
+    // membership invariant exempts `loadGraphView.ts`, not a route asking the same
+    // question in a query of its own. It labels each citation with the Story a reader
+    // could open it as, which is what lets the queue link in where there is one.
+    const samples = await loadProposalCitations(items.flatMap((p) => [p.survivorEntityId, p.mergedEntityId]));
 
     const side = (entity: { id: string; kind: PromotableKind; canonicalName: string }, articleCount: number) => ({
       id: entity.id,
@@ -187,12 +154,7 @@ graphRouter.get(
       // reviewer decides between two names as they were reported.
       canonicalName: entity.canonicalName,
       articleCount,
-      articles: (samples.get(entity.id) ?? []).map((a) => ({
-        id: a.id,
-        title: a.title,
-        url: a.url,
-        publishedAt: a.publishedAt,
-      })),
+      articles: (samples.get(entity.id) ?? []).map(({ entityId: _entityId, ...citation }) => citation),
     });
 
     res.json(
@@ -210,6 +172,12 @@ graphRouter.get(
         page,
         pageSize,
         total,
+        // The corpus this queue reads, on the surface that draws it: the exemption
+        // AGENTS.md grants the graph seam is granted on that condition, and a reviewer
+        // deciding a fold is reading firehose reporting rather than the Curated Corpus
+        // alone. Sent rather than restated in the console, so the Admin surface states
+        // the number the two reader surfaces state (../graph/loadGraphView.ts).
+        { retainedDays: GDELT_RETENTION_DAYS },
       ),
     );
   }),

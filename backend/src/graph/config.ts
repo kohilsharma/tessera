@@ -100,6 +100,15 @@ export const VIEW_THEME_FACETS = envNumber("GRAPH_VIEW_THEME_FACETS", 12, { min:
 // allowed to differ, and the page says so.
 export const VIEW_EDGE_CITATIONS = envNumber("GRAPH_VIEW_EDGE_CITATIONS", 20, { min: 1, max: 200 });
 
+// #67's bound, and the smallest one here because it answers the smallest question: enough
+// reporting to recognise which name this is, not a page of it. Three Articles per side is
+// "which stories is this the name from", which is what a reviewer deciding a fold is
+// actually reading for — the counts either side is promoted on are stated beside the
+// sample, and they are the pass's, measured over the whole window rather than over three
+// rows. Not an env knob for the same reason `NEIGHBOURHOOD_DEPTH` is not: a queue row is
+// a glance, and a widened one is a different surface rather than a better one.
+export const PROPOSAL_SAMPLE_ARTICLES = 3;
+
 // The two bars #67 turns on, both read by pg_trgm's `similarity()` over normalized
 // surface names. v3 §18.5's rule sets them: a wrong merge is more harmful than an
 // unresolved duplicate, so the automatic bar sits above every wrong merge measured and

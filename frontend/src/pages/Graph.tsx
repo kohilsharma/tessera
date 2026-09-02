@@ -3,16 +3,19 @@ import { useNavigate } from "react-router-dom";
 import { ENTITY_KIND_LABELS, getGraphView, type GraphEdge, type GraphNode, type GraphView } from "../api/client";
 import { DashboardRegister, RegisterRow } from "../components/dashboardArchetype";
 import {
-  corpusLedger,
+  boundNote,
+  drawnOf,
   edgesOn,
+  graphRule,
   GraphKey,
+  GraphLedger,
   GraphPlot,
   otherEnd,
   reports,
   strongestOf,
 } from "../components/graphRegister";
 import { DateStamp, IndexPage } from "../components/indexArchetype";
-import { peakOf } from "../components/timelineRegister";
+import { peakOf } from "../components/scale";
 import { EmptyState, EntryList, PendingState, RetryableError } from "../components/uiStates";
 
 // #68: the bounded global graph, and the one reader surface in Tessera that reads a
@@ -43,14 +46,10 @@ import { EmptyState, EntryList, PendingState, RetryableError } from "../componen
 // and stamping it over a span is a claim this page cannot support. The measured span rides
 // with the measured count instead, where both are facts about what is actually cited.
 function Provenance({ view }: { view: GraphView }) {
-  const drawn =
-    view.nodes.length === view.entityCount
-      ? `All ${view.entityCount} names`
-      : `${view.nodes.length} of ${view.entityCount} names`;
   return (
-    <dl className="graph-ledger">
-      {[
-        ...corpusLedger(view.retainedDays),
+    <GraphLedger
+      retainedDays={view.retainedDays}
+      rows={[
         {
           term: "Reporting",
           value: (
@@ -65,14 +64,9 @@ function Provenance({ view }: { view: GraphView }) {
             </>
           ),
         },
-        { term: "Drawn", value: drawn },
-      ].map(({ term, value }) => (
-        <div key={term}>
-          <dt>{term}</dt>
-          <dd>{value}</dd>
-        </div>
-      ))}
-    </dl>
+        { term: "Drawn", value: drawnOf(view.nodes.length, view.entityCount) },
+      ]}
+    />
   );
 }
 
@@ -152,13 +146,10 @@ export default function Graph() {
             Graph has named an entity in over the last {view.retainedDays} days, together with
             Tessera&rsquo;s Curated Corpus. That is a wider and rougher body of reporting than the Stories
             and Briefs elsewhere in Tessera, so a name here will not always open onto a Story you can
-            read. A name enters once {view.promotionFloor} separate reports have named it; a link means two
-            names were reported together, and its weight is how many reports that was. Open any
-            name for its own neighbourhood, where every link shows the reporting it was observed
-            in.
+            read. {graphRule(view.promotionFloor)} Open any name for its own neighbourhood, where every
+            link shows the reporting it was observed in.
             {view.nodes.length < view.entityCount &&
-              ` Showing the ${view.nodes.length} most reported names and each one's strongest links, because a
-                graph of every name at once is a picture of none of them.`}
+              boundNote(`the ${view.nodes.length} most reported names and each one's strongest links`, "graph")}
           </p>
           <Provenance view={view} />
           <GraphKey nodes={view.nodes} />

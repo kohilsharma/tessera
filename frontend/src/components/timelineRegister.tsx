@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { LENS_LABELS, type Timeline, type TimelineEvent } from "../api/client";
 import { ArticleEntry, DateStamp, EntryLedger } from "./indexArchetype";
+import { peakOf } from "./scale";
 import { EntryList } from "./uiStates";
 
 // CONTEXT.md "Timeline": a Story's reporting ordered over time with the analytical
@@ -21,14 +22,6 @@ export const PERIOD_LABELS: Record<Timeline["granularity"], string> = {
   day: "per day",
   week: "per week",
 };
-
-// The height every drawing of one axis scales against, beside the component that draws it:
-// a Story's register takes it over its own volume, the search timeline over the whole match
-// set so a tall bar means the same count in every lane (#65). Floored at 1, because an axis
-// of all-zero buckets would otherwise divide by zero rather than draw flat.
-export function peakOf(counts: number[]): number {
-  return Math.max(...counts, 1);
-}
 
 // Reporting per period as a row of bars on one baseline. Its own component because the
 // search timeline (#65) draws this once for the whole match set and once per Story lane,

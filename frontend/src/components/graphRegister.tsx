@@ -2,7 +2,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import cytoscape from "cytoscape";
 import type { Css, ElementDefinition, StylesheetJson } from "cytoscape";
 import { ENTITY_KINDS, ENTITY_KIND_LABELS, type EntityKind, type GraphEdge, type GraphNode } from "../api/client";
-import { peakOf } from "./timelineRegister";
+import { peakOf } from "./scale";
 
 // The graph drawn the same way wherever it is drawn — the bounded global view (#68) and one
 // Entity's neighbourhood (#69). Shared for the reason the two share a read path server-side:
@@ -51,6 +51,47 @@ export function corpusLedger(retainedDays: number): { term: string; value: React
     { term: "Corpus", value: "GDELT firehose, plus Tessera’s Curated Corpus" },
     { term: "Retention window", value: `Rolling ${retainedDays} days of firehose metadata` },
   ];
+}
+
+// The ledger drawn, for the surfaces that draw one as a list rather than as a Record
+// masthead's. `rows` is each page's own — a global view states its span and how much of
+// the graph is on screen, a review queue states neither — and the corpus rows come first,
+// because which corpus was read is the fact the others are true *of*.
+export function GraphLedger({ retainedDays, rows = [] }: { retainedDays: number; rows?: { term: string; value: ReactNode }[] }) {
+  return (
+    <dl className="graph-ledger">
+      {[...corpusLedger(retainedDays), ...rows].map(({ term, value }) => (
+        <div key={term}>
+          <dt>{term}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+// What a name is and what a link means, in one wording for every surface that draws them.
+// Written once for the reason the picture is: the promotion floor and the weight are the
+// two things a reader has to be told before any of it is readable, and two pages phrasing
+// them differently would be two claims about one graph.
+export const graphRule = (promotionFloor: number) =>
+  `A name enters the graph once ${promotionFloor} separate reports have named it; a link means two names ` +
+  `were reported together, and its weight is how many reports that was.`;
+
+// Why the page is showing part of the graph rather than all of it, in the words the other
+// surface uses. Both halves are the caller's: what it kept ("the 60 most reported names")
+// and what it bounded ("graph", "neighbourhood"), since a global view and one name's
+// surroundings are cut down to different things. The reason they are cut down is the same
+// sentence on both, which is the half worth having once.
+export const boundNote = (kept: string, subject: string) =>
+  ` Showing ${kept}, because a ${subject} of every name at once is a picture of none of them.`;
+
+// "All 34 names" / "20 of 34 names" / "No names" — how much of a working set is drawn,
+// stated the same way wherever a picture is bounded. Read from the drawn nodes against the
+// count the endpoint measured, so it never implies the graph is as wide as the screen.
+export function drawnOf(shown: number, whole: number): string {
+  if (whole === 0) return "No names";
+  return shown === whole ? `All ${whole} names` : `${shown} of ${whole} names`;
 }
 
 // The other end of a line from one name. Stored order is storage's business — a pair is one
