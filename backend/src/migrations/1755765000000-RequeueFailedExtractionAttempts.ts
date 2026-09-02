@@ -18,6 +18,11 @@ export class RequeueFailedExtractionAttempts1755765000000 implements MigrationIn
     // video page under the 600-character floor); that costs one further attempt
     // each, capped at 20 a run and paced at one request per domain per 2 seconds,
     // and is the price of not hand-listing which failures were which.
+    //
+    // The candidate rule's other two clauses — RSS-discovered, and a Publisher whose
+    // Terms Class leaves room for the swap — are deliberately not repeated: only
+    // `discoverExtraction` ever writes this column, and it selects on them already,
+    // so no row outside the rule holds a mark for this to clear.
     await queryRunner.query(`
       UPDATE "articles"
         SET "extractionAttemptedAt" = NULL

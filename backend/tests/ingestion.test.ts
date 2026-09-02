@@ -37,6 +37,7 @@ import {
   fetchVettedPage,
   httpFetchPage,
   httpFetchText,
+  isExtractionEligibleFeed,
   runConnector,
   spaceDocRequest,
   spaceExtractionRequest,
@@ -1830,7 +1831,7 @@ describe("runConnector over Readability extraction", () => {
   // local server, and loopback is precisely what the address rules above refuse —
   // which is why `fetchVettedPage` is a seam of its own, below them. `pinned.invalid`
   // resolves nowhere (RFC 2606), so a page comes back only if the pin was dialled.
-  const localPages = async (handler: (req: IncomingMessage, res: ServerResponse) => void) => {
+  const startPageServer = async (handler: (req: IncomingMessage, res: ServerResponse) => void) => {
     const server = createServer(handler);
     await new Promise<void>((ready) => void server.listen(0, "127.0.0.1", ready));
     const { port } = server.address() as AddressInfo;
@@ -1844,7 +1845,7 @@ describe("runConnector over Readability extraction", () => {
 
   it("fetches a page over the socket it pinned, and reports a redirect instead of following it", async () => {
     const seen: { host?: string; ua?: string | string[] }[] = [];
-    const server = await localPages((req, res) => {
+    const server = await startPageServer((req, res) => {
       seen.push({ host: req.headers.host, ua: req.headers["user-agent"] });
       if (req.url === "/moved") {
         res.writeHead(302, { location: "https://elsewhere.example/story" });
@@ -1880,7 +1881,7 @@ describe("runConnector over Readability extraction", () => {
   });
 
   it("refuses a page it cannot read, and one it cannot hold", async () => {
-    const server = await localPages((req, res) => {
+    const server = await startPageServer((req, res) => {
       if (req.url === "/paper.pdf") {
         res.writeHead(200, { "content-type": "application/pdf" });
         res.end("%PDF-1.4");
@@ -1975,11 +1976,10 @@ describe("runConnector over Readability extraction", () => {
 // `GDELT_LIVE_SMOKE` established. The transport is the one part of this pass no fixture
 // can vouch for: every test that injects a `fetchPage` passes whether or not the real
 // one can reach a publisher, which is how a pass that had never fetched a page shipped
-// green. The feeds come from the seed rather than a list here, so a feed added to the
-// corpus is a feed this covers.
-const EXTRACTION_FEEDS = SEED_CONNECTORS.filter(
-  ({ kind, feedProvidesFullText }) => kind === "rss" && feedProvidesFullText === false,
-);
+// green. The feeds come from the seed through the pass's own eligibility rule rather
+// than a list here, so a feed added to the corpus is a feed this covers and a rule
+// widened is a rule this follows.
+const EXTRACTION_FEEDS = SEED_CONNECTORS.filter(isExtractionEligibleFeed);
 
 describe.runIf(process.env.EXTRACTION_LIVE_SMOKE === "1")("Readability extraction live smoke", () => {
   beforeEach(async () => {

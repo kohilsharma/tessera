@@ -167,6 +167,17 @@ export const MAX_EXTRACTION_ATTEMPTS = 20;
 const EXTRACTABLE_TERMS_CLASSES = TERMS_CLASSES.filter(
   (termsClass) => mayStoreText(termsClass) && !mayServeText(termsClass, "feed_excerpt"),
 );
+// The connector half of the candidate rule, named once: discoverExtraction's SQL
+// filters on these values and the live smoke picks the feeds it covers with the
+// predicate over the seed list (#70), so widening the rule cannot leave the smoke
+// vouching for feeds the pass will never try. `= false` in SQL rather than
+// `IS FALSE` because a NULL feed — every GKG and DOC connector — fails both alike.
+export const EXTRACTION_FEED_RULE = { kind: "rss" satisfies ConnectorKind, feedProvidesFullText: false } as const;
+export const isExtractionEligibleFeed = (
+  feed: Pick<IngestionConnector, "kind" | "feedProvidesFullText">,
+): boolean =>
+  feed.kind === EXTRACTION_FEED_RULE.kind &&
+  feed.feedProvidesFullText === EXTRACTION_FEED_RULE.feedProvidesFullText;
 // A body large enough to be a download rather than an article. Enforced once,
 // while consuming the stream, so a chunked body that declares no Content-Length is
 // bounded too. The dispatcher can enforce a ceiling of its own (`maxResponseSize`)
@@ -210,7 +221,10 @@ NON_PUBLIC_GLOBAL_IPV6.addSubnet("2002::", 16, "ipv6");
 NON_PUBLIC_GLOBAL_IPV6.addSubnet("3fff::", 20, "ipv6");
 
 type PublicAddress = { address: string; family: 4 | 6 };
-export type PublicPageTarget = { url: URL; addresses: PublicAddress[] };
+// Non-empty by type rather than by comment: `pinnedLookup` reads `addresses[0]` on
+// the scalar half of Node's contract, and a hand-built target — which this type
+// being exported now allows — is the other way one could arrive empty.
+export type PublicPageTarget = { url: URL; addresses: [PublicAddress, ...PublicAddress[]] };
 // The seam sits *below* the address rules rather than around the whole fetch: a
 // test that proves this transport can fetch a page has to reach a local HTTP
 // server, and loopback is exactly what the rules above refuse. So the request
@@ -275,9 +289,9 @@ async function publicPageTarget(
   // ponytail: a NAT64 address is dropped rather than decoded, because the A record
   // beside it names the same host and keeps it reachable. Decode the embedded
   // IPv4 and vet *that* if Tessera is ever run on an IPv6-only NAT64 path.
-  const addresses = (await lookupWithSignal(hostname, signal, resolve)).filter(isPublicAddress);
-  if (addresses.length === 0) throw new Error(`${url} is not a public http(s) page URL`);
-  return { url, addresses };
+  const [first, ...rest] = (await lookupWithSignal(hostname, signal, resolve)).filter(isPublicAddress);
+  if (!first) throw new Error(`${url} is not a public http(s) page URL`);
+  return { url, addresses: [first, ...rest] };
 }
 
 // Exported for the same reason spaceDocRequest is: the pacing is the requirement,
@@ -317,7 +331,7 @@ async function readBoundedPage(res: UndiciResponse, url: URL): Promise<string> {
 
 // What one request against a vetted target ends in: the page, or where the
 // publisher says to look for it instead.
-type PageResponse = { redirectTo: string } | { html: string };
+type PageHopOutcome = { redirectTo: string } | { html: string };
 
 // The second defect: undici calls this hook as
 // `lookup(hostname, { hints, all: true }, callback)`, and with `all` the callback
@@ -326,9 +340,11 @@ type PageResponse = { redirectTo: string } | { html: string };
 // undefined`) — a failure that only appears once the version skew below is fixed
 // and the request actually starts. Both halves of Node's `LookupFunction` contract
 // are answered rather than the one undici 8 happens to ask for: assuming a caller's
-// half is what cost this pass every page it ever tried to fetch.
+// half is what cost this pass every page it ever tried to fetch. The scalar half is
+// the one no test reaches, which is why the target type — not a guard here — is what
+// makes `addresses[0]` safe to read.
 const pinnedLookup =
-  (addresses: PublicAddress[]): LookupFunction =>
+  (addresses: PublicPageTarget["addresses"]): LookupFunction =>
   (_hostname, options, callback) =>
     options.all ? callback(null, addresses) : callback(null, addresses[0].address, addresses[0].family);
 
@@ -346,7 +362,16 @@ const pinnedLookup =
 // of the vetting above could matter. One package supplies both halves here, so a
 // Node upgrade cannot re-open it; a dispatcher must never be handed to the global
 // `fetch` again.
-export async function fetchVettedPage({ url, addresses }: PublicPageTarget, signal: AbortSignal): Promise<PageResponse> {
+//
+// The ticket offered dropping the pin instead — vet each resolved target, then let a
+// plain `fetch` re-resolve it — and that is the route not taken, because it relaxes
+// the address rule in the same breath: undici would dial whatever the resolver
+// answers next, including the private entry inside a mixed answer, through a
+// DNS-TOCTOU window the 2-second pacer widens by design. The pin closes that window
+// while the URL hostname still carries Host and TLS SNI. Its one cost is the seam
+// above: a pinned loopback is exactly what the rules refuse, so no test can reach a
+// local server through the whole of `httpFetchPage`.
+export async function fetchVettedPage({ url, addresses }: PublicPageTarget, signal: AbortSignal): Promise<PageHopOutcome> {
   // A one-request Agent pins the vetted addresses while preserving the URL
   // hostname for Host and TLS SNI, so a resolver that answers differently a
   // moment later — during the pacing wait, say — cannot move the connection.
@@ -860,9 +885,9 @@ async function discoverExtraction(deps: RunConnectorDeps): Promise<Discovery> {
     .andWhere(
       `article."discoveredByConnectorId" IN (
         SELECT id FROM ingestion_connectors
-        WHERE kind = :kind AND "feedProvidesFullText" IS FALSE
+        WHERE kind = :kind AND "feedProvidesFullText" = :feedProvidesFullText
       )`,
-      { kind: "rss" satisfies ConnectorKind },
+      EXTRACTION_FEED_RULE,
     )
     .andWhere(`publisher."termsClass" IN (:...termsClasses)`, { termsClasses: EXTRACTABLE_TERMS_CLASSES })
     // Freshest first: a run is capped, so what it spends its attempts on should be
