@@ -1,9 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
-import cytoscape from "cytoscape";
-import type { Css, ElementDefinition, StylesheetJson } from "cytoscape";
-import { ENTITY_KINDS, ENTITY_KIND_LABELS, getGraphView, type EntityKind, type GraphEdge, type GraphNode, type GraphView } from "../api/client";
+import { useNavigate } from "react-router-dom";
+import { ENTITY_KIND_LABELS, getGraphView, type GraphEdge, type GraphNode, type GraphView } from "../api/client";
 import { DashboardRegister, RegisterRow } from "../components/dashboardArchetype";
+import { GraphKey, GraphPlot, reports } from "../components/graphRegister";
 import { DateStamp, IndexPage } from "../components/indexArchetype";
 import { peakOf } from "../components/timelineRegister";
 import { EmptyState, EntryList, PendingState, RetryableError } from "../components/uiStates";
@@ -18,136 +17,10 @@ import { EmptyState, EntryList, PendingState, RetryableError } from "../componen
 // Bounds are not this page's business: the endpoint takes no parameters and answers with
 // what it decided to draw (backend/src/graph/loadGraphView.ts). What is this page's
 // business is saying how much of the graph that is.
-
-// Kind carried three ways at once (DESIGN.md's Redundant Signal Rule): ink, shape, and
-// the word itself in the legend and in every register row — so the graph reads in
-// greyscale, and to anyone who cannot tell #1458a6 from #492e84.
 //
-// The inks are read from the Bureau tokens at draw time so the canvas cannot drift from
-// the legend beside it, which takes the same tokens through CSS. No hex here: DESIGN.md
-// keeps the palette at `:root` and has pages consume it, and a fallback copy would be a
-// second palette to keep in step — jsdom resolves no custom properties, but jsdom also
-// renders no canvas, so nothing there ever observes the value.
-const KIND_MARK: Record<EntityKind, { shape: Css.NodeShape; token: string }> = {
-  person: { shape: "ellipse", token: "--proof-blue" },
-  organization: { shape: "rectangle", token: "--proof-magenta" },
-  location: { shape: "diamond", token: "--registered-overlap" },
-};
-
-function token(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
-// The graph as Cytoscape wants it. Exported and pure so the mapping the picture rests on
-// is checkable without a canvas: jsdom cannot render one, so the renderer is stubbed in
-// the page's own tests and this is what those tests can still hold to account.
-//
-// `share` is each quantity against the largest of its kind on the page, so node size
-// reads as reporting and edge width as co-mention weight. Both are stated in words in the
-// register below — the picture is never the only place a number appears.
-export function toGraphElements(view: GraphView): ElementDefinition[] {
-  const busiest = peakOf(view.nodes.map((node) => node.articleCount));
-  const heaviest = peakOf(view.edges.map((edge) => edge.weight));
-  return [
-    ...view.nodes.map((node) => ({
-      data: {
-        id: node.id,
-        name: node.canonicalName,
-        kind: node.kind,
-        share: node.articleCount / busiest,
-      },
-    })),
-    ...view.edges.map((edge) => ({
-      data: {
-        id: `${edge.entityAId}~${edge.entityBId}`,
-        source: edge.entityAId,
-        target: edge.entityBId,
-        share: edge.weight / heaviest,
-      },
-    })),
-  ];
-}
-
-// Bureau on a canvas: square nodes for organizations because corners are square here,
-// labels in the page's own face, and the ink spent on identifying a kind and nothing
-// else. No hover or selection styling — selecting a node means something in #69 and
-// nothing yet, and a picture that responds to a click by doing nothing is worse than one
-// that does not respond.
-function stylesheet(): StylesheetJson {
-  return [
-    {
-      selector: "node",
-      style: {
-        label: "data(name)",
-        width: "mapData(share, 0, 1, 16, 44)",
-        height: "mapData(share, 0, 1, 16, 44)",
-        "border-width": 1,
-        "border-color": token("--bureau-ink"),
-        "font-family": "Arial, Helvetica, sans-serif",
-        "font-size": 10,
-        "font-weight": 700,
-        color: token("--bureau-ink"),
-        "text-valign": "bottom",
-        "text-margin-y": 4,
-        "text-background-color": token("--stock-paper"),
-        "text-background-opacity": 0.85,
-        "text-background-padding": "2px",
-        "min-zoomed-font-size": 7,
-      },
-    },
-    ...ENTITY_KINDS.map((kind) => ({
-      selector: `node[kind="${kind}"]`,
-      style: { shape: KIND_MARK[kind].shape, "background-color": token(KIND_MARK[kind].token) },
-    })),
-    {
-      selector: "edge",
-      style: {
-        width: "mapData(share, 0, 1, 1, 5)",
-        "line-color": token("--quiet-ink"),
-        opacity: 0.55,
-        "curve-style": "straight",
-      },
-    },
-  ];
-}
-
-// The picture. A reader pans and zooms it; nothing here edits the graph, so nothing is
-// grabbable or selectable. `role="img"` with a label that states what it draws, because
-// a canvas is unreachable by keyboard and unreadable by a screen reader — the register
-// under it is the same graph in words, which is the reading those two get.
-function GraphPlot({ view }: { view: GraphView }) {
-  const plot = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!plot.current) return;
-    const cy = cytoscape({
-      container: plot.current,
-      elements: toGraphElements(view),
-      style: stylesheet(),
-      // `cose` is Cytoscape's own force layout — no plugin, and ADR-0019 asked for a
-      // force-directed reading. Unanimated: DESIGN.md keeps motion for evidence
-      // registration, and a graph that settles while being read is a graph being read
-      // twice.
-      layout: { name: "cose", animate: false, padding: 28, nodeRepulsion: () => 12000, idealEdgeLength: () => 90 },
-      autoungrabify: true,
-      autounselectify: true,
-    });
-    return () => cy.destroy();
-  }, [view]);
-
-  return (
-    <div
-      className="graph-plot"
-      ref={plot}
-      role="img"
-      aria-label={`A force-directed graph of ${view.nodes.length} names joined by ${view.edges.length} co-mention links. Every name it draws is listed in words below it.`}
-    />
-  );
-}
-
-// "1 report" / "24 reports", wherever a count of reporting is stated — over the whole
-// graph, on one name, or on one link — so the three read as the same unit.
-const reports = (count: number) => `${count} report${count === 1 ? "" : "s"}`;
+// The picture, its legend and its Cytoscape mapping are shared with #69's neighbourhood
+// (../components/graphRegister) — one graph drawn one way — and a name here opens onto that
+// page, from the canvas and from its register row alike.
 
 // The corpus statement's measured half, in the ledger register every other surface states
 // its facts in: which corpus, under what retention, how much reporting and over what span,
@@ -194,15 +67,6 @@ function Provenance({ view }: { view: GraphView }) {
       </div>
     </dl>
   );
-}
-
-// The kinds actually on the page, each with how many names it accounts for: a legend of
-// three marks where only two are drawn states a distinction the picture does not make.
-function kindsDrawn(view: GraphView): { kind: EntityKind; count: number }[] {
-  return ENTITY_KINDS.map((kind) => ({
-    kind,
-    count: view.nodes.filter((node) => node.kind === kind).length,
-  })).filter(({ count }) => count > 0);
 }
 
 // How many of the drawn links each drawn name is on, and the heaviest of them. Degree a
@@ -253,6 +117,7 @@ function metaFor(
 
 export default function Graph() {
   const query = useQuery({ queryKey: ["graph"], queryFn: getGraphView });
+  const navigate = useNavigate();
   const view = query.data;
   const busiest = peakOf(view?.nodes.map((node) => node.articleCount) ?? []);
   const links = view ? linksDrawn(view) : new Map<string, { count: number; strongest: GraphEdge }>();
@@ -300,26 +165,25 @@ export default function Graph() {
             Tessera&rsquo;s Curated Corpus. That is a wider and rougher body of reporting than the Stories
             and Briefs elsewhere in Tessera, so a name here will not always open onto a Story you can
             read. A name enters once {view.promotionFloor} separate reports have named it; a link means two
-            names were reported together, and its weight is how many reports that was.
+            names were reported together, and its weight is how many reports that was. Open any
+            name for its own neighbourhood, where every link shows the reporting it was observed
+            in.
             {view.nodes.length < view.entityCount &&
               ` Showing the ${view.nodes.length} most reported names and each one's strongest links, because a
                 graph of every name at once is a picture of none of them.`}
           </p>
           <Provenance view={view} />
-          {/* Ink, shape and word for each kind, stated once for the whole picture. */}
-          <ul className="graph-key" aria-label="What each shape in the graph is">
-            {kindsDrawn(view).map(({ kind, count }) => (
-              <li key={kind}>
-                <span className={`graph-key-mark graph-key-mark--${kind}`} aria-hidden="true" />
-                {ENTITY_KIND_LABELS[kind]} · {count}
-              </li>
-            ))}
-          </ul>
-          <GraphPlot view={view} />
+          <GraphKey nodes={view.nodes} />
+          <GraphPlot
+            view={view}
+            label={`A force-directed graph of ${view.nodes.length} names joined by ${view.edges.length} co-mention links. Every name it draws is listed in words below it, and opens that name's own neighbourhood.`}
+            onOpen={(entityId) => navigate(`/graph/entities/${entityId}`)}
+          />
           {/* The same graph in words: every name the picture draws, in the order the view
               ranked them, with the two measurements the picture encodes as size and width.
               This is the reading a keyboard or a screen reader gets, and the reading anyone
-              gets who needs a name rather than a shape. */}
+              gets who needs a name rather than a shape — so it is also where clicking a
+              node is reachable without a canvas, each name opening its neighbourhood (#69). */}
           <DashboardRegister
             heading="Names in the graph"
             folio={`${view.nodes.length} drawn · most reported first`}
@@ -329,6 +193,7 @@ export default function Graph() {
                 <RegisterRow
                   key={node.id}
                   name={node.canonicalName}
+                  to={`/graph/entities/${node.id}`}
                   measure={node.articleCount / busiest}
                   meta={metaFor(node, links, names)}
                 />

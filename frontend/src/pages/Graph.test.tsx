@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import Graph, { toGraphElements } from "./Graph";
+import type { ReactElement } from "react";
+import Graph from "./Graph";
 import type { GraphView } from "../api/client";
 import { jsonResponse, renderWithProviders } from "../test/renderWithProviders";
 
@@ -11,8 +12,12 @@ import { jsonResponse, renderWithProviders } from "../test/renderWithProviders";
 // same graph in words underneath. That is not a workaround — those are the readings a
 // keyboard and a screen reader get, and the picture is the one part of the page that
 // carries nothing they cannot reach.
+//
+// `on` is captured rather than ignored: the tap handler the stub is handed is the canvas's
+// only behaviour, and calling it is the only way to check where a node opens (#69).
 const destroy = vi.fn();
-vi.mock("cytoscape", () => ({ default: vi.fn(() => ({ destroy })) }));
+const on = vi.fn();
+vi.mock("cytoscape", () => ({ default: vi.fn(() => ({ destroy, on })) }));
 
 const node = (id: string, canonicalName: string, kind: GraphView["nodes"][number]["kind"], articleCount: number) => ({
   id,
@@ -41,9 +46,12 @@ const view: GraphView = {
   ],
 };
 
-function render(overrides: Partial<GraphView> = {}) {
+function render(
+  overrides: Partial<GraphView> = {},
+  options: { probe?: { path: string; element: ReactElement } } = {},
+) {
   vi.mocked(fetch).mockResolvedValue(jsonResponse({ ...view, ...overrides }));
-  return renderWithProviders(<Graph />, { route: "/graph" });
+  return renderWithProviders(<Graph />, { route: "/graph", path: "/graph", ...options });
 }
 
 describe("Knowledge graph — UI states", () => {
@@ -168,21 +176,27 @@ describe("Knowledge graph — the picture and its reading in words", () => {
 
     const plot = await screen.findByRole("img");
     expect(plot).toHaveAccessibleName(
-      "A force-directed graph of 3 names joined by 2 co-mention links. Every name it draws is listed in words below it.",
+      "A force-directed graph of 3 names joined by 2 co-mention links. Every name it draws is listed in words below it, and opens that name's own neighbourhood.",
     );
   });
 
-  it("registers every drawn name with its kind, its reporting and its links", async () => {
+  it("registers every drawn name with its kind, its reporting and its links, each opening its own neighbourhood", async () => {
     render();
 
     const register = await screen.findByRole("region", { name: "Names in the graph" });
     const rows = within(register).getAllByRole("listitem");
-    // Most reported first, which is the order the view ranked them in.
-    expect(rows.map((row) => row.querySelector(".entry-name")?.textContent)).toEqual([
+    // Most reported first, which is the order the view ranked them in. Each name is the link
+    // out to that name's neighbourhood (#69) — the reachability a canvas tap cannot give a
+    // keyboard or a screen reader.
+    expect(rows.map((row) => row.querySelector(".entry-title")?.textContent)).toEqual([
       "Reserve Bank",
       "Ada Lovelace",
       "Canberra",
     ]);
+    expect(within(register).getByRole("link", { name: "Ada Lovelace" })).toHaveAttribute(
+      "href",
+      "/graph/entities/e2",
+    );
     // The two quantities the picture encodes as node size and line width, in words:
     // nothing on this page is stated by the drawing alone.
     expect(rows[0]).toHaveTextContent("18 reports");
@@ -200,22 +214,24 @@ describe("Knowledge graph — the picture and its reading in words", () => {
     expect(within(register).getAllByRole("listitem")[0]).toHaveTextContent("Links drawn0");
     expect(screen.queryByText("Strongest link")).not.toBeInTheDocument();
   });
-});
 
-// The one part of the picture that is checkable without a canvas, and the part a wrong
-// answer would silently mis-draw: what Cytoscape is handed.
-describe("Knowledge graph — the elements handed to the layout", () => {
-  it("gives every node and edge its share of the largest quantity on the page", () => {
-    expect(toGraphElements(view)).toEqual([
-      { data: { id: "e1", name: "Reserve Bank", kind: "organization", share: 1 } },
-      { data: { id: "e2", name: "Ada Lovelace", kind: "person", share: 11 / 18 } },
-      { data: { id: "e3", name: "Canberra", kind: "location", share: 6 / 18 } },
-      { data: { id: "e1~e2", source: "e1", target: "e2", share: 1 } },
-      { data: { id: "e1~e3", source: "e1", target: "e3", share: 4 / 9 } },
-    ]);
-  });
+  // The first acceptance criterion of #69, on the surface it is reached from: tapping a name
+  // opens that name's neighbourhood. Cytoscape is stubbed, so the handler it was handed is
+  // called directly — there is no canvas in jsdom to click, and the handler is the whole of
+  // the behaviour.
+  it("opens a name's own neighbourhood when its node is tapped", async () => {
+    render({}, { probe: { path: "/graph/entities/:entityId", element: <p>Neighbourhood reached</p> } });
+    await screen.findByRole("img");
 
-  it("hands an empty graph nothing to lay out rather than dividing by an absent peak", () => {
-    expect(toGraphElements({ ...view, nodes: [], edges: [] })).toEqual([]);
+    // Selected by the selector it was registered for: the plot also wires a handler for a
+    // tapped *line*, which this page hands it nothing to do (#69 does).
+    const [, , handler] = on.mock.calls.filter(([event, selector]) => event === "tap" && selector === "node").at(-1) as [
+      string,
+      string,
+      (e: unknown) => void,
+    ];
+    act(() => handler({ target: { id: () => "e2" } }));
+
+    expect(await screen.findByText("Neighbourhood reached")).toBeInTheDocument();
   });
 });

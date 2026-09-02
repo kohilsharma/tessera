@@ -1,104 +1,29 @@
 import "reflect-metadata";
-import bcrypt from "bcryptjs";
 import { beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app";
-import { AppDataSource } from "../src/data-source";
-import { signToken } from "../src/auth/jwt";
 import { ENTITY_PROMOTION_FLOOR, VIEW_EDGES_PER_ENTITY, VIEW_NODE_CAP } from "../src/graph/config";
 import { runEntityResolution } from "../src/graph/runEntityResolution";
-import { Article } from "../src/entities/Article";
-import type { GkgAnnotationKind } from "../src/entities/GkgAnnotation";
-import { Publisher } from "../src/entities/Publisher";
-import { User } from "../src/entities/User";
 import { GDELT_RETENTION_DAYS } from "../src/ingestion/retention";
-import { stageAnnotations } from "../src/ingestion/runConnector";
+import {
+  adminToken,
+  annotate,
+  coMention,
+  createArticle,
+  createPublisher,
+  crowdNames,
+  reader,
+  truncateGraph,
+} from "./graphFixture";
 import { setupTestDb } from "./setupTestDb";
 
 // #68: the one bounded global view every reader shares. The pass (#66) is the fixture
 // generator throughout — a graph assembled by hand would let this file agree with
-// itself about a shape the pass never produces.
+// itself about a shape the pass never produces. The generator is shared with #69's
+// neighbourhood (./graphFixture), because the two surfaces read one graph.
 setupTestDb();
 
 const app = () => createApp();
-
-let nextArticle = 0;
-
-async function createPublisher(domain: string): Promise<Publisher> {
-  return AppDataSource.getRepository(Publisher).save({ domain, name: domain });
-}
-
-// One Article per hour from a fixed origin, so the window a graph states is a fact the
-// fixture knows rather than one the test recomputes with the same SQL under test.
-// `metadata_only` because ADR-0028's graph is built over firehose metadata.
-async function createArticle(publisherId: string, title: string): Promise<Article> {
-  nextArticle += 1;
-  return AppDataSource.getRepository(Article).save({
-    publisherId,
-    title,
-    url: `https://${nextArticle}.example/story`,
-    analysisText: null,
-    analysisTextMode: "metadata_only",
-    publishedAt: new Date(Date.UTC(2026, 7, 25, nextArticle)),
-  });
-}
-
-let nextOffset = 0;
-async function annotate(articleId: string, names: string[], kind: GkgAnnotationKind = "person"): Promise<void> {
-  await stageAnnotations(
-    AppDataSource.manager,
-    articleId,
-    names.map((surfaceName) => {
-      nextOffset += 1;
-      return { kind, surfaceName, charOffset: nextOffset, locationDetail: null };
-    }),
-  );
-}
-
-// `count` Articles each naming every one of `names`: the floor counts distinct Articles,
-// so this is both how a name is promoted and how a pair earns its weight.
-async function coMention(publisherId: string, names: string[], count: number, label = names.join("+")): Promise<Article[]> {
-  const created: Article[] = [];
-  for (let index = 0; index < count; index += 1) {
-    const article = await createArticle(publisherId, `${label} ${index}`);
-    await annotate(article.id, names);
-    created.push(article);
-  }
-  return created;
-}
-
-// More names than the view will draw, all at identical presence, each pair co-mentioned
-// in every Article: the fixture the node bound is argued against. Fixed-width digits so
-// the names are far enough apart in trigram space that the pass does not fold any of
-// them into another (#67's automatic bar is 0.90).
-function crowdNames(size: number): string[] {
-  return Array.from({ length: size }, (_, index) => `Crowd ${String(index).padStart(2, "0")}`);
-}
-
-// Users outlive the truncation between tests, so each reader registers under its own
-// address. The token is asserted here rather than at the call sites: without it every
-// later assertion fails as a 401, which reads as a broken route rather than a broken
-// fixture.
-let nextReader = 0;
-async function reader(role: "student" | "investor"): Promise<string> {
-  nextReader += 1;
-  const res = await request(app())
-    .post("/api/v1/auth/register")
-    .send({ email: `${role}.${nextReader}@tessera.local`, password: "correct-horse", role });
-  expect(res.status).toBe(201);
-  return res.body.token as string;
-}
-
-async function adminToken(): Promise<string> {
-  const passwordHash = await bcrypt.hash("correct-horse", 10);
-  nextReader += 1;
-  const user = await AppDataSource.getRepository(User).save({
-    email: `admin.${nextReader}@tessera.local`,
-    passwordHash,
-    role: "admin",
-  });
-  return signToken({ sub: user.id, role: user.role });
-}
 
 type GraphBody = {
   retainedDays: number;
@@ -127,12 +52,7 @@ function labelled(body: GraphBody): { pair: string; weight: number }[] {
   }));
 }
 
-beforeEach(async () => {
-  await AppDataSource.query(
-    `TRUNCATE "articles", "publishers", "stories", "entities", "entity_edges",
-              "entity_resolution_runs", "entity_aliases", "entity_merge_refusals" CASCADE`,
-  );
-});
+beforeEach(truncateGraph);
 
 describe("the bounded global graph", () => {
   it("is closed to an anonymous caller", async () => {

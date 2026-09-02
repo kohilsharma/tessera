@@ -263,7 +263,7 @@ Entities and the same edges. Operationally it is a third BullMQ queue on the sam
 ticking hourly at :20 (clear of the quarter-hour ingestion ticks, after clustering's :05), with an
 Admin-only `POST /api/v1/graph/resolution-runs` answering `202 {status:"accepted"}` and an
 `entity_resolution_runs` history table whose ledger is `promoted + belowFloor = considered`.
-The graph's first reader is #68 below; the Entity neighbourhood (#69) is still ahead — as is
+The graph's first reader is #68 below, and one Entity's neighbourhood (#69) is the second — as is
 ADR-0028/ADR-0029's groundwork behind it, the
 restored DOC connector (#60), the fixed Guardian feed (#61) and the annotated Curated Corpus
 (#62) above.
@@ -404,11 +404,67 @@ read overlapping the hourly commit could pair nodes from before it with edges fr
 draw every name as an isolate. #68's third bound, depth, has no constant and `graph/config.ts` says
 why — the global view draws edges *among* a selection rather than traversing out from a node, so
 there is no hop to bound until #69's neighbourhood.
+**An Entity's neighbourhood** (#69) is that hop, and it is deliberately not a second read path:
+`loadEntityNeighbourhood` and `loadEdgeCitations` sit in `loadGraphView.ts` beside the global view
+and share its statements, so the promotion floor, `GRAPH_VIEW_NODES` and the both-ends edge bound
+are applied by one file however a reader arrived and the two pictures cannot disagree about what is
+in the graph. Depth is the bound #68 had no constant for and it is `NEIGHBOURHOOD_DEPTH = 1`, not an
+env knob: two hops from a well-reported name is most of the graph, since the neighbours' own
+neighbourhoods overlap, so a second hop is a different picture rather than a wider one — and the
+page a reader wants for it is the one every drawn neighbour already links to. One clause is the
+neighbourhood's own, and it is an *exemption* rather than a bound: `boundedEdgesSql(' OR "self" =
+$4')` keeps every tie to the focus past `GRAPH_VIEW_EDGES_PER_ENTITY`, because every neighbour on
+the page is drawn *because* it ties to the focus and a neighbour drawn without that tie is a dot
+placed for a reason the picture no longer shows. The interlinks among the neighbours stay under the
+bound; the test that holds them to it counts the focus's ties apart, which is the relation that is
+actually claimed — the earlier form asserted `nodes × 6` over all edges and passed only for as long
+as the tie-break happened to keep the crowd small.
+A Theme is the facet here and never a node (ADR-0028), and it is applied to the **citations** —
+`$1` of every statement that reads one — rather than to the finished picture, so a facet narrows
+what an edge weighs, what the profile counts and what the drawer opens together. Filtering the
+picture afterwards would leave a weight counting reporting the drawer then refused to open, which is
+the page disagreeing with itself one click later. The facet *vocabulary* is the one statement that
+does not take the Theme in force: `GRAPH_VIEW_THEME_FACETS` (12) over the focus's whole reporting, so
+narrowing never dead-ends on its first click — 2,072 controlled values at ~48 per Article means a
+well-reported name carries hundreds, and the head is where the subjects it is known for sit, with
+each count stated beside it so a reader can see this is a head and not the whole.
+Under one edge, `EDGE_CITATION_CAP` (20) Articles newest first with the edge's whole weight stated
+above them from one `COUNT(*) OVER ()`, so the two numbers cannot disagree; the list is metadata
+only and fail-closed by construction rather than by a check — `toPublicArticle` does not select
+`analysisText` at all, so even a `licensed` Publisher whose text `mayServeText` would clear serves
+none here, and the text a reader may read stays on the Article record where that gate lives. Each
+citation states the Story it was accepted into through `src/lib/storyMembership.ts` or `null`, which
+for a firehose-derived graph is the common case and a fact about the corpus rather than a gap. A
+name the graph no longer holds — demoted, or folded away by a merge — is a 404 like an id that was
+never one, since an empty neighbourhood would state that a name exists with nothing around it, and
+all four statements share one REPEATABLE READ snapshot for the reason #68's three do.
+Frontend: `pages/EntityNeighbourhood.tsx` at `/graph/entities/:entityId` is a **Record** page, since
+this is one thing with facts about it and the picture is one of those facts rather than the page's
+subject. What both graph surfaces draw moved to `components/graphRegister.tsx` — the kind marks,
+`toGraphElements`, the stylesheet, `GraphPlot` and `GraphKey` — rather than being redrawn per page,
+mirroring the one read seam behind them; `focusId` is optional and adds `focus: true` to the one
+matched node, so #68's elements are unchanged and the flag is absent rather than false on the global
+view. The masthead ledger states the two things a layout cannot show — `1 hop from this name`, and
+`Drawn` as `All 2 names` or `2 of 9 names` — beside the kind, the normalized names folded in, and
+the reporting with its span. **Reported alongside** is the same neighbourhood in words through the
+Dashboard register: the reading a keyboard and a screen reader get, and the only place a link's
+evidence can be opened, since a canvas has nowhere to put a drawer. Each row states the weight the
+picture draws as line width, and one `Show reporting` button toggling an `aria-expanded` /
+`aria-controls` pair to a panel with its own request and its own four states — a failed edge leaves
+the neighbourhood readable. The canvas tap and the row's own link go to the same URL, so "clicking a
+node opens that Entity" holds for a mouse, a keyboard and a screen reader alike; the tap handler is
+read from a ref so a re-render never re-settles the force layout. The facet rides in the address bar
+and travels with a reader walking name to name, so a narrowed reading stays narrowed and is a link
+they can share. The two empty neighbourhoods are told apart: a facet that emptied it says so and
+keeps the control on screen, because clearing it is the way back, while the ticket's own criterion —
+every edge rolled out of the retained window — names the window and not the promotion floor, a rule
+this name has already cleared. That is also why the floor's prose sits inside the drawn branch.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
 `/register`, `/account`), role dashboards (`/dashboard/:role`), browsing the corpus
 (`/stories`, `/stories/:id`, `/articles/:id`), IntelligenceBriefs (`/briefs`, `/briefs/:id`),
-search (`/search`, `/search/timeline`), the knowledge graph (`/graph`), and the Student study
+search (`/search`, `/search/timeline`), the knowledge graph (`/graph`,
+`/graph/entities/:entityId`), and the Student study
 session (`/study`). The
 **Bureau rollout** (#28) is mid-flight: root design tokens and the
 application shell (#29), the four shared UI-state treatments and restyled list controls (#30),
@@ -445,13 +501,15 @@ so the graph reads in greyscale and to anyone who cannot tell `--proof-blue` fro
 `--registered-overlap`. The Cytoscape canvas reads those inks from the Bureau tokens at draw time,
 so the picture cannot drift from the legend beside it, which takes the same tokens through CSS.
 Nothing on the page is stated by the drawing alone: `toGraphElements` is exported and pure — jsdom
-renders no canvas, so the renderer is stubbed and that mapping is what the page's own tests hold to
-account — and under the plot, **Names in the graph** is the same graph in words through the
+renders no canvas, so the renderer is stubbed and that mapping is what the tests of the register it
+now lives in (`components/graphRegister.tsx`, shared with #69) hold to account — and under the plot,
+**Names in the graph** is the same graph in words through the
 Dashboard archetype's register, every drawn name in the view's own order with the two quantities the
 picture encodes as node size and line width written out. That register is the reading a keyboard and
 a screen reader get, which is why the canvas is a `role="img"` that says what it draws and points at
-it, and why nothing on it is grabbable or selectable: selecting a node means something in #69 and
-nothing yet. `Drawn` states `3 of 5 names` or `All 3 names`, so a reader is never left thinking the
+it, and why nothing on it is grabbable or selectable: a tap on a node is one gesture with one
+meaning, opening that name's own neighbourhood (#69), and dragging or selecting would compete with
+it. `Drawn` states `3 of 5 names` or `All 3 names`, so a reader is never left thinking the
 bound is the graph. Story detail carries the **analysis surface** (#53): a Request-analysis command (a
 mutation, never a fetch on render, since an analysis may cost money), a Lens select for an Admin
 only — a reader's Lens is their role, and the API refuses one from them — claims grouped by kind

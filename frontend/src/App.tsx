@@ -15,6 +15,7 @@ import ArticleDetail from "./pages/ArticleDetail";
 import Search from "./pages/Search";
 import SearchTimeline from "./pages/SearchTimeline";
 import Graph from "./pages/Graph";
+import EntityNeighbourhood from "./pages/EntityNeighbourhood";
 import Briefs from "./pages/Briefs";
 import BriefForm from "./pages/BriefForm";
 import BriefDetail from "./pages/BriefDetail";
@@ -57,6 +58,11 @@ function App() {
             ADR-0028's graph reads the retained firehose, which is a different corpus from
             any Story. */}
         <Route path="/graph" element={<Graph />} />
+        {/* One name's neighbourhood (#69), reached by opening a name in the view above.
+            Under /graph because it is the same graph read closer, and the Entity id in the
+            path because a shared link is to one name — the Theme it may be narrowed by
+            rides in the query string, where a facet belongs. */}
+        <Route path="/graph/entities/:entityId" element={<EntityNeighbourhood />} />
         <Route path="/briefs" element={<Briefs />} />
         <Route path="/briefs/new" element={<BriefForm />} />
         <Route path="/briefs/:id" element={<BriefDetail />} />

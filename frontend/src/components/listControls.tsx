@@ -1,5 +1,5 @@
 import { useSearchParams } from "react-router-dom";
-import { isStoryCategory, STORY_CATEGORIES, type ListEnvelope, type StoryCategory } from "../api/client";
+import { isStoryCategory, STORY_CATEGORIES, type ListEnvelope, type StoryCategory, type ThemeFacet } from "../api/client";
 
 // URL search params double as the filter/sort/page state on every list page:
 // shareable links, and back/forward behaves the way a reader expects. The names
@@ -106,6 +106,42 @@ export function CategoryFilter({ value, onChange }: { value: string; onChange: (
             {c}
           </option>
         ))}
+      </select>
+    </label>
+  );
+}
+
+// The Theme a neighbourhood is narrowed by (#69). Same pill as every other filter, and a
+// filter is all a Theme ever is: ADR-0028 keeps Themes out of the graph as nodes, because ~48
+// per Article makes theme-to-theme co-occurrence a complete graph that says nothing.
+//
+// The options come from the payload rather than from a constant — the vocabulary is 2,072
+// GKG values and this is the head of the ones this name is actually reported under — and each
+// carries its count, so a reader can see that picking one narrows a lot or a little before
+// they pick it.
+export function ThemeFacetFilter({
+  value,
+  facets,
+  onChange,
+}: {
+  value: string;
+  facets: ThemeFacet[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className={filterFieldClass(Boolean(value))}>
+      Theme{" "}
+      <select value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">All themes</option>
+        {facets.map(({ theme, articleCount }) => (
+          <option key={theme} value={theme}>
+            {theme} · {articleCount}
+          </option>
+        ))}
+        {/* A facet arrived at by link may not be in this name's head of the vocabulary. Kept
+            as an option so the control states the filter actually in force rather than
+            silently reading as "All themes". */}
+        {value && !facets.some((facet) => facet.theme === value) && <option value={value}>{value}</option>}
       </select>
     </label>
   );

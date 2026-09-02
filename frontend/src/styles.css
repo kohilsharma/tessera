@@ -943,7 +943,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 /* The legend, carrying kind three ways at once so it survives greyscale and colour
    blindness (DESIGN.md's Redundant Signal Rule): the ink, the shape the canvas draws
    that kind as, and the word. Same tokens the canvas reads at draw time
-   (pages/Graph.tsx), so the key and the picture cannot disagree. */
+   (components/graphRegister.tsx), so the key and the picture cannot disagree. */
 .graph-key { display: flex; flex-wrap: wrap; gap: 9px 22px; margin: 22px 0 0; padding: 0; list-style: none; color: var(--quiet-ink); font: 500 .68rem/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
 .graph-key li { display: flex; align-items: center; gap: 9px; }
 .graph-key-mark { flex: none; width: 12px; height: 12px; border: 1px solid var(--bureau-ink); }
@@ -956,3 +956,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    60 names is visible from it. No shadow — DESIGN.md keeps the offset shadow for
    registration, and nothing is being registered here. */
 .graph-plot { height: clamp(340px, 60vh, 600px); margin-top: 18px; border: 1px solid var(--bureau-ink); background: var(--stock-paper); }
+
+/* The reporting behind one link (#69), opened inside the register row of the name on its
+   other end. Indented under a rule on the mark side, so an opened drawer reads as evidence
+   *for that row* rather than as a new register: the row's name is the claim, and this is what
+   it rests on. The rows inside are the corpus's own entry rows, so a citation here reads and
+   links exactly as it does in a Story's coverage. */
+.graph-evidence { margin: 15px 0 4px; border-left: 3px solid var(--bureau-ink); padding-left: 15px; }
+.graph-evidence-note { margin: 0; color: var(--quiet-ink); font: 400 .82rem/1.5 Arial, Helvetica, sans-serif; }
+.graph-evidence .entry-list { margin-top: 13px; }

@@ -6,9 +6,17 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 // A fresh QueryClient per test: the app's shared one would carry cached data
 // between tests and make a "loading" assertion pass or fail by test order.
 // Retries off so an error state is reached on the first rejection.
+//
+// `probe` is somewhere for a navigate() to land that a test can then read — the
+// graph's canvas opens a name by navigating rather than by rendering a link
+// (#69), so where it went is only observable as a route that was reached.
 export function renderWithProviders(
   ui: ReactElement,
-  { route = "/", path = "*" }: { route?: string; path?: string } = {},
+  {
+    route = "/",
+    path = "*",
+    probe,
+  }: { route?: string; path?: string; probe?: { path: string; element: ReactElement } } = {},
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -19,6 +27,7 @@ export function renderWithProviders(
       <MemoryRouter initialEntries={[route]}>
         <Routes>
           <Route path={path} element={ui} />
+          {probe && <Route path={probe.path} element={probe.element} />}
           {/* Somewhere for a post-submit navigate() to land, so a successful
               save doesn't log "No routes matched" noise from every test. */}
           {path !== "*" && <Route path="*" element={null} />}

@@ -75,8 +75,27 @@ export const VIEW_EDGES_PER_ENTITY = envNumber("GRAPH_VIEW_EDGES_PER_ENTITY", 6,
 // omission. The global view selects its nodes by presence and then draws the edges *among
 // them*: it never traverses out from a node, so there is no hop for a caller to widen and
 // nothing a number here could tighten. Depth becomes a real bound the moment a view starts
-// from one Entity and walks outward, which is #69's neighbourhood; it belongs beside that
-// selection, not in front of a projection that has no traversal to bound.
+// from one Entity and walks outward, which is #69's neighbourhood — where it lives as
+// `NEIGHBOURHOOD_DEPTH` beside that selection (./loadGraphView.ts), not in front of a
+// projection that has no traversal to bound, and not as an env knob: one hop is what
+// "neighbourhood" means, and two is a different picture rather than a wider one.
+
+// #69's two bounds, both on one Entity's page and both about a list a person reads rather
+// than about what the graph holds.
+//
+// 12 Themes: a facet list is only a filter while a reader can take it in at a glance. The
+// vocabulary is 2,072 values at ~48 per Article, so a well-reported name carries hundreds
+// of them and the head of that distribution is where the subjects it is actually known for
+// sit. The count each carries is stated beside it, so a reader can see this is a head and
+// not the whole.
+export const VIEW_THEME_FACETS = envNumber("GRAPH_VIEW_THEME_FACETS", 12, { min: 1, max: 100 });
+
+// 20 Articles under one edge, newest first, with the edge's whole weight stated above them.
+// A weight is a count of Articles and runs to hundreds on a heavy pair; what a reader opens
+// a line for is enough reporting to check that the two names really were reported together,
+// which is a handful of the most recent — not every window they shared. The two numbers are
+// allowed to differ, and the page says so.
+export const EDGE_CITATION_CAP = envNumber("GRAPH_EDGE_CITATIONS", 20, { min: 1, max: 200 });
 
 // The two bars #67 turns on, both read by pg_trgm's `similarity()` over normalized
 // surface names. v3 §18.5's rule sets them: a wrong merge is more harmful than an
@@ -128,7 +147,8 @@ if (ENTITY_MERGE_REVIEW_SIMILARITY >= ENTITY_MERGE_AUTO_SIMILARITY) {
 // ADR-0028: Themes are never Entities. They are 46,787 of the 66,229 measured
 // occurrences over 2,072 controlled-vocabulary values — roughly 48 per Article, so
 // theme-to-theme co-occurrence approaches a complete graph and says nothing. A Theme
-// is a facet the graph is filtered *by*, which is a later ticket's read path.
+// is a facet the graph is filtered *by*, which is #69's neighbourhood and the one read
+// path that takes one (./loadGraphView.ts).
 //
 // A list rather than "everything except theme" so the exclusion is a decision the
 // compiler checks against GkgAnnotationKind rather than a negation to re-derive. Narrow

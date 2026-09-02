@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { AppDataSource } from "../data-source";
 import { enqueueEntityResolutionRun } from "../graph/queue";
-import { loadGraphView } from "../graph/loadGraphView";
+import { loadEdgeCitations, loadEntityNeighbourhood, loadGraphView } from "../graph/loadGraphView";
 import { MERGE_PROPOSAL_DECISIONS, decideMergeProposal, type MergeProposalDecision } from "../graph/merge";
 import type { PromotableKind } from "../graph/config";
 import { EntityMergeProposal } from "../entities/EntityMergeProposal";
@@ -31,6 +31,59 @@ graphRouter.get(
   requireAuth,
   asyncHandler(async (_req, res) => {
     res.json(await loadGraphView());
+  }),
+);
+
+// The one parameter either graph route accepts, and the reason it is safe to: a Theme only
+// ever narrows (ADR-0028 — never a node, always a facet). Anything unusable falls back to
+// the unfaceted picture rather than 422ing, for the same reason `GET /graph` ignores
+// `?nodes=5000`: a reader following a stale link is owed the page, not a validation error.
+function themeOf(query: Record<string, unknown>): string | null {
+  const theme = query.theme;
+  return typeof theme === "string" && theme.trim() !== "" ? theme : null;
+}
+
+// One Entity's neighbourhood (#69), reached by clicking a name in the global view. Same
+// `requireAuth` and no role guard, for the reason above — and the same read path, so the
+// bounds and the promotion floor here are the ones the global view applied and the two
+// pictures cannot disagree about what is in the graph.
+//
+// 404 for an id that is not a uuid as well as for one the graph does not hold: a name a
+// merge folded away or a pass demoted is a name that is gone, and both arrive here as a
+// link that no longer resolves. Checked before the query so a malformed id is not a
+// database error.
+graphRouter.get(
+  "/graph/entities/:entityId",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const view = isUuid(req.params.entityId)
+      ? await loadEntityNeighbourhood(req.params.entityId, themeOf(req.query as Record<string, unknown>))
+      : null;
+    if (!view) {
+      res.status(404).json({ error: "Entity not found" });
+      return;
+    }
+    res.json(view);
+  }),
+);
+
+// The evidence under one edge: the Articles the co-mention was observed in, which is the
+// citation invariant made openable. A pair the graph holds no edge for is 404 rather than
+// an empty list — an empty list would assert a co-mention that was never reported.
+graphRouter.get(
+  "/graph/entities/:entityId/edges/:otherEntityId",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { entityId, otherEntityId } = req.params;
+    const evidence =
+      isUuid(entityId) && isUuid(otherEntityId)
+        ? await loadEdgeCitations(entityId, otherEntityId, themeOf(req.query as Record<string, unknown>))
+        : null;
+    if (!evidence) {
+      res.status(404).json({ error: "Edge not found" });
+      return;
+    }
+    res.json(evidence);
   }),
 );
 

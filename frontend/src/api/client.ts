@@ -713,6 +713,73 @@ export function getGraphView(): Promise<GraphView> {
   return getJson("/api/v1/graph", "Could not load the knowledge graph");
 }
 
+// #69: one Entity's neighbourhood, reached by clicking a name in the global view. The
+// same node and edge bounds as above, applied by the same read path server-side, so the
+// two pictures cannot disagree about what is in the graph.
+export type EntityProfile = {
+  id: string;
+  kind: EntityKind;
+  canonicalName: string;
+  // The other surface names a merge folded into this one, normalized — what an alias is
+  // remembered as (backend/src/entities/EntityAlias.ts), so the page says so rather than
+  // implying these were reported this way.
+  aliases: string[];
+  articleCount: number;
+  from: string | null;
+  to: string | null;
+};
+
+// A Theme this name is reported under, with how much of its reporting carries it. Never
+// a node (ADR-0028) — the head of the list, so the page states the count beside each.
+export type ThemeFacet = { theme: string; articleCount: number };
+
+export type Neighbourhood = {
+  retainedDays: number;
+  promotionFloor: number;
+  // How far out the picture reaches, stated because a reader cannot see a hop count in
+  // a layout. Fixed server-side: one hop is what "neighbourhood" means.
+  depth: number;
+  focus: EntityProfile;
+  // The facet in force, echoed back, and the vocabulary to choose from — computed over
+  // the focus's whole reporting rather than the filtered slice, so switching facets is
+  // never a dead end.
+  theme: string | null;
+  themes: ThemeFacet[];
+  // Neighbours the focus has, against `nodes.length - 1` drawn: the same "part of, not
+  // all of" the global view states with `entityCount`.
+  neighbourCount: number;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+};
+
+// The reporting one edge was observed in — the citation invariant made openable. Metadata
+// only, whatever a Publisher's Terms Class allows: a body is served from the Article
+// record alone (ADR-0018). `story` is null while an Article's Story membership is not
+// accepted, so the link is offered only where it resolves.
+export type EdgeCitation = ArticleSummary & { story: { id: string; slug: string; title: string } | null };
+
+// `weight` is the edge's whole weight, which may exceed the citations returned — the page
+// states both rather than implying the list is all of it.
+export type EdgeCitations = { weight: number; citations: EdgeCitation[] };
+
+export function getEntityNeighbourhood(entityId: string, theme?: string | null): Promise<Neighbourhood> {
+  return getJson(
+    `/api/v1/graph/entities/${entityId}${toQueryString({ theme: theme ?? undefined })}`,
+    "Could not load this Entity's neighbourhood",
+  );
+}
+
+export function getEdgeCitations(
+  entityId: string,
+  otherEntityId: string,
+  theme?: string | null,
+): Promise<EdgeCitations> {
+  return getJson(
+    `/api/v1/graph/entities/${entityId}/edges/${otherEntityId}${toQueryString({ theme: theme ?? undefined })}`,
+    "Could not load the reporting behind this connection",
+  );
+}
+
 // #53: the flagship. Mirrors backend/src/entities/GenerationRun.ts and
 // AnalysisClaim.ts. CONTEXT.md "Lens" — one role-specific claim type per
 // generation, derived from the caller's role, so a Student and an Investor get

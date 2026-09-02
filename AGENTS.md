@@ -19,9 +19,9 @@ Each pointer names the branch that reaches it. Read what your task hits.
 ## Repo state
 
 Phases 1 and 2 are complete; Phase 3 through #58; Phase 3.5 in flight — entity resolution (#66),
-a Story's timeline (#64), the search timeline (#65), candidate merges (#67) and the bounded global
-graph (#68) are in, the Entity neighbourhood (#69) is ahead. `docs/repo-state.md` carries the
-per-ticket detail.
+a Story's timeline (#64), the search timeline (#65), candidate merges (#67), the bounded global
+graph (#68) and one Entity's neighbourhood (#69) are in; the Extraction pass (#70) is ahead.
+`docs/repo-state.md` carries the per-ticket detail.
 
 **backend/** — one seam per module. Extend the seam rather than adding a parallel path.
 
@@ -30,7 +30,7 @@ per-ticket detail.
 | `src/ingestion/` | `runConnector` | RSS, GKG 15-min firehose, DOC, Readability. Canonical-URL identity, dedup, cross-connector enrichment, Terms-Class rights checks, window cursor + 7-day GDELT retention, GKG Annotation staging |
 | `src/clustering/` | `runClustering` | Embed → centroid → nearest-Story assignment. No singleton Stories, model-named new Stories, a pending-review band beneath the threshold, Story merge |
 | `src/generation/` | `runGeneration` | Deterministic evidence selection → frozen EvidenceSet (`A1…` ids, SHA-256) → cited claims under one Lens. Validation below the prompt, repair ×2, Admin-tunable `prompt_templates` |
-| `src/graph/` | `runEntityResolution`, `loadGraphView` | Normalized-name folding, promotion floor, rolling co-occurrence graph, edges bounded from both ends, trigram merge candidates above a bar and a review band beneath it, merges and refusals remembered by name, whole pass in one transaction. The read view is bounded again — for one screen, not for storage — and `GET /graph` takes no parameters, so a caller cannot widen it |
+| `src/graph/` | `runEntityResolution`, `loadGraphView` | Normalized-name folding, promotion floor, rolling co-occurrence graph, edges bounded from both ends, trigram merge candidates above a bar and a review band beneath it, merges and refusals remembered by name, whole pass in one transaction. One read seam for both pictures — the whole graph and one Entity's neighbourhood one hop out, with the reporting under any edge openable — bounded again for one screen, not for storage. `GET /graph` takes no parameters, and the only thing a neighbourhood takes is a Theme, which only ever narrows |
 | `src/timeline/` | `buildTimeline` | Takes a **set of Articles**, never a query. Reporting and analytical events on one axis, granularity chosen from the span, one lane per Story over a set drawn from many |
 | `src/lib/storyMembership.ts` | — | The one accepted-membership predicate every reader surface tests |
 
@@ -46,7 +46,9 @@ screenshots at both breakpoints in `docs/verification/bureau-rollout/`. Every ro
 four shared UI states, and states "nothing here" differently from a failed request.
 
 Shared registers, reused rather than redrawn per page: `components/timelineRegister.tsx` (Story
-detail's coverage register, and the axis and bars every `/search/timeline` lane draws) and
+detail's coverage register, and the axis and bars every `/search/timeline` lane draws),
+`components/graphRegister.tsx` (the kind marks, the Cytoscape mapping, the plot and its legend, drawn
+by `/graph` and by every Entity's neighbourhood) and
 `components/analysisRegister.tsx` (claims, read differently under
 each Lens, on both Story detail and Brief detail). The Admin console's six Phase-3 registers
 live in `pages/adminRegisters.tsx`, each owning its own request and commands, laid out by
