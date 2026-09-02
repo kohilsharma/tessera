@@ -58,11 +58,12 @@ export class CreateEntityMergeReview1755764000000 implements MigrationInterface 
       `CREATE INDEX "IDX_entity_merge_refusals_refusedByUserId" ON "entity_merge_refusals" ("refusedByUserId")`,
     );
 
-    // A proposal changes nothing. It is derived state, rebuilt whole by each pass like
-    // the edges are, so it carries no timestamp: a pair re-proposed hourly has no
-    // meaningful age. The two Article counts are stored because they are what the pass
-    // measured and what fixed the orientation — the reviewer sees the same numbers the
-    // survivor was chosen by.
+    // A proposal changes nothing. It is derived state — each pass refreshes what it
+    // measured and drops the pairs it no longer stages — but keyed on the pair, so an open
+    // proposal keeps its id across every pass that re-derives it: the id is what an Admin's
+    // decision names, and one that churned hourly would 404 the decision. The two Article
+    // counts are stored because they are what the pass measured and what fixed the
+    // orientation — the reviewer sees the same numbers the survivor was chosen by.
     await queryRunner.query(`
       CREATE TABLE "entity_merge_proposals" (
         "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),

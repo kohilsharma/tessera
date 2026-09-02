@@ -19,6 +19,14 @@ export type MergeSide = {
 export const MERGE_PROPOSAL_DECISIONS = ["accept", "refuse"] as const;
 export type MergeProposalDecision = (typeof MERGE_PROPOSAL_DECISIONS)[number];
 
+// The key `entity_merge_refusals` stores an unordered pair under: the lesser normalized
+// name in "A", which its CHECK enforces. One expression because two places have to agree
+// on it — the insert below writes a refusal, and the pass reads the memory back to filter
+// its candidates. If the two drifted the row would still be there and would silently stop
+// matching the pair it was made about.
+export const refusalKeySql = (one: string, other: string) =>
+  [`LEAST(${one}, ${other})`, `GREATEST(${one}, ${other})`] as const;
+
 export type DecidedMergeProposal = {
   proposalId: string;
   decision: MergeProposalDecision;
@@ -143,10 +151,11 @@ export async function decideMergeProposal(
       // ids, and this judgement still holds. ON CONFLICT DO NOTHING because refusing an
       // already-refused pair is the same answer, not a second one — the earlier refusal
       // and its author stand.
+      const [nameA, nameB] = refusalKeySql("$3", "$4");
       await manager.query(
         `INSERT INTO "entity_merge_refusals"
            ("kind", "featureKey", "normalizedNameA", "normalizedNameB", "refusedByUserId")
-         VALUES ($1, $2, LEAST($3, $4), GREATEST($3, $4), $5)
+         VALUES ($1, $2, ${nameA}, ${nameB}, $5)
          ON CONFLICT DO NOTHING`,
         [survivor.kind, survivor.featureKey, survivor.normalizedName, merged.normalizedName, decidedByUserId],
       );

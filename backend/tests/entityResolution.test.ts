@@ -179,6 +179,17 @@ function refusals(): Promise<{ normalizedNameA: string; normalizedNameB: string;
 const AUTO_PAIR = ["Massachusetts Institute of Technology", "Massachusets Institute of Technology"] as const;
 const BAND_PAIR = ["Australian Associated Press", "Australian Associated"] as const;
 
+// Three spellings of one organization, for the case a refusal has to outlive the names it
+// was made about. `…Commission` is in the band against the truncation and above the bar
+// against the typo, and the truncation is still inside the band against the typo — so once
+// the fold takes the refused name away, what is left is a pair the refusal never named and
+// a queue would ask about afresh.
+const REFUSED_CHAIN = {
+  refused: "Securities and Exchange Commission",
+  against: "Securities and Exchange",
+  foldsInto: "Securities and Exchange Commision",
+} as const;
+
 async function nameSimilarity(one: string, other: string): Promise<number> {
   const [row] = (await AppDataSource.query(`SELECT similarity(lower($1), lower($2))::float AS score`, [
     one,
@@ -619,6 +630,28 @@ describe("runEntityResolution", () => {
     expect(run.proposed).toBe(1);
   });
 
+  it("re-orients a held pair when attestation moves, rather than leaving the old one behind", async () => {
+    const publisher = await createPublisher("reorient.example");
+    const [survivorName, mergedName] = BAND_PAIR;
+    await stageMergePair(publisher.id, BAND_PAIR);
+    await runEntityResolution();
+    expect((await proposals()).map(({ survivor, merged }) => [survivor, merged])).toEqual([
+      [survivorName, mergedName],
+    ]);
+
+    // The weaker spelling overtakes: two more Articles name it, so it is the better
+    // attested side now and the pair is oriented the other way round.
+    await coMention(publisher.id, [mergedName, "Regional Press Club"], 2, "overtake", "organization");
+    const second = await runEntityResolution();
+
+    // One proposal, not two: a proposal is derived, so the pair the pass no longer stages
+    // stops being one rather than sitting in the queue beside its own reversal.
+    expect(second.proposed).toBe(1);
+    expect((await proposals()).map(({ survivor, merged }) => [survivor, merged])).toEqual([
+      [mergedName, survivorName],
+    ]);
+  });
+
   it("proposes nothing for two names that merely share a kind", async () => {
     const publisher = await createPublisher("distinct.example");
     await coMention(publisher.id, ["Ada Lovelace", "Grace Hopper"], ENTITY_PROMOTION_FLOOR);
@@ -867,6 +900,59 @@ describe("the merge review queue", () => {
     expect(rebuilt.promoted).toBe(4);
     expect(rebuilt.proposed).toBe(0);
     expect(await proposals()).toEqual([]);
+  });
+
+  it("still refuses a pair after one of its names has been folded into a third spelling", async () => {
+    const publisher = await createPublisher("chained.example");
+    const { refused, against, foldsInto } = REFUSED_CHAIN;
+    const held = await nameSimilarity(refused, against);
+    expect(held).toBeGreaterThanOrEqual(ENTITY_MERGE_REVIEW_SIMILARITY);
+    expect(held).toBeLessThan(ENTITY_MERGE_AUTO_SIMILARITY);
+    await stageMergePair(publisher.id, [refused, against]);
+    await runEntityResolution();
+    const token = await createAdminToken("chained-admin@example.com");
+    await request(app())
+      .patch(`/api/v1/graph/merge-proposals/${await onlyProposalId()}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ decision: "refuse" });
+
+    // A third spelling, better attested than the refused name and above the bar against
+    // it, so the next pass folds the refused name away by itself. What is left is a pair
+    // whose names the refusal row does not hold.
+    expect(await nameSimilarity(foldsInto, refused)).toBeGreaterThanOrEqual(ENTITY_MERGE_AUTO_SIMILARITY);
+    expect(await nameSimilarity(foldsInto, against)).toBeGreaterThanOrEqual(ENTITY_MERGE_REVIEW_SIMILARITY);
+    await coMention(publisher.id, [foldsInto, "Bureau Wire"], ENTITY_PROMOTION_FLOOR + 3, "typo", "organization");
+
+    const run = await runEntityResolution();
+
+    expect(run.merged).toBe(1);
+    expect(await aliases()).toEqual([
+      { normalizedName: refused.toLowerCase(), targetNormalizedName: foldsInto.toLowerCase() },
+    ]);
+    // The Admin judged that these two things are not the same thing. One of them being
+    // spelled differently now is not a fresh question, so the memory is read through the
+    // fold — and in the same pass that wrote it, not an hour later.
+    expect(run.proposed).toBe(0);
+    expect(await proposals()).toEqual([]);
+  });
+
+  it("keeps a held pair's id across the pass that re-derives it, so a decision still lands", async () => {
+    const token = await stageOneProposal("stable.example");
+    const proposalId = await onlyProposalId();
+
+    const second = await runEntityResolution();
+
+    // A proposal is derived state, but its id is what a decision names. Re-deriving the
+    // same pair under a new id would 404 every decision made against a queue an Admin read
+    // before the pass — hourly, and silently.
+    expect(second.proposed).toBe(1);
+    expect(await onlyProposalId()).toBe(proposalId);
+    const res = await request(app())
+      .patch(`/api/v1/graph/merge-proposals/${proposalId}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ decision: "accept" });
+    expect(res.status).toBe(200);
+    expect((await entities()).map((entity) => entity.canonicalName)).not.toContain(BAND_PAIR[1]);
   });
 
   it("answers 404 for a proposal that is not there to decide, and 422 for a decision it does not know", async () => {

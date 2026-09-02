@@ -334,14 +334,24 @@ asserts). Every stored target is terminal — merging B into C repoints A→B at
 one `LEFT JOIN` rather than a recursive walk. Refusals are keyed the same way, on the ordered
 normalized pair in `entity_merge_refusals`, and therefore outlive the Entities themselves: the
 regression drives both names out of the working set, watches the pass demote them, re-stages the
-reporting, and asserts the rebuilt pair is proposed zero times. `graph/merge.ts` is the one place a
+reporting, and asserts the rebuilt pair is proposed zero times. The memory is *read* through the
+fold too, since a refused name can itself be merged away afterwards and the pair left over names
+the same two things: `refusedPairSql` resolves both stored names through `entity_aliases` before it
+compares, and runs twice in a pass — at candidate staging, and again after the merges, because the
+merges in between write the aliases the staging could not have seen. The pass that folds
+`…Commission` into `…Commision` is otherwise the pass that holds `…Commision`/`Securities and
+Exchange` for an Admin to accept, an hour after a person said those two are not the same thing. `graph/merge.ts` is the one place a
 merge happens, for both the automatic and the accepted path — alias write, terminal repoint, edge
 carry through `LEAST`/`GREATEST` with `ON CONFLICT DO NOTHING`, then the delete whose cascade takes
 the leftovers — which is what makes the Admin's accept correct with no rebuild behind it. Proposals
-are rebuilt from the candidate table on every pass, so one cannot outlive the working set it
-described; a decision locks the proposal and then both Entities in id order, and 404s three cases
-a reviewer reads as one: no such row, one another operator already decided, one a pass rebuilt
-away. The run ledger gains `merged` and `proposed`, both outside `promoted + belowFloor =
+are re-derived from the candidate table on every pass, so one cannot outlive the working set it
+described, but *upserted* on the pair rather than deleted and reinserted: the id is what a decision
+names, and one regenerated hourly would 404 every decision made against a queue older than a pass —
+the whole review band going quiet on a schedule. The other half of derived is a prune, so a pair the
+pass no longer stages stops being a proposal, which is also how a re-oriented pair replaces its own
+reversal instead of sitting beside it. A decision locks the proposal and then both Entities in id
+order, and 404s three cases a reviewer reads as one: no such row, one another operator already
+decided, one a pass rebuilt away. The run ledger gains `merged` and `proposed`, both outside `promoted + belowFloor =
 considered` because they count *pairs* — and because both names of a merged pair were promoted by
 the same pass that then folded them.
 The queue is the Admin console's second review register, beside clustering's for the reason they

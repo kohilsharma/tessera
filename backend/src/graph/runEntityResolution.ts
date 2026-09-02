@@ -9,7 +9,7 @@ import {
   PROMOTABLE_KINDS,
   type PromotableKind,
 } from "./config";
-import { applyEntityMerge } from "./merge";
+import { applyEntityMerge, refusalKeySql } from "./merge";
 
 // The fold identity is decided on: case, punctuation and whitespace. One SQL
 // expression rather than a TypeScript function, because the retained window holds
@@ -53,6 +53,34 @@ const aliasJoinSql = `LEFT JOIN "entity_aliases" al
         AND al."featureKey" = ${featureKeySql}`;
 
 const resolvedNameSql = `COALESCE(al."targetNormalizedName", ${normalizedNameSql('ga."surfaceName"')})`;
+
+// Is this pair one an Admin has already refused? Read through the same aliases the fold
+// reads, because the names a refusal was made about can themselves be merged away
+// afterwards: refuse `securities and exchange` against `securities and exchange
+// commission`, let the second fold into the typo `…commision`, and the pair that is left
+// names the same two things the Admin looked at. A refusal keyed on raw names goes quiet
+// there — the memory still holds the row and stops matching the pair it was made about.
+//
+// Both stored names are resolved and the pair re-ordered afterwards, since a fold can move
+// which of the two is the lesser.
+const refusedPairSql = (kind: string, featureKey: string, one: string, other: string) => {
+  const [nameA, nameB] = refusalKeySql(one, other);
+  const [refusedA, refusedB] = refusalKeySql(
+    `COALESCE(ra."targetNormalizedName", r."normalizedNameA")`,
+    `COALESCE(rb."targetNormalizedName", r."normalizedNameB")`,
+  );
+  return `EXISTS (
+          SELECT 1 FROM "entity_merge_refusals" r
+            LEFT JOIN "entity_aliases" ra
+                   ON ra."kind" = r."kind" AND ra."featureKey" = r."featureKey"
+                  AND ra."normalizedName" = r."normalizedNameA"
+            LEFT JOIN "entity_aliases" rb
+                   ON rb."kind" = r."kind" AND rb."featureKey" = r."featureKey"
+                  AND rb."normalizedName" = r."normalizedNameB"
+           WHERE r."kind" = ${kind} AND r."featureKey" = ${featureKey}
+             AND ${refusedA} = ${nameA} AND ${refusedB} = ${nameB}
+        )`;
+};
 
 type Counted = { count: number };
 
@@ -201,12 +229,7 @@ async function stageMergeCandidates(manager: EntityManager): Promise<void> {
         AND (s."articleCount" > m."articleCount"
              OR (s."articleCount" = m."articleCount" AND s."normalizedName" < m."normalizedName"))
       WHERE similarity(s."normalizedName", m."normalizedName") >= $1
-        AND NOT EXISTS (
-          SELECT 1 FROM "entity_merge_refusals" r
-           WHERE r."kind" = s."kind" AND r."featureKey" = s."featureKey"
-             AND r."normalizedNameA" = LEAST(s."normalizedName", m."normalizedName")
-             AND r."normalizedNameB" = GREATEST(s."normalizedName", m."normalizedName")
-        )`,
+        AND NOT ${refusedPairSql('s."kind"', 's."featureKey"', 's."normalizedName"', 'm."normalizedName"')}`,
     [ENTITY_MERGE_REVIEW_SIMILARITY],
   );
 }
@@ -257,15 +280,23 @@ async function resolveMerges(manager: EntityManager): Promise<{ merged: number; 
     merged += 1;
   }
 
-  // Rebuilt whole, like the edges: a proposal is derived state, so the queue states what
-  // the graph looks like *now* rather than accumulating pairs whose names have since
-  // moved. An Admin's undecided proposal survives this — the same pair is re-derived from
-  // the same names — while one whose Entity was merged or demoted does not, which is the
-  // right answer to "decide this" for a row that is no longer there.
+  // The merges above wrote aliases, so the refusal memory reads differently now than it did
+  // at staging: folding A into C brings the pair (C, B) under a refusal made about (A, B),
+  // which the staging could not have seen because the alias did not exist yet. Re-read here
+  // rather than left to the next pass — v3 §18.5 puts the wrong merge on the harmful side of
+  // the trade, and a proposal an Admin can accept for an hour is one.
+  await manager.query(
+    `DELETE FROM "resolution_merge_candidate" c
+      WHERE ${refusedPairSql('c."kind"', 'c."featureKey"', 'c."survivorName"', 'c."mergedName"')}`,
+  );
+
+  // Upserted on the pair rather than deleted and re-inserted. A proposal is derived state
+  // and its measurements are refreshed from what this pass read, but its *id* is what an
+  // Admin's decision names: an id regenerated hourly would 404 every decision made against
+  // a queue older than one pass, so the whole review band would go quiet on a schedule.
   //
-  // The join back to `entities` is what excludes the pairs the loop above just merged
-  // away; their proposals would name a deleted row.
-  await manager.query(`DELETE FROM "entity_merge_proposals"`);
+  // The join back to `entities` is what excludes the pairs the loop above merged away;
+  // their proposals went by cascade with the Entity.
   await manager.query(
     `INSERT INTO "entity_merge_proposals"
        ("survivorEntityId", "mergedEntityId", "similarity", "survivorArticleCount", "mergedArticleCount")
@@ -274,7 +305,26 @@ async function resolveMerges(manager: EntityManager): Promise<{ merged: number; 
        FROM "resolution_merge_candidate" c
        JOIN "entities" s ON s."id" = c."survivorEntityId"
        JOIN "entities" m ON m."id" = c."mergedEntityId"
-      WHERE c."similarity" < $1`,
+      WHERE c."similarity" < $1
+     ON CONFLICT ("survivorEntityId", "mergedEntityId")
+     DO UPDATE SET "similarity" = EXCLUDED."similarity",
+                   "survivorArticleCount" = EXCLUDED."survivorArticleCount",
+                   "mergedArticleCount" = EXCLUDED."mergedArticleCount"`,
+    [ENTITY_MERGE_AUTO_SIMILARITY],
+  );
+
+  // The other half of "derived": what this pass no longer stages stops being a proposal — a
+  // pair that left the band, one refused since, one the fold re-oriented. Orientation is
+  // part of the pair, so a flip is this delete together with the insert above, and the
+  // reviewer is asked about the pair as it now stands rather than as it once did.
+  await manager.query(
+    `DELETE FROM "entity_merge_proposals" p
+      WHERE NOT EXISTS (
+        SELECT 1 FROM "resolution_merge_candidate" c
+         WHERE c."survivorEntityId" = p."survivorEntityId"
+           AND c."mergedEntityId" = p."mergedEntityId"
+           AND c."similarity" < $1
+      )`,
     [ENTITY_MERGE_AUTO_SIMILARITY],
   );
   const [{ count: proposed }] = (await manager.query(
