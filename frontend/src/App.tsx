@@ -14,6 +14,7 @@ import StoryDetail from "./pages/StoryDetail";
 import ArticleDetail from "./pages/ArticleDetail";
 import Search from "./pages/Search";
 import SearchTimeline from "./pages/SearchTimeline";
+import Graph from "./pages/Graph";
 import Briefs from "./pages/Briefs";
 import BriefForm from "./pages/BriefForm";
 import BriefDetail from "./pages/BriefDetail";
@@ -52,6 +53,10 @@ function App() {
         {/* The same query read as a timeline (#65) — its own route, so a reader can
             link to it, and under /search because it is the same search. */}
         <Route path="/search/timeline" element={<SearchTimeline />} />
+        {/* The bounded global graph (#68). Its own top-level route, not under /stories:
+            ADR-0028's graph reads the retained firehose, which is a different corpus from
+            any Story. */}
+        <Route path="/graph" element={<Graph />} />
         <Route path="/briefs" element={<Briefs />} />
         <Route path="/briefs/new" element={<BriefForm />} />
         <Route path="/briefs/:id" element={<BriefDetail />} />

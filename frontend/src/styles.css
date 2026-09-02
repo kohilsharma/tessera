@@ -647,7 +647,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    DESIGN.md's Redundant Signal Rule, and no claim of certainty the data can't
    support. */
 .dash-measure { max-width: 260px; height: 6px; margin-top: 11px; background: var(--bench-stock); }
-.dash-measure i { display: block; height: 100%; width: calc(var(--share) * 100%); background: var(--role-ink); }
+.dash-measure i { display: block; height: 100%; width: calc(var(--share) * 100%); background: var(--role-ink, var(--bureau-ink)); }
 
 /* Standing totals as plates rather than rows: the ledger's term over its number
    at the scale a total earns. Bench stock and neutral rules — a count is not a
@@ -924,3 +924,35 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
   .study-folio { display: grid; }
   .study-card { box-shadow: 4px 4px 0 var(--bench-stock); }
 }
+
+/* ============================================================
+   KNOWLEDGE GRAPH — the bounded global view (#68). ADR-0028's
+   graph reads the retained firehose, which is a different corpus
+   from every other reader surface, so the provenance ledger is
+   part of the page and not a note under the picture.
+   ============================================================ */
+/* The corpus, the window, the reporting and how much of the graph is on screen, as
+   ruled plates: the dashboard's count register at prose scale, because these values
+   are phrases and a date range rather than display numbers. Under a heavy rule, so
+   the statement reads as the page's own footing and not as one more filter band. */
+.graph-ledger { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 208px), 1fr)); gap: 12px; margin: 24px 0 0; border-top: 3px solid var(--bureau-ink); padding-top: 18px; }
+.graph-ledger > div { border: 1px solid var(--registration-rule); background: var(--bench-stock); padding: 13px 15px 15px; }
+.graph-ledger dt { margin: 0 0 7px; color: var(--quiet-ink); font: 500 .66rem/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.graph-ledger dd { margin: 0; font: 700 .82rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+
+/* The legend, carrying kind three ways at once so it survives greyscale and colour
+   blindness (DESIGN.md's Redundant Signal Rule): the ink, the shape the canvas draws
+   that kind as, and the word. Same tokens the canvas reads at draw time
+   (pages/Graph.tsx), so the key and the picture cannot disagree. */
+.graph-key { display: flex; flex-wrap: wrap; gap: 9px 22px; margin: 22px 0 0; padding: 0; list-style: none; color: var(--quiet-ink); font: 500 .68rem/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.graph-key li { display: flex; align-items: center; gap: 9px; }
+.graph-key-mark { flex: none; width: 12px; height: 12px; border: 1px solid var(--bureau-ink); }
+.graph-key-mark--person { border-radius: 50%; background: var(--proof-blue); }
+.graph-key-mark--organization { background: var(--proof-magenta); }
+.graph-key-mark--location { background: var(--registered-overlap); transform: rotate(45deg) scale(.86); }
+
+/* The picture: a ruled sheet on the bench like every other register, tall enough for a
+   60-node force layout to settle inside and short enough that the register naming those
+   60 names is visible from it. No shadow — DESIGN.md keeps the offset shadow for
+   registration, and nothing is being registered here. */
+.graph-plot { height: clamp(340px, 60vh, 600px); margin-top: 18px; border: 1px solid var(--bureau-ink); background: var(--stock-paper); }

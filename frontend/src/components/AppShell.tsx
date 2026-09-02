@@ -5,6 +5,9 @@ import IdentityMenu from "./IdentityMenu";
 const NAV_LINKS = [
   { to: "/stories", label: "Stories" },
   { to: "/search", label: "Search" },
+  // #68. Alongside the two reader surfaces rather than under either: the graph reads the
+  // retained firehose, so it is a third way into the corpus and not a view of a Story.
+  { to: "/graph", label: "Graph" },
   { to: "/briefs", label: "My Briefs" },
 ];
 

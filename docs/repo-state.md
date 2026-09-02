@@ -263,7 +263,7 @@ Entities and the same edges. Operationally it is a third BullMQ queue on the sam
 ticking hourly at :20 (clear of the quarter-hour ingestion ticks, after clustering's :05), with an
 Admin-only `POST /api/v1/graph/resolution-runs` answering `202 {status:"accepted"}` and an
 `entity_resolution_runs` history table whose ledger is `promoted + belowFloor = considered`.
-Nothing *reads* the graph yet: the Cytoscape view (#68, #69) is still ahead — as is
+The graph's first reader is #68 below; the Entity neighbourhood (#69) is still ahead — as is
 ADR-0028/ADR-0029's groundwork behind it, the
 restored DOC connector (#60), the fixed Guardian feed (#61) and the annotated Curated Corpus
 (#62) above.
@@ -363,11 +363,37 @@ firehose-derived Article may have no accepted Story membership and so no record 
 Two honest ceilings, both documented in `.env.example`: `joe biden`/`joseph biden` (0.533) and
 `ibm`/`i b m` (0.111) are never proposed at all, and the upgrade path for either is a
 hand-written alias row rather than a lower floor that would propose noise by the hundred.
+**The bounded global graph** (#68) is the graph's first reader, and the corpus statement is the
+design rather than a footnote under the picture: ADR-0028's graph is firehose-derived and rolling,
+so `/graph` is the one reader surface in Tessera that does *not* join through accepted Story
+membership, and a reader who mistakes it for the curated corpus has misread every name on the page.
+`src/graph/loadGraphView.ts` is the read seam (#69 extends it), and it carries two bounds of its own
+in `graph/config.ts` — `GRAPH_VIEW_NODES` (60) and `GRAPH_VIEW_EDGES_PER_ENTITY` (6) — because the
+pass's bounds keep the *stored* graph bounded and that is a larger number than one screen holds:
+195 nodes at 25 neighbours each is some 2,400 pairs, a hairball to pan rather than a picture to
+read. Those bounds are un-widenable structurally rather than by validation: `GET /api/v1/graph`
+takes **no parameters at all**, so `?nodes=5000` is not a malformed request but a request about
+nothing, and the test asserts a query string changes the payload not at all. Presence is ranked by
+`COUNT(DISTINCT "articleId")` over `entity_edges` rather than over `gkg_annotations` — a few
+thousand indexed rows against millions, and the same cited reporting the picture then shows — and
+edges are re-bounded among the drawn nodes from *both* ends, in `rebuildEdges`' own idiom, so the
+read path keeps a node's own strongest neighbour for the reason the pass keeps it. The join is
+inner: an Entity nothing co-cites is not drawn, which is the honest reading of a co-occurrence
+graph, and `entityCount` beside it states that the working set is wider. Two facts about time that
+the page must not conflate ride separately — `retainedDays` is the rolling ingest rule, since
+retention is bounded on *stored* time, while `from`/`to` are the published span of the *cited*
+reporting, and the test drives a later single-name Article through the window to prove it does not
+stretch `to`. `promotionFloor` rides for the empty state alone: a graph nothing has resolved into
+states the rule that would fill it, which is what makes it read differently from a failed request.
+Student and Investor read one graph behind `requireAuth` and no role guard — ADR-0021 gives each
+role its own *features*, and a co-occurrence shown to two roles differently would be evidence about
+the reader rather than about the reporting.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
 `/register`, `/account`), role dashboards (`/dashboard/:role`), browsing the corpus
 (`/stories`, `/stories/:id`, `/articles/:id`), IntelligenceBriefs (`/briefs`, `/briefs/:id`),
-search (`/search`, `/search/timeline`), and the Student study session (`/study`). The
+search (`/search`, `/search/timeline`), the knowledge graph (`/graph`), and the Student study
+session (`/study`). The
 **Bureau rollout** (#28) is mid-flight: root design tokens and the
 application shell (#29), the four shared UI-state treatments and restyled list controls (#30),
 and the Index archetype across all three of its consumers — `/stories` (#31), `/briefs` and
@@ -392,7 +418,25 @@ each headed by a link into the Story, each drawing its bars through the shared `
 against one page-wide `peak` so a tall bar means the same count in every lane. `/search` and it
 are one address bar — `useListQueryParams` hands over `queryString` whole, so `Read as a timeline`
 and `Read as a ranked list` switch the reading without re-typing the query, and `q` survives Clear
-filters on both. Story detail carries the **analysis surface** (#53): a Request-analysis command (a
+filters on both. `pages/Graph.tsx` at `/graph` is the **knowledge graph** (#68) and the app's third
+way into the corpus, nav-level beside Stories and Search rather than under either, because what it
+reads is a different corpus — stated in the reader's own language in prose *and* in the ledger
+register every other surface states its facts in (Corpus, Window, Reporting, Drawn), beside the
+picture rather than under it. Kind is carried three ways at once, per DESIGN.md's Redundant Signal
+Rule: ink, canvas shape — a square node for an organization, since corners are square here — and
+the word itself, in a legend naming only the kinds actually drawn and again in every register row,
+so the graph reads in greyscale and to anyone who cannot tell `--proof-blue` from
+`--registered-overlap`. The Cytoscape canvas reads those inks from the Bureau tokens at draw time,
+so the picture cannot drift from the legend beside it, which takes the same tokens through CSS.
+Nothing on the page is stated by the drawing alone: `toGraphElements` is exported and pure — jsdom
+renders no canvas, so the renderer is stubbed and that mapping is what the page's own tests hold to
+account — and under the plot, **Names in the graph** is the same graph in words through the
+Dashboard archetype's register, every drawn name in the view's own order with the two quantities the
+picture encodes as node size and line width written out. That register is the reading a keyboard and
+a screen reader get, which is why the canvas is a `role="img"` that says what it draws and points at
+it, and why nothing on it is grabbable or selectable: selecting a node means something in #69 and
+nothing yet. `Drawn` states `3 of 5 names` or `All 3 names`, so a reader is never left thinking the
+bound is the graph. Story detail carries the **analysis surface** (#53): a Request-analysis command (a
 mutation, never a fetch on render, since an analysis may cost money), a Lens select for an Admin
 only — a reader's Lens is their role, and the API refuses one from them — claims grouped by kind
 in the record's note register with each citation an `A1 · Publisher` link to the Article it

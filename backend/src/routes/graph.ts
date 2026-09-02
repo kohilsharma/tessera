@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AppDataSource } from "../data-source";
 import { enqueueEntityResolutionRun } from "../graph/queue";
+import { loadGraphView } from "../graph/loadGraphView";
 import { MERGE_PROPOSAL_DECISIONS, decideMergeProposal, type MergeProposalDecision } from "../graph/merge";
 import type { PromotableKind } from "../graph/config";
 import { EntityMergeProposal } from "../entities/EntityMergeProposal";
@@ -15,6 +16,23 @@ export const graphRouter = Router();
 // ADR-0004: operating the pipeline is an Admin capability — a Student or Investor gets
 // 403 here, and an anonymous caller 401 (requireAuth).
 const adminOnly = [requireAuth, requireRole("admin")] as const;
+
+// The reader's graph (#68). `requireAuth` and no role guard: ADR-0021 gives each role its
+// own *features*, and this is not one — a Student and an Investor read the same graph,
+// because a co-occurrence the two roles were shown differently would be evidence about
+// the reader rather than about the reporting.
+//
+// No query string, by design. The bounds this view is legible under belong to
+// graph/config.ts, and an endpoint that names none of them is an endpoint whose bounds a
+// caller cannot widen. Anything sent is ignored rather than rejected: a bound is not a
+// parameter, so `?nodes=5000` is not a malformed request, it is a request about nothing.
+graphRouter.get(
+  "/graph",
+  requireAuth,
+  asyncHandler(async (_req, res) => {
+    res.json(await loadGraphView());
+  }),
+);
 
 // Enough reporting to recognise a name, not a page of it: three Articles per side answers
 // "which stories is this the name from", which is the question a reviewer is actually

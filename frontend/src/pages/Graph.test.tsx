@@ -1,0 +1,185 @@
+import { describe, expect, it, vi } from "vitest";
+import { screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import Graph, { toGraphElements } from "./Graph";
+import type { GraphView } from "../api/client";
+import { jsonResponse, renderWithProviders } from "../test/renderWithProviders";
+
+// #68. jsdom has no canvas, so Cytoscape is stubbed and what is asserted is everything
+// the page owes a reader *besides* the picture: which corpus this is and over what
+// window, that the bound is stated rather than hidden, the kinds in a legend, and the
+// same graph in words underneath. That is not a workaround — those are the readings a
+// keyboard and a screen reader get, and the picture is the one part of the page that
+// carries nothing they cannot reach.
+const destroy = vi.fn();
+vi.mock("cytoscape", () => ({ default: vi.fn(() => ({ destroy })) }));
+
+const node = (id: string, canonicalName: string, kind: GraphView["nodes"][number]["kind"], articleCount: number) => ({
+  id,
+  canonicalName,
+  kind,
+  articleCount,
+});
+
+// A graph drawn from a wider working set than it shows, so the page has a bound to state:
+// three of five names, one of each kind.
+const view: GraphView = {
+  retainedDays: 7,
+  promotionFloor: 5,
+  entityCount: 5,
+  articleCount: 24,
+  from: "2026-08-26T06:00:00Z",
+  to: "2026-09-01T18:00:00Z",
+  nodes: [
+    node("e1", "Reserve Bank", "organization", 18),
+    node("e2", "Ada Lovelace", "person", 11),
+    node("e3", "Canberra", "location", 6),
+  ],
+  edges: [
+    { entityAId: "e1", entityBId: "e2", weight: 9 },
+    { entityAId: "e1", entityBId: "e3", weight: 4 },
+  ],
+};
+
+function render(overrides: Partial<GraphView> = {}) {
+  vi.mocked(fetch).mockResolvedValue(jsonResponse({ ...view, ...overrides }));
+  return renderWithProviders(<Graph />, { route: "/graph" });
+}
+
+describe("Knowledge graph — UI states", () => {
+  it("says it is reading the graph while the request is in flight", () => {
+    vi.mocked(fetch).mockReturnValue(new Promise(() => {}));
+
+    renderWithProviders(<Graph />, { route: "/graph" });
+
+    expect(screen.getByRole("status")).toHaveTextContent("Reading the graph");
+  });
+
+  it("offers a retry when the request fails, and does not call it an empty graph", async () => {
+    vi.mocked(fetch)
+      .mockRejectedValueOnce(new Error("server unavailable"))
+      .mockResolvedValueOnce(jsonResponse(view));
+
+    renderWithProviders(<Graph />, { route: "/graph" });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load the knowledge graph");
+    expect(screen.queryByText(/No name has been resolved/)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByText("Ada Lovelace")).toBeInTheDocument();
+  });
+
+  it("states a graph nothing has been resolved into as the rule that would fill it", async () => {
+    render({ nodes: [], edges: [], entityCount: 0, articleCount: 0, from: null, to: null });
+
+    expect(await screen.findByText(/No name has been resolved into the graph yet/)).toBeInTheDocument();
+    // An empty graph is not a failure and says so by not being one.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText(/5 separate reports/)).toBeInTheDocument();
+    expect(screen.getByText(/last 7 days/)).toBeInTheDocument();
+  });
+});
+
+describe("Knowledge graph — the corpus it reads", () => {
+  it("states which corpus and which window before it draws anything", async () => {
+    render();
+
+    // The distinction the whole page turns on: this is not the curated corpus the rest
+    // of Tessera reads.
+    expect(await screen.findByText(/retained firehose/)).toBeInTheDocument();
+    expect(screen.getByText(/wider and rougher body of reporting than the Stories/)).toBeInTheDocument();
+
+    // Scoped to the ledger: "Reporting" is a term in every register row too, which is the
+    // point — the same fact is stated per name below and over the whole graph up here.
+    const ledger = within(screen.getByText("Corpus").closest("dl")!);
+    expect(ledger.getByText("Corpus").closest("div")).toHaveTextContent("GDELT firehose");
+    expect(ledger.getByText("Window").closest("div")).toHaveTextContent("Rolling 7 days");
+    expect(ledger.getByText("Reporting").closest("div")).toHaveTextContent("24 reports cited");
+  });
+
+  it("states the bound it drew under rather than implying the graph is three names wide", async () => {
+    render();
+
+    expect(await screen.findByText("Drawn")).toBeInTheDocument();
+    expect(screen.getByText("Drawn").closest("div")).toHaveTextContent("3 of 5 names");
+    expect(screen.getByText(/Showing the 3 most reported names/)).toBeInTheDocument();
+  });
+
+  it("claims no bound when it drew the whole working set", async () => {
+    render({ entityCount: 3 });
+
+    expect(await screen.findByText("Drawn")).toBeInTheDocument();
+    expect(screen.getByText("Drawn").closest("div")).toHaveTextContent("All 3 names");
+    expect(screen.queryByText(/Showing the 3 most reported/)).not.toBeInTheDocument();
+  });
+});
+
+describe("Knowledge graph — the picture and its reading in words", () => {
+  it("names every kind it drew, and only the kinds it drew", async () => {
+    render();
+
+    const key = await screen.findByRole("list", { name: "What each shape in the graph is" });
+    expect(within(key).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "person · 1",
+      "organization · 1",
+      "place · 1",
+    ]);
+  });
+
+  it("draws the graph as a labelled picture, with what it draws stated in words", async () => {
+    render();
+
+    const plot = await screen.findByRole("img");
+    expect(plot).toHaveAccessibleName(
+      "A force-directed graph of 3 names joined by 2 co-mention links. Every name it draws is listed in words below it.",
+    );
+  });
+
+  it("registers every drawn name with its kind, its reporting and its links", async () => {
+    render();
+
+    const register = await screen.findByRole("region", { name: "Names in the graph" });
+    const rows = within(register).getAllByRole("listitem");
+    // Most reported first, which is the order the view ranked them in.
+    expect(rows.map((row) => row.querySelector(".entry-name")?.textContent)).toEqual([
+      "Reserve Bank",
+      "Ada Lovelace",
+      "Canberra",
+    ]);
+    // The two quantities the picture encodes as node size and line width, in words:
+    // nothing on this page is stated by the drawing alone.
+    expect(rows[0]).toHaveTextContent("18 reports");
+    expect(rows[0]).toHaveTextContent("organization");
+    expect(rows[0]).toHaveTextContent("Links drawn2");
+    expect(rows[0]).toHaveTextContent("Strongest linkAda Lovelace · 9 reports");
+    expect(rows[2]).toHaveTextContent("Links drawn1");
+    expect(rows[2]).toHaveTextContent("Strongest linkReserve Bank · 4 reports");
+  });
+
+  it("carries no link row for a name whose every tie was to a name outside the bound", async () => {
+    render({ edges: [] });
+
+    const register = await screen.findByRole("region", { name: "Names in the graph" });
+    expect(within(register).getAllByRole("listitem")[0]).toHaveTextContent("Links drawn0");
+    expect(screen.queryByText("Strongest link")).not.toBeInTheDocument();
+  });
+});
+
+// The one part of the picture that is checkable without a canvas, and the part a wrong
+// answer would silently mis-draw: what Cytoscape is handed.
+describe("Knowledge graph — the elements handed to the layout", () => {
+  it("gives every node and edge its share of the largest quantity on the page", () => {
+    expect(toGraphElements(view)).toEqual([
+      { data: { id: "e1", name: "Reserve Bank", kind: "organization", share: 1 } },
+      { data: { id: "e2", name: "Ada Lovelace", kind: "person", share: 11 / 18 } },
+      { data: { id: "e3", name: "Canberra", kind: "location", share: 6 / 18 } },
+      { data: { id: "e1~e2", source: "e1", target: "e2", share: 1 } },
+      { data: { id: "e1~e3", source: "e1", target: "e3", share: 4 / 9 } },
+    ]);
+  });
+
+  it("hands an empty graph nothing to lay out rather than dividing by an absent peak", () => {
+    expect(toGraphElements({ ...view, nodes: [], edges: [] })).toEqual([]);
+  });
+});

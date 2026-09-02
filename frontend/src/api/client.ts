@@ -679,6 +679,40 @@ export function decideMergeProposal(
   );
 }
 
+// #68: the bounded global graph, mirroring backend/src/graph/loadGraphView.ts. Every
+// reader role reads this one — ADR-0021's role features are elsewhere, and a
+// co-occurrence weighted differently per role would be evidence about the reader
+// rather than about the reporting.
+//
+// The endpoint takes no parameters on purpose: the node and edge bounds are the
+// server's, so there is nothing here to pass and nothing a caller could widen.
+export type GraphNode = { id: string; kind: EntityKind; canonicalName: string; articleCount: number };
+
+// The pair as stored — ordered by id, one row per pair — with the number of Articles
+// that reported both names together as its weight.
+export type GraphEdge = { entityAId: string; entityBId: string; weight: number };
+
+export type GraphView = {
+  // The two rules the page has to state in the reader's own language: the rolling window
+  // this corpus is kept for, and how much reporting a name needs before it is in the
+  // graph at all. Read from the backend rather than restated here, so the page cannot
+  // drift from the pass that built what it is drawing.
+  retainedDays: number;
+  promotionFloor: number;
+  // The whole working set, against `nodes.length` — what lets the page say it is showing
+  // part of the graph instead of implying it is showing all of it.
+  entityCount: number;
+  articleCount: number;
+  from: string | null;
+  to: string | null;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+};
+
+export function getGraphView(): Promise<GraphView> {
+  return getJson("/api/v1/graph", "Could not load the knowledge graph");
+}
+
 // #53: the flagship. Mirrors backend/src/entities/GenerationRun.ts and
 // AnalysisClaim.ts. CONTEXT.md "Lens" — one role-specific claim type per
 // generation, derived from the caller's role, so a Student and an Investor get

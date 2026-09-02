@@ -46,6 +46,31 @@ export const ENTITY_PROMOTION_FLOOR = envNumber("GRAPH_ENTITY_PROMOTION_FLOOR", 
 // node's own strongest neighbour is never missing because it was that neighbour's 26th.
 export const EDGES_PER_ENTITY = envNumber("GRAPH_EDGES_PER_ENTITY", 25, { min: 1, max: 500 });
 
+// #68's two bounds, on the *read* side. The pass's bounds keep the stored graph
+// bounded; these keep one screen of it legible, which is a smaller number. The pass
+// holds 195 nodes at 25 neighbours each — every one of them worth storing, and all of
+// them at once worth nothing to look at.
+//
+// Not merged into the pass's bounds, and not derived from them: what a screen can hold
+// is a fact about a screen, and the neighbourhood #69 draws around one Entity will want
+// the same ceiling over a different selection. Held here so a route never carries a
+// number of its own, and so `GET /graph` can take no parameters at all — a bound a
+// caller cannot name is a bound a caller cannot widen.
+//
+// 60 nodes: at ADR-0019's 200 a force layout has more labels than gaps, and the reader
+// is left panning a hairball to find the name they came for. The most present 60 of the
+// working set is a picture; the page states the other number beside it, so a reader is
+// never left thinking 60 is all there is.
+export const VIEW_NODES = envNumber("GRAPH_VIEW_NODES", 60, { min: 1, max: 200 });
+
+// 6 neighbours: 60 nodes at 6 is at most ~180 edges, which is a graph a person reads a
+// path through. Applied from both ends, as the pass's bound is, and for the same reason
+// — a node's strongest neighbour is never dropped for being that neighbour's seventh.
+//
+// The pass's own bound is the real ceiling above this: past `EDGES_PER_ENTITY` there is
+// nothing stored to return.
+export const VIEW_EDGES_PER_ENTITY = envNumber("GRAPH_VIEW_EDGES_PER_ENTITY", 6, { min: 1, max: 100 });
+
 // The two bars #67 turns on, both read by pg_trgm's `similarity()` over normalized
 // surface names. v3 §18.5's rule sets them: a wrong merge is more harmful than an
 // unresolved duplicate, so the automatic bar sits above every wrong merge measured and
