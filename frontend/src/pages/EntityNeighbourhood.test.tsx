@@ -197,10 +197,15 @@ describe("An Entity's neighbourhood — the profile and its bounds", () => {
     expect(screen.queryByText(/Showing the 2 names most reported/)).not.toBeInTheDocument();
   });
 
-  it("states the retention window and offers the way back to the graph it came from", async () => {
+  // The price of AGENTS.md's exemption for the graph read seam, paid on this surface too: the
+  // corpus named, in the same two rows the global view states it in.
+  it("names the corpus it read and the window that bounds it, and offers the way back to the graph", async () => {
     render();
 
-    expect(await screen.findByText("Retention window")).toBeInTheDocument();
+    expect(await screen.findByText("Corpus")).toBeInTheDocument();
+    expect(screen.getByText("Corpus").closest("div")).toHaveTextContent(
+      "GDELT firehose, plus Tessera’s Curated Corpus",
+    );
     expect(screen.getByText("Retention window").closest("div")).toHaveTextContent(
       "Rolling 7 days of firehose metadata",
     );
@@ -290,7 +295,7 @@ describe("An Entity's neighbourhood — Themes as a facet", () => {
 });
 
 describe("An Entity's neighbourhood — the reporting under one link", () => {
-  it("opens the Articles a link was observed in, each linking to its Article record", async () => {
+  it("opens the Articles a link was observed in, each linking to somewhere it can be read", async () => {
     render();
     const register = await screen.findByRole("region", { name: "Reported alongside" });
     const row = within(register).getAllByRole("listitem")[0];
@@ -315,7 +320,13 @@ describe("An Entity's neighbourhood — the reporting under one link", () => {
       "href",
       "/stories/s1",
     );
-    expect(opened[1]).toHaveTextContent("StoryNot in a Story");
+    expect(opened[1]).toHaveTextContent("Not in a Story · reads at wire.example");
+    // And its title goes where it can actually be read: the Article record exists for exactly
+    // the reporting a Story has accepted, so this one's only reading is the original.
+    expect(within(opened[1]).getByRole("link", { name: "A quieter read on inflation" })).toHaveAttribute(
+      "href",
+      "https://wire.example/inflation",
+    );
   });
 
   it("states the whole weight of the link beside the reporting it lists", async () => {
@@ -357,7 +368,7 @@ describe("An Entity's neighbourhood — the reporting under one link", () => {
   it("says it is reading the reporting, and offers a retry when that request is the one that fails", async () => {
     vi.mocked(fetch).mockImplementation((input) =>
       String(input).includes("/edges/")
-        ? Promise.resolve(jsonResponse({ error: "Edge not found" }, 404))
+        ? Promise.resolve(jsonResponse({ error: "Could not read the citations" }, 500))
         : Promise.resolve(jsonResponse(view)),
     );
     renderWithProviders(<EntityNeighbourhood />, {
@@ -370,9 +381,32 @@ describe("An Entity's neighbourhood — the reporting under one link", () => {
 
     // The neighbourhood itself is untouched by a link's failure: the page is still readable.
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Could not load the reporting behind this link: Edge not found",
+      "Could not load the reporting behind this link: Could not read the citations",
     );
     expect(screen.getByRole("heading", { name: "Reserve Bank", level: 1 })).toBeInTheDocument();
+  });
+
+  // The graph rebuilds hourly and the picture was read one request earlier, so a link whose last
+  // citation aged out in between is gone by the time it is opened. The endpoint 404s that pair,
+  // and a reader is owed the absence rather than a failed request they could retry forever.
+  it("reads a link that rolled out of the window since the picture was drawn as an absence, not a failure", async () => {
+    vi.mocked(fetch).mockImplementation((input) =>
+      String(input).includes("/edges/")
+        ? Promise.resolve(jsonResponse({ error: "Edge not found" }, 404))
+        : Promise.resolve(jsonResponse(view)),
+    );
+    renderWithProviders(<EntityNeighbourhood />, {
+      route: "/graph/entities/e1",
+      path: "/graph/entities/:entityId",
+    });
+    const register = await screen.findByRole("region", { name: "Reported alongside" });
+
+    await userEvent.click(within(register).getAllByRole("button", { name: "Show reporting" })[0]);
+
+    expect(
+      await screen.findByText(/is no longer in the retained window/),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("closes the reporting again, and says which state the command is in", async () => {
@@ -394,23 +428,41 @@ describe("An Entity's neighbourhood — the reporting under one link", () => {
     expect(screen.queryByRole("link", { name: "Rates held for a third meeting" })).not.toBeInTheDocument();
   });
 
-  // The same question asked of the picture rather than of the register. Cytoscape is stubbed,
+  // The open drawer is a reading a reader can share, which is why it is in the address bar
+  // rather than in component state — and why a line tapped between two neighbours has somewhere
+  // to land (below).
+  it("opens the link named in the address, and puts an opened one there", async () => {
+    render({}, { route: "/graph/entities/e1?link=e3" });
+    const register = await screen.findByRole("region", { name: "Reported alongside" });
+    const rows = within(register).getAllByRole("listitem");
+
+    expect(within(rows[1]).getByRole("button", { name: "Hide reporting" })).toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url))).toContain(
+      "/api/v1/graph/entities/e1/edges/e3",
+    );
+
+    // And a name walked on to carries the reading with it: the facet, but not a link belonging
+    // to the page being left.
+    expect(within(rows[0]).getByRole("link", { name: "Ada Lovelace" })).toHaveAttribute(
+      "href",
+      "/graph/entities/e2",
+    );
+  });
+
   // so the handler it was handed is called directly — there is no canvas in jsdom to click.
-  it("opens the reporting behind a line tapped in the picture, and nothing for a line that is not the focus's", async () => {
-    render();
-    await screen.findByRole("img");
-    const tapEdge = on.mock.calls
+  function tapper() {
+    return on.mock.calls
       .filter(([event, selector]) => event === "tap" && selector === "edge")
       .at(-1)![2] as (event: unknown) => void;
+  }
 
-    // The line between the two neighbours is theirs, not this page's: the drawer it would
-    // open is about a pair the page states no weight for, so it opens none.
-    act(() => tapEdge({ target: { data: () => ({ source: "e2", target: "e3" }) } }));
+  it("opens the reporting behind a tie tapped in the picture, from either end it was stored at", async () => {
+    render();
+    await screen.findByRole("img");
+    const tapEdge = tapper();
 
-    expect(screen.queryByRole("button", { name: "Hide reporting" })).not.toBeInTheDocument();
-
-    // A tie to the focus, tapped from the end it was stored at — and again from the other,
-    // since which name sorted into `entityAId` is storage's business, not the reader's.
+    // Tapped from the end it was stored at — and again from the other, since which name sorted
+    // into `entityAId` is storage's business, not the reader's.
     act(() => tapEdge({ target: { data: () => ({ source: "e1", target: "e2" }) } }));
 
     const register = screen.getByRole("region", { name: "Reported alongside" });
@@ -422,5 +474,38 @@ describe("An Entity's neighbourhood — the reporting under one link", () => {
 
     expect(within(rows[1]).getByRole("button", { name: "Hide reporting" })).toBeInTheDocument();
     expect(within(rows[0]).getByRole("button", { name: "Show reporting" })).toBeInTheDocument();
+  });
+
+  // A line between two neighbours is theirs rather than this page's, and this page has no row to
+  // open it under — so instead of swallowing the tap it walks the reader to the page the line
+  // *is* a tie on, with the same evidence already open.
+  it("walks a line between two neighbours to the page it is a tie on, with its reporting open", async () => {
+    const ada: Neighbourhood = {
+      ...view,
+      focus: { ...view.focus, id: "e2", kind: "person", canonicalName: "Ada Lovelace", articleCount: 11 },
+      neighbourCount: 2,
+      edges: [
+        { entityAId: "e2", entityBId: "e3", weight: 2 },
+        { entityAId: "e1", entityBId: "e2", weight: 9 },
+      ],
+    };
+    vi.mocked(fetch).mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/edges/")) return Promise.resolve(jsonResponse(citations));
+      return Promise.resolve(jsonResponse(url.includes("/entities/e2") ? ada : view));
+    });
+    renderWithProviders(<EntityNeighbourhood />, {
+      route: "/graph/entities/e1",
+      path: "/graph/entities/:entityId",
+    });
+    await screen.findByRole("img");
+
+    act(() => tapper()({ target: { data: () => ({ source: "e2", target: "e3" }) } }));
+
+    expect(await screen.findByRole("heading", { name: "Ada Lovelace", level: 1 })).toBeInTheDocument();
+    const rows = within(screen.getByRole("region", { name: "Reported alongside" })).getAllByRole("listitem");
+    const canberra = rows.find((row) => row.textContent?.startsWith("Canberra"))!;
+    expect(within(canberra).getByRole("button", { name: "Hide reporting" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Rates held for a third meeting" })).toBeInTheDocument();
   });
 });

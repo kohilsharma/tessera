@@ -1,15 +1,13 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ENTITY_KIND_LABELS,
   getEdgeCitations,
   getEntityNeighbourhood,
-  type GraphEdge,
   type GraphNode,
 } from "../api/client";
 import { DashboardRegister, RegisterRow } from "../components/dashboardArchetype";
-import { GraphKey, GraphPlot, reports } from "../components/graphRegister";
+import { corpusLedger, edgesOn, GraphKey, GraphPlot, otherEnd, reports } from "../components/graphRegister";
 import { DateStamp, Entry, FilterRegister } from "../components/indexArchetype";
 import { ThemeFacetFilter } from "../components/listControls";
 import { RecordMasthead, RecordSection } from "../components/recordArchetype";
@@ -24,25 +22,6 @@ import { EmptyState, EntryList, PendingState, RetryableError } from "../componen
 // (backend/src/graph/loadGraphView.ts), so the two pictures cannot disagree about what is in
 // the graph. What this page owes a reader on top of #68's statement of corpus and window is
 // depth: a hop count is invisible in a layout, so it is stated in the ledger.
-
-// The weight of each drawn edge that touches the focus — what "reported together" means for
-// one neighbour — and, for the rest, how many of the drawn links each name is on. Both read
-// from the edges in view rather than from a count the endpoint could send, so both are about
-// the picture on screen.
-//
-// Interlink weights are not stated here, only counted: a line between two neighbours is
-// theirs, and it is stated as reporting on whichever of them the reader opens next. The
-// numbers this page states in words are the ones its own picture encodes.
-function tiesTo(focusId: string, edges: GraphEdge[]) {
-  const ties = new Map<string, number>();
-  const others = new Map<string, number>();
-  for (const edge of edges) {
-    const [a, b] = [edge.entityAId, edge.entityBId];
-    if (a === focusId || b === focusId) ties.set(a === focusId ? b : a, edge.weight);
-    else for (const end of [a, b]) others.set(end, (others.get(end) ?? 0) + 1);
-  }
-  return { ties, others };
-}
 
 // The reporting one link was observed in, opened under the name it belongs to. Its own request
 // and its own four states: a reader who opens a link is owed either the evidence or the reason
@@ -75,6 +54,21 @@ function EdgeEvidence({
       />
     );
 
+  // The graph rebuilds hourly, and the picture above was read one request earlier: a link whose
+  // last citation aged out in between is gone by the time it is opened. The endpoint 404s that
+  // pair — rightly, since an empty list would assert a co-mention nothing reported — and this is
+  // the reader's side of the same fact, which is an absence rather than a failed request.
+  if (!query.data)
+    return (
+      <EmptyState>
+        <p>
+          The reporting that linked <strong>{focus.canonicalName}</strong> and{" "}
+          <strong>{neighbour.canonicalName}</strong> is no longer in the retained window, so this link
+          has rolled out of the graph since this page was drawn. Reload to read it as it stands now.
+        </p>
+      </EmptyState>
+    );
+
   const { weight, citations } = query.data;
   return (
     <div className="graph-evidence">
@@ -82,26 +76,34 @@ function EdgeEvidence({
         {citations.length === weight
           ? `All ${reports(weight)} that named ${focus.canonicalName} and ${neighbour.canonicalName} together.`
           : `The ${citations.length} most recent of ${reports(weight)} that named ${focus.canonicalName} and ${neighbour.canonicalName} together.`}{" "}
-        Each opens its Article record, where the article text Tessera may show is stated with it.
+        Each opens its Article record, where the article text Tessera may show is stated with it —
+        or, for reporting that belongs to no Story, the original at the Publisher, which is the
+        only place there is to read it.
       </p>
       <EntryList>
         {citations.map((citation) => (
           <Entry
             key={citation.id}
-            to={`/articles/${citation.id}`}
+            // The Article record exists for exactly the reporting a Story has accepted
+            // (backend/src/routes/articles.ts 404s the rest, deliberately — an Unclustered
+            // Article is not a public record). This graph reads the retained firehose
+            // (ADR-0028), so most of what it cites has no record here, and `story` is the
+            // endpoint's own answer to which: it is set through the one accepted-membership
+            // predicate. A link into a 404 would be the citation invariant made unopenable.
+            to={citation.story ? `/articles/${citation.id}` : citation.url}
             title={citation.title}
             meta={[
               { term: "Publisher", value: citation.publisher.name },
               { term: "Published", value: <DateStamp iso={citation.publishedAt} /> },
               {
                 term: "Story",
-                // This graph reads the retained firehose (ADR-0028), so most of its reporting
-                // sits in no Story at all. Stated either way: an absent link here is a fact
-                // about the corpus, and a missing row would read as an oversight.
+                // Stated either way: an absent link here is a fact about the corpus, and a
+                // missing row would read as an oversight. It also says where the title above
+                // goes — the record inside Tessera, or the reporting at its Publisher.
                 value: citation.story ? (
                   <Link to={`/stories/${citation.story.id}`}>{citation.story.title}</Link>
                 ) : (
-                  "Not in a Story"
+                  `Not in a Story · reads at ${citation.publisher.domain}`
                 ),
               },
             ]}
@@ -116,11 +118,12 @@ export default function EntityNeighbourhood() {
   const { entityId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const theme = searchParams.get("theme") ?? "";
+  // Which link's evidence is open, by the neighbour on its other end — in the address bar
+  // rather than in component state, so an opened drawer is a reading a reader can share, and
+  // so a line tapped between two neighbours has somewhere to land (see `onOpenEdge`). One at
+  // a time: the drawer answers "was this pair really reported together", about one pair.
+  const openLink = searchParams.get("link");
   const navigate = useNavigate();
-  // Which link's evidence is open, by the neighbour on its other end. One at a time: the
-  // drawer is the answer to "was this pair really reported together", which is a question
-  // about one pair.
-  const [openLink, setOpenLink] = useState<string | null>(null);
   const query = useQuery({
     queryKey: ["graph", "entity", entityId, theme],
     queryFn: () => getEntityNeighbourhood(entityId!, theme || null),
@@ -134,8 +137,17 @@ export default function EntityNeighbourhood() {
     const params = new URLSearchParams(searchParams);
     if (next) params.set("theme", next);
     else params.delete("theme");
-    setOpenLink(null);
+    params.delete("link");
     setSearchParams(params);
+  }
+
+  // Replacing rather than pushing: opening and closing a drawer is reading this page, not
+  // navigating away from it, so it does not fill the back button with a trail of one page.
+  function openEvidence(neighbourId: string | null) {
+    const params = new URLSearchParams(searchParams);
+    if (neighbourId) params.set("link", neighbourId);
+    else params.delete("link");
+    setSearchParams(params, { replace: true });
   }
 
   if (query.isPending) return <PendingState>Reading this Entity&rsquo;s neighbourhood…</PendingState>;
@@ -154,7 +166,13 @@ export default function EntityNeighbourhood() {
   const view = query.data;
   const { focus, themes, neighbourCount } = view;
   const neighbours = view.nodes.filter((node) => node.id !== focus.id);
-  const { ties, others } = tiesTo(focus.id, view.edges);
+  // Every drawn line each name is on, and from it the tie each neighbour is on the page for.
+  // Read from the edges in view rather than from a count the endpoint could send, so the
+  // numbers stated in words are the ones this page's own picture encodes.
+  const linkedTo = edgesOn(view.edges);
+  const ties = new Map(
+    (linkedTo.get(focus.id) ?? []).map((edge) => [otherEnd(edge, focus.id), edge.weight]),
+  );
   const heaviest = peakOf(neighbours.map((node) => ties.get(node.id) ?? 0));
   const drawn =
     neighbourCount === 0
@@ -163,8 +181,15 @@ export default function EntityNeighbourhood() {
         ? `All ${neighbourCount} names`
         : `${neighbours.length} of ${neighbourCount} names`;
   // The facet travels with the reader walking from name to name: a narrowed reading of the
-  // graph stays narrowed until they widen it.
-  const walkTo = (id: string) => `/graph/entities/${id}${theme ? `?theme=${encodeURIComponent(theme)}` : ""}`;
+  // graph stays narrowed until they widen it. `link` travels only where a caller names one,
+  // which is a line tapped between two neighbours — the reader arrives with its evidence open.
+  const walkTo = (id: string, link?: string) => {
+    const params = new URLSearchParams();
+    if (theme) params.set("theme", theme);
+    if (link) params.set("link", link);
+    const search = params.toString();
+    return `/graph/entities/${id}${search ? `?${search}` : ""}`;
+  };
 
   return (
     <main>
@@ -206,7 +231,12 @@ export default function EntityNeighbourhood() {
           // layout: everything drawn was reported alongside this name itself, never alongside
           // one of its neighbours.
           { term: "Depth", value: `${view.depth} hop from this name` },
-          { term: "Retention window", value: `Rolling ${view.retainedDays} days of firehose metadata` },
+          // The corpus and its window, in the words the global view states them in
+          // (components/graphRegister). AGENTS.md's membership invariant exempts this read
+          // seam on the condition that every surface drawing it says which corpus it read,
+          // and this page is one of those surfaces — including in both its empty states,
+          // which the ledger sits above.
+          ...corpusLedger(view.retainedDays),
           { term: "Drawn", value: drawn },
         ]}
       />
@@ -264,11 +294,14 @@ export default function EntityNeighbourhood() {
               }}
               // A tapped line answers "on what basis?" the way the register's own command does,
               // so the picture is not the one place on this page a number cannot be checked. A
-              // line into the focus is one of its ties and opens that neighbour's reporting; a
-              // line between two neighbours is theirs rather than this page's, and opens nothing
-              // here — it is stated as reporting on whichever of them the reader walks to next.
+              // line into the focus is one of its ties and opens that neighbour's reporting
+              // here. A line between two neighbours is theirs rather than this page's, and this
+              // page has no row to open it under — so it walks the reader to the first of the
+              // pair with that link already open, where it *is* a tie. The evidence is the same
+              // from either end, since the drawer reads a pair rather than a direction.
               onOpenEdge={(a, b) => {
-                if (a === focus.id || b === focus.id) setOpenLink(a === focus.id ? b : a);
+                if (a === focus.id || b === focus.id) openEvidence(a === focus.id ? b : a);
+                else navigate(walkTo(a, b));
               }}
             />
           </>
@@ -286,6 +319,12 @@ export default function EntityNeighbourhood() {
           <EntryList>
             {neighbours.map((node) => {
               const weight = ties.get(node.id) ?? 0;
+              // The interlinks this neighbour carries: the lines the picture draws from it to
+              // another neighbour rather than to the focus. Counted, not weighed — an interlink
+              // is stated as reporting on the page it is a tie on, which is one tap away.
+              const interlinks = (linkedTo.get(node.id) ?? []).filter(
+                (edge) => otherEnd(edge, node.id) !== focus.id,
+              ).length;
               const open = openLink === node.id;
               // Deterministic rather than `useId`, which cannot be called per row: the button
               // sits in the register's third column, so the evidence it opens is beside it
@@ -301,7 +340,7 @@ export default function EntityNeighbourhood() {
                     { term: "Kind", value: ENTITY_KIND_LABELS[node.kind] },
                     { term: "Reported together", value: reports(weight) },
                     { term: "Reporting", value: reports(node.articleCount) },
-                    { term: "Other links drawn", value: others.get(node.id) ?? 0 },
+                    { term: "Other links drawn", value: interlinks },
                   ]}
                   body={
                     // Always present, empty until opened: `aria-controls` below has to name an
@@ -316,7 +355,7 @@ export default function EntityNeighbourhood() {
                       type="button"
                       aria-expanded={open}
                       aria-controls={panelId}
-                      onClick={() => setOpenLink(open ? null : node.id)}
+                      onClick={() => openEvidence(open ? null : node.id)}
                     >
                       {open ? "Hide reporting" : "Show reporting"}
                     </button>

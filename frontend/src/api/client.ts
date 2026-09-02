@@ -257,6 +257,17 @@ async function getJson<T>(path: string, errorMessage: string): Promise<T> {
   return res.json();
 }
 
+// `null` for a 404 rather than an error, where the caller has an emptiness to draw and a
+// failure would be the wrong treatment for it: a record that is gone is not a request that
+// broke. Only 404 — every other status is still an error, so a 500 never reads as "nothing
+// here". Kept beside `getJson` because it is the same one fetch layer, one branch wider.
+async function getJsonOrNull<T>(path: string, errorMessage: string): Promise<T | null> {
+  const res = await authFetch(path);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(await parseErrorMessage(res, errorMessage));
+  return res.json();
+}
+
 export function getStudentDashboard(): Promise<StudentDashboardData> {
   return getJson("/api/v1/dashboard/student", "Could not load this dashboard");
 }
@@ -769,12 +780,17 @@ export function getEntityNeighbourhood(entityId: string, theme?: string | null):
   );
 }
 
+// `null` where the graph holds no edge for the pair. The endpoint 404s that rather than
+// answering an empty list, because an empty list would assert a co-mention that was never
+// reported — but a drawer is only ever opened on a line the page just drew, so the reader's
+// case is an edge the hourly pass rolled away between the two requests. That is an absence,
+// not a failed request, and the page states it as one.
 export function getEdgeCitations(
   entityId: string,
   otherEntityId: string,
   theme?: string | null,
-): Promise<EdgeCitations> {
-  return getJson(
+): Promise<EdgeCitations | null> {
+  return getJsonOrNull(
     `/api/v1/graph/entities/${entityId}/edges/${otherEntityId}${toQueryString({ theme: theme ?? undefined })}`,
     "Could not load the reporting behind this connection",
   );

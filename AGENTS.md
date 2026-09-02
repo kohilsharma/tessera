@@ -109,9 +109,13 @@ One line each, so a decided area is never re-litigated by accident. Full rationa
 - Cache LLM calls by content hash; batch where possible.
 - Every public read path joins through accepted Story membership
   (`backend/src/lib/storyMembership.ts`), so the firehose stays invisible to readers by construction.
-  One documented exception: `GET /graph` reads the retained firehose deliberately (ADR-0028 — a
-  Story-scoped graph is permanently empty), and pays for it by stating its corpus on screen. Any
-  *other* reader path that skips the join is a bug.
+  One documented exception, and it is a seam rather than a route: everything behind
+  `loadGraphView.ts` — the global graph, an Entity's neighbourhood, the citations under one edge —
+  reads the retained firehose deliberately (ADR-0028 — a Story-scoped graph is permanently empty),
+  and pays for it by stating that corpus on screen wherever it is drawn. Membership still runs
+  there, but only to *label* a citation, never to filter one: it is what decides whether a graph
+  citation can offer a Story or an Article record at all. Any reader path outside that seam which
+  skips the join is a bug.
 - GDELT/API **metadata** is storable; article **bodies** are internal, served only where a
   Publisher's Terms Class clears them by hand — never for `api_content`, which Tessera extracted
   itself. Two documented exceptions: the hosted embedding provider (ADR-0023), and synthesis

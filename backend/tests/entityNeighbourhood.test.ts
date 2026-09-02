@@ -6,8 +6,8 @@ import { createApp } from "../src/app";
 import { AppDataSource } from "../src/data-source";
 import {
   EDGES_PER_ENTITY,
-  EDGE_CITATION_CAP,
   ENTITY_PROMOTION_FLOOR,
+  VIEW_EDGE_CITATIONS,
   VIEW_EDGES_PER_ENTITY,
   VIEW_NODE_CAP,
 } from "../src/graph/config";
@@ -516,7 +516,7 @@ describe("the evidence under one edge", () => {
   // not.
   it("bounds the list it opens, and states the weight it was bounded out of", async () => {
     const publisher = await createPublisher("wire.example");
-    const cited = await coMention(publisher.id, ["Ada Lovelace", "Charles Babbage"], EDGE_CITATION_CAP + 3);
+    const cited = await coMention(publisher.id, ["Ada Lovelace", "Charles Babbage"], VIEW_EDGE_CITATIONS + 3);
     await runEntityResolution();
 
     const body = await citations(
@@ -525,8 +525,8 @@ describe("the evidence under one edge", () => {
       await entityId("Charles Babbage"),
     );
 
-    expect(body.weight).toBe(EDGE_CITATION_CAP + 3);
-    expect(body.citations).toHaveLength(EDGE_CITATION_CAP);
+    expect(body.weight).toBe(VIEW_EDGE_CITATIONS + 3);
+    expect(body.citations).toHaveLength(VIEW_EDGE_CITATIONS);
     // Bounded off the old end: the newest reporting is what the neighbourhood's window
     // states, so a bound that dropped it would open a list that disagrees with the page.
     expect(body.citations[0].title).toBe(cited[cited.length - 1].title);

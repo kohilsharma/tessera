@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import cytoscape from "cytoscape";
 import type { Css, ElementDefinition, StylesheetJson } from "cytoscape";
 import { ENTITY_KINDS, ENTITY_KIND_LABELS, type EntityKind, type GraphEdge, type GraphNode } from "../api/client";
@@ -36,6 +36,52 @@ export type GraphPicture = { nodes: GraphNode[]; edges: GraphEdge[] };
 // "1 report" / "24 reports", wherever a count of reporting is stated — over a whole graph, on
 // one name, or on one link — so every one of them reads as the same unit.
 export const reports = (count: number) => `${count} report${count === 1 ? "" : "s"}`;
+
+// The corpus every graph surface reads, and the rule that bounds half of it, in one wording
+// for both. AGENTS.md's membership invariant exempts this seam on the condition that it states
+// its corpus on screen — so the statement is shared with the picture rather than written per
+// page, and a surface that draws the graph cannot forget to make it.
+//
+// Two rows, not one value: CONTEXT.md's *Retention Window* expires only `metadata_only` GDELT
+// rows, so the Curated Corpus, anything enriched with text, and any Article a Story or Brief
+// holds all outlive it. "Rolling 7 days" is true of the firehose and false of the graph, which
+// is why the measured span each page holds rides separately.
+export function corpusLedger(retainedDays: number): { term: string; value: ReactNode }[] {
+  return [
+    { term: "Corpus", value: "GDELT firehose, plus Tessera’s Curated Corpus" },
+    { term: "Retention window", value: `Rolling ${retainedDays} days of firehose metadata` },
+  ];
+}
+
+// The other end of a line from one name. Stored order is storage's business — a pair is one
+// row ordered by id — so no reader surface should be re-deriving which end it arrived from.
+export function otherEnd(edge: GraphEdge, entityId: string): string {
+  return edge.entityAId === entityId ? edge.entityBId : edge.entityAId;
+}
+
+// Every drawn line each drawn name is on. What both surfaces read an edge list for: degree,
+// the strongest tie, the weight of one pair, the interlinks a neighbour carries. Read from the
+// edges in view rather than from a count the endpoint could send, so what it measures is the
+// picture on screen — and walked once here rather than in a loop per page, because handling
+// both ends of every row is the part that is easy to get wrong twice.
+export function edgesOn(edges: GraphEdge[]): Map<string, GraphEdge[]> {
+  const on = new Map<string, GraphEdge[]>();
+  for (const edge of edges) {
+    for (const end of [edge.entityAId, edge.entityBId]) {
+      const held = on.get(end);
+      if (held) held.push(edge);
+      else on.set(end, [edge]);
+    }
+  }
+  return on;
+}
+
+// The heaviest of the lines one name is on, first-wins on a tie so the payload's own order
+// (weight descending) decides. `undefined` where the name is on none, which is a name the
+// picture draws as an isolate and a register row states as `Links drawn 0`.
+export function strongestOf(edges: GraphEdge[]): GraphEdge | undefined {
+  return edges.reduce<GraphEdge | undefined>((best, edge) => (best && best.weight >= edge.weight ? best : edge), undefined);
+}
 
 // The graph as Cytoscape wants it. Exported and pure so the mapping the picture rests on is
 // checkable without a canvas: jsdom cannot render one, so the renderer is stubbed in the

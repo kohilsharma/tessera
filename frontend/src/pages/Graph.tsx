@@ -2,7 +2,15 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { ENTITY_KIND_LABELS, getGraphView, type GraphEdge, type GraphNode, type GraphView } from "../api/client";
 import { DashboardRegister, RegisterRow } from "../components/dashboardArchetype";
-import { GraphKey, GraphPlot, reports } from "../components/graphRegister";
+import {
+  corpusLedger,
+  edgesOn,
+  GraphKey,
+  GraphPlot,
+  otherEnd,
+  reports,
+  strongestOf,
+} from "../components/graphRegister";
 import { DateStamp, IndexPage } from "../components/indexArchetype";
 import { peakOf } from "../components/timelineRegister";
 import { EmptyState, EntryList, PendingState, RetryableError } from "../components/uiStates";
@@ -41,51 +49,31 @@ function Provenance({ view }: { view: GraphView }) {
       : `${view.nodes.length} of ${view.entityCount} names`;
   return (
     <dl className="graph-ledger">
-      <div>
-        <dt>Corpus</dt>
-        <dd>GDELT firehose, plus Tessera&rsquo;s Curated Corpus</dd>
-      </div>
-      <div>
-        <dt>Retention window</dt>
-        <dd>Rolling {view.retainedDays} days of firehose metadata</dd>
-      </div>
-      <div>
-        <dt>Reporting</dt>
-        <dd>
-          {reports(view.articleCount)} cited
-          {view.from && view.to && (
+      {[
+        ...corpusLedger(view.retainedDays),
+        {
+          term: "Reporting",
+          value: (
             <>
-              {" · "}
-              <DateStamp iso={view.from} /> – <DateStamp iso={view.to} />
+              {reports(view.articleCount)} cited
+              {view.from && view.to && (
+                <>
+                  {" · "}
+                  <DateStamp iso={view.from} /> – <DateStamp iso={view.to} />
+                </>
+              )}
             </>
-          )}
-        </dd>
-      </div>
-      <div>
-        <dt>Drawn</dt>
-        <dd>{drawn}</dd>
-      </div>
+          ),
+        },
+        { term: "Drawn", value: drawn },
+      ].map(({ term, value }) => (
+        <div key={term}>
+          <dt>{term}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
     </dl>
   );
-}
-
-// How many of the drawn links each drawn name is on, and the heaviest of them. Degree a
-// reader can count off the picture; a link's *weight* is drawn as line width and nowhere
-// else, and a line cannot be measured by a screen reader, so the strongest one is stated
-// in words beside the name it belongs to. Both are read from the edges in view rather than
-// from a count the endpoint could send, so both are about the picture on screen.
-function linksDrawn(view: GraphView): Map<string, { count: number; strongest: GraphEdge }> {
-  const links = new Map<string, { count: number; strongest: GraphEdge }>();
-  for (const edge of view.edges) {
-    for (const end of [edge.entityAId, edge.entityBId]) {
-      const held = links.get(end);
-      links.set(end, {
-        count: (held?.count ?? 0) + 1,
-        strongest: held && held.strongest.weight >= edge.weight ? held.strongest : edge,
-      });
-    }
-  }
-  return links;
 }
 
 // One name's ledger: its kind in the word the legend uses, and the two quantities the
@@ -98,20 +86,17 @@ function linksDrawn(view: GraphView): Map<string, { count: number; strongest: Gr
 // It always is — the endpoint bounds edges to the nodes it returned — so this is a guard
 // against a future selection that stops being true, not against today's, and it costs one
 // `&&` rather than rendering the word "undefined" at a reader.
-function metaFor(
-  node: GraphNode,
-  links: Map<string, { count: number; strongest: GraphEdge }>,
-  names: Map<string, string>,
-) {
-  const link = links.get(node.id);
-  const other =
-    link && (link.strongest.entityAId === node.id ? link.strongest.entityBId : link.strongest.entityAId);
-  const otherName = other && names.get(other);
+function metaFor(node: GraphNode, links: Map<string, GraphEdge[]>, names: Map<string, string>) {
+  const on = links.get(node.id) ?? [];
+  const strongest = strongestOf(on);
+  const otherName = strongest && names.get(otherEnd(strongest, node.id));
   return [
     { term: "Kind", value: ENTITY_KIND_LABELS[node.kind] },
     { term: "Reporting", value: reports(node.articleCount) },
-    { term: "Links drawn", value: link?.count ?? 0 },
-    ...(link && otherName ? [{ term: "Strongest link", value: `${otherName} · ${reports(link.strongest.weight)}` }] : []),
+    { term: "Links drawn", value: on.length },
+    ...(strongest && otherName
+      ? [{ term: "Strongest link", value: `${otherName} · ${reports(strongest.weight)}` }]
+      : []),
   ];
 }
 
@@ -120,7 +105,10 @@ export default function Graph() {
   const navigate = useNavigate();
   const view = query.data;
   const busiest = peakOf(view?.nodes.map((node) => node.articleCount) ?? []);
-  const links = view ? linksDrawn(view) : new Map<string, { count: number; strongest: GraphEdge }>();
+  // Degree a reader can count off the picture, and the heaviest line each name is on: a
+  // link's weight is drawn as line width and nowhere else, and a line cannot be measured by
+  // a screen reader, so the strongest one is stated in words beside the name it belongs to.
+  const links = edgesOn(view?.edges ?? []);
   const names = new Map(view?.nodes.map((node) => [node.id, node.canonicalName]) ?? []);
 
   return (

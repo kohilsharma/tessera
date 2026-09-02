@@ -71,14 +71,17 @@ export const VIEW_NODE_CAP = envNumber("GRAPH_VIEW_NODES", 60, { min: 1, max: 20
 // nothing stored to return.
 export const VIEW_EDGES_PER_ENTITY = envNumber("GRAPH_VIEW_EDGES_PER_ENTITY", 6, { min: 1, max: 100 });
 
-// #68's third bound — depth — has no constant here, and that is the answer rather than an
-// omission. The global view selects its nodes by presence and then draws the edges *among
-// them*: it never traverses out from a node, so there is no hop for a caller to widen and
-// nothing a number here could tighten. Depth becomes a real bound the moment a view starts
-// from one Entity and walks outward, which is #69's neighbourhood — where it lives as
-// `NEIGHBOURHOOD_DEPTH` beside that selection (./loadGraphView.ts), not in front of a
-// projection that has no traversal to bound, and not as an env knob: one hop is what
-// "neighbourhood" means, and two is a different picture rather than a wider one.
+// #68's third bound — depth — had no constant while the global view was the only reader:
+// it selects its nodes by presence and draws the edges *among them*, never traversing out
+// from a node, so there was no hop to widen. #69's neighbourhood is the view that walks
+// outward, so the bound is real now and lives here with the other five.
+//
+// Not an env knob, which is why it is a plain constant among the `envNumber` ones: one hop
+// is what "neighbourhood" means. Two hops from a well-reported name is most of the graph —
+// the neighbours' own neighbourhoods overlap — so a second hop is a different picture
+// rather than a wider one, and a reader who wants it has a page for it, since every
+// neighbour drawn is a link to its own neighbourhood.
+export const NEIGHBOURHOOD_DEPTH = 1;
 
 // #69's two bounds, both on one Entity's page and both about a list a person reads rather
 // than about what the graph holds.
@@ -95,7 +98,7 @@ export const VIEW_THEME_FACETS = envNumber("GRAPH_VIEW_THEME_FACETS", 12, { min:
 // a line for is enough reporting to check that the two names really were reported together,
 // which is a handful of the most recent — not every window they shared. The two numbers are
 // allowed to differ, and the page says so.
-export const EDGE_CITATION_CAP = envNumber("GRAPH_EDGE_CITATIONS", 20, { min: 1, max: 200 });
+export const VIEW_EDGE_CITATIONS = envNumber("GRAPH_VIEW_EDGE_CITATIONS", 20, { min: 1, max: 200 });
 
 // The two bars #67 turns on, both read by pg_trgm's `similarity()` over normalized
 // surface names. v3 §18.5's rule sets them: a wrong merge is more harmful than an

@@ -3,8 +3,9 @@ import { GDELT_RETENTION_DAYS } from "../ingestion/retention";
 import { toPublicArticle, type ArticleProjection } from "../lib/articleView";
 import { acceptedMembership } from "../lib/storyMembership";
 import {
-  EDGE_CITATION_CAP,
   ENTITY_PROMOTION_FLOOR,
+  NEIGHBOURHOOD_DEPTH,
+  VIEW_EDGE_CITATIONS,
   VIEW_EDGES_PER_ENTITY,
   VIEW_NODE_CAP,
   VIEW_THEME_FACETS,
@@ -213,13 +214,6 @@ export async function loadGraphView(): Promise<GraphView> {
   });
 }
 
-// One hop, and not a number a caller may raise. Two hops from a well-reported name is
-// most of the graph — the neighbours' own neighbourhoods overlap — so a second hop is a
-// different picture rather than a wider one, and a reader who wants it has a page for it:
-// every neighbour drawn is a link to its own neighbourhood. Returned in the payload
-// because a bounded reading has to say what it bounded (#69).
-export const NEIGHBOURHOOD_DEPTH = 1;
-
 // What the page is about: the Entity, the names folded into it, and how much reporting it
 // was seen in. `articleCount`, `from` and `to` are measured over the citations, which is
 // the same quantity the global view sizes this name's node by — one number, so the two
@@ -244,6 +238,8 @@ export type ThemeFacet = { theme: string; articleCount: number };
 export type Neighbourhood = {
   retainedDays: number;
   promotionFloor: number;
+  // `NEIGHBOURHOOD_DEPTH` (./config.ts), in the payload because a bounded reading has to
+  // say what it bounded (#69).
   depth: number;
   focus: EntityProfile;
   // The facet in force, echoed back rather than trusted from the caller's own URL: a page
@@ -410,7 +406,7 @@ export type EdgeCitation = ReturnType<typeof toPublicArticle> & {
 };
 
 // The whole weight, then the bounded list of it: a drawer is something a person reads, so
-// it holds the newest `EDGE_CITATION_CAP` and says how many there were. `COUNT(*) OVER ()`
+// it holds the newest `VIEW_EDGE_CITATIONS` and says how many there were. `COUNT(*) OVER ()`
 // is computed before the LIMIT, so the two numbers come from one statement and cannot
 // disagree about the pair they describe.
 export type EdgeCitations = { weight: number; citations: EdgeCitation[] };
@@ -466,7 +462,7 @@ export async function loadEdgeCitations(
     theme,
     entityAId,
     entityBId,
-    EDGE_CITATION_CAP,
+    VIEW_EDGE_CITATIONS,
   ])) as CitationRow[];
   if (rows.length === 0) return null;
 

@@ -99,6 +99,12 @@ export function EntryLedger({ meta }: { meta: { term: string; value: ReactNode }
 // `action` is what can be done to this entry's membership of the list it is in —
 // detaching an Article from a Brief (#34). Not what can be done to the record:
 // the record's own actions live on its record page.
+//
+// `to` is a route inside Tessera, or an `http(s)` URL when the record it names has
+// no page here — reporting the graph cites that belongs to no Story (#69), where the
+// original at the Publisher is the only place to read it. Only those two schemes
+// become an anchor; anything else stays a `Link`, so a stored value can never make
+// this render a `javascript:` href.
 export function Entry({
   to,
   title,
@@ -112,12 +118,19 @@ export function Entry({
   meta: { term: string; value: ReactNode }[];
   action?: ReactNode;
 }) {
+  const external = to.startsWith("https://") || to.startsWith("http://");
   return (
     <li className="entry">
       {cover !== undefined && <div className="entry-cover">{cover}</div>}
-      <Link className="entry-title" to={to}>
-        {title}
-      </Link>
+      {external ? (
+        <a className="entry-title" href={to} target="_blank" rel="noreferrer">
+          {title}
+        </a>
+      ) : (
+        <Link className="entry-title" to={to}>
+          {title}
+        </Link>
+      )}
       <EntryLedger meta={meta} />
       {action && <div className="entry-action">{action}</div>}
     </li>
