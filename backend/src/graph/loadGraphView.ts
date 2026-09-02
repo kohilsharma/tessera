@@ -1,6 +1,6 @@
 import { AppDataSource } from "../data-source";
 import { GDELT_RETENTION_DAYS } from "../ingestion/retention";
-import { ENTITY_PROMOTION_FLOOR, VIEW_EDGES_PER_ENTITY, VIEW_NODES, type PromotableKind } from "./config";
+import { ENTITY_PROMOTION_FLOOR, VIEW_EDGES_PER_ENTITY, VIEW_NODE_CAP, type PromotableKind } from "./config";
 
 // The graph's read seam (#68), the one every reader surface goes through, as
 // `runEntityResolution` is the one every write goes through. #69's Entity neighbourhood
@@ -11,11 +11,19 @@ import { ENTITY_PROMOTION_FLOOR, VIEW_EDGES_PER_ENTITY, VIEW_NODES, type Promota
 // below, so `GET /graph` needs no parameters and a widened bound is not a request a
 // caller can make — which is what #68 asks for, and cheaper than validating a limit.
 //
-// There is also no time predicate below, and that is the retained window rather than a
-// filter left out: retention deletes an aged-out firehose Article and its (pair, Article)
-// citations cascade with it, and the pass demotes an Entity whose annotations have left
-// the window. What is stored *is* the window, so a date filter here would be a second,
-// looser copy of the rule that already emptied those rows.
+// There is no time predicate below either, and that is deliberate rather than left out —
+// but it does not make what is stored equal to the retained window. Retention bounds the
+// firehose half only: it deletes an aged-out `metadata_only` GDELT row and its (pair,
+// Article) citations cascade with it. Everything CONTEXT.md's *Retention Window* exempts
+// outlives it — the Curated Corpus, which ADR-0029 holds open to resolution, anything
+// enriched above `metadata_only`, and any Article a Story or a Brief has taken hold of —
+// so the graph can and should cite reporting older than `retainedDays`. Adding a date
+// filter here would hide exactly the corpus ADR-0029 opened.
+//
+// Which makes `retainedDays` and `from`/`to` two different facts, and the reason both are
+// returned: the first is the rule bounding what the firehose leaves behind, the second is
+// the span of the reporting actually cited. A reader must be told the second, not shown
+// the first and left to infer it.
 
 export type GraphNode = {
   id: string;
@@ -32,9 +40,10 @@ export type GraphNode = {
 export type GraphEdge = { entityAId: string; entityBId: string; weight: number };
 
 export type GraphView = {
-  // Why the window rolls and why a name is in the graph at all. Returned rather than
-  // restated on the page: the reader is owed the corpus this view reads, and a frontend
-  // constant would be a second copy of a number the backend owns.
+  // The rule that bounds the firehose half, and the floor that decides whether a name is
+  // in the graph at all. Returned rather than restated on the page: the reader is owed the
+  // corpus this view reads, and a frontend constant would be a second copy of a number the
+  // backend owns. `retainedDays` is not the graph's span — `from`/`to` below are.
   retainedDays: number;
   promotionFloor: number;
   // The whole working set the picture was drawn from, against the picture's own length —
@@ -105,7 +114,7 @@ const EDGES_SQL = `
 // ones: this is what the graph was built from, which is what a reader needs told, and
 // it is a different question from which of it fits on a screen. Reporting that cites no
 // edge — a window where one promoted name appeared alone — is not part of the graph and
-// so does not stretch the window it states.
+// so does not stretch the span it states.
 const SUBSTRATE_SQL = `
   SELECT (SELECT COUNT(*)::int FROM "entities") AS "entityCount",
          COUNT(DISTINCT e."articleId")::int AS "articleCount",
@@ -114,28 +123,35 @@ const SUBSTRATE_SQL = `
     FROM "entity_edges" e
     JOIN "articles" a ON a."id" = e."articleId"`;
 
+// One snapshot for all three reads. `runEntityResolution` rebuilds the whole graph inside
+// one transaction — `DELETE FROM "entity_edges"` and then the insert — and under READ
+// COMMITTED each statement takes its own snapshot, so a read overlapping the hourly commit
+// could pair nodes counted before it with edges selected after it and draw every name as an
+// isolate, or state an `entityCount` that disagrees with the nodes beside it. REPEATABLE
+// READ pins one snapshot for the whole transaction. It is read-only, so unlike SERIALIZABLE
+// it cannot fail with a serialization error and there is nothing to retry; the cost is that
+// the three statements share one connection and run in sequence rather than concurrently.
 export async function loadGraphView(): Promise<GraphView> {
-  const [nodes, [substrate]] = await Promise.all([
-    AppDataSource.query(NODES_SQL, [VIEW_NODES]) as Promise<GraphNode[]>,
-    AppDataSource.query(SUBSTRATE_SQL) as Promise<SubstrateRow[]>,
-  ]);
+  return AppDataSource.transaction("REPEATABLE READ", async (manager) => {
+    const nodes = (await manager.query(NODES_SQL, [VIEW_NODE_CAP])) as GraphNode[];
+    const [substrate] = (await manager.query(SUBSTRATE_SQL)) as SubstrateRow[];
+    const edges =
+      nodes.length === 0
+        ? []
+        : ((await manager.query(EDGES_SQL, [
+            nodes.map((node) => node.id),
+            VIEW_EDGES_PER_ENTITY,
+          ])) as GraphEdge[]);
 
-  const edges =
-    nodes.length === 0
-      ? []
-      : ((await AppDataSource.query(EDGES_SQL, [
-          nodes.map((node) => node.id),
-          VIEW_EDGES_PER_ENTITY,
-        ])) as GraphEdge[]);
-
-  return {
-    retainedDays: GDELT_RETENTION_DAYS,
-    promotionFloor: ENTITY_PROMOTION_FLOOR,
-    entityCount: substrate.entityCount,
-    articleCount: substrate.articleCount,
-    from: substrate.from,
-    to: substrate.to,
-    nodes,
-    edges,
-  };
+    return {
+      retainedDays: GDELT_RETENTION_DAYS,
+      promotionFloor: ENTITY_PROMOTION_FLOOR,
+      entityCount: substrate.entityCount,
+      articleCount: substrate.articleCount,
+      from: substrate.from,
+      to: substrate.to,
+      nodes,
+      edges,
+    };
+  });
 }

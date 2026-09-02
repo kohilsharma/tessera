@@ -388,6 +388,22 @@ states the rule that would fill it, which is what makes it read differently from
 Student and Investor read one graph behind `requireAuth` and no role guard — ADR-0021 gives each
 role its own *features*, and a co-occurrence shown to two roles differently would be evidence about
 the reader rather than about the reporting.
+Review of #68 corrected three things the first pass got wrong about its own claims. The ledger
+stamped `Rolling 7 days` across the span it printed beside it, and that rule is only true of the
+firehose half: CONTEXT.md's **Retention Window** expires `metadata_only` GDELT rows and nothing
+else, so the Curated Corpus (open to resolution, ADR-0029), anything enriched above
+`metadata_only`, and any Article a Story or a Brief holds are all cited from outside the window.
+The rule and the measured span are now separate ledger rows, and the backend comment that argued
+"what is stored *is* the window" says what retention actually bounds. `nodes: []` also had two
+causes read as one — nothing promoted, and names promoted that nothing co-cites, which the inner
+join draws as nothing — so the page branches on `entityCount` and the second state names the rule
+it has already cleared instead of the promotion floor; a backend test drives a name over the floor
+with no pair to prove the state is reachable. And the three read statements now share one
+REPEATABLE READ snapshot: the pass rebuilds the graph in one transaction, so under READ COMMITTED a
+read overlapping the hourly commit could pair nodes from before it with edges from after it and
+draw every name as an isolate. #68's third bound, depth, has no constant and `graph/config.ts` says
+why — the global view draws edges *among* a selection rather than traversing out from a node, so
+there is no hop to bound until #69's neighbourhood.
 **frontend/** — `src/App.tsx` is the route table alone; chrome comes from `components/AppShell.tsx`.
 Live, `fetch`-based pages (`src/api/client.ts`) cover health (`/status`), auth (`/login`,
 `/register`, `/account`), role dashboards (`/dashboard/:role`), browsing the corpus

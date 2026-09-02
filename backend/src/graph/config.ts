@@ -61,7 +61,7 @@ export const EDGES_PER_ENTITY = envNumber("GRAPH_EDGES_PER_ENTITY", 25, { min: 1
 // is left panning a hairball to find the name they came for. The most present 60 of the
 // working set is a picture; the page states the other number beside it, so a reader is
 // never left thinking 60 is all there is.
-export const VIEW_NODES = envNumber("GRAPH_VIEW_NODES", 60, { min: 1, max: 200 });
+export const VIEW_NODE_CAP = envNumber("GRAPH_VIEW_NODES", 60, { min: 1, max: 200 });
 
 // 6 neighbours: 60 nodes at 6 is at most ~180 edges, which is a graph a person reads a
 // path through. Applied from both ends, as the pass's bound is, and for the same reason
@@ -70,6 +70,13 @@ export const VIEW_NODES = envNumber("GRAPH_VIEW_NODES", 60, { min: 1, max: 200 }
 // The pass's own bound is the real ceiling above this: past `EDGES_PER_ENTITY` there is
 // nothing stored to return.
 export const VIEW_EDGES_PER_ENTITY = envNumber("GRAPH_VIEW_EDGES_PER_ENTITY", 6, { min: 1, max: 100 });
+
+// #68's third bound — depth — has no constant here, and that is the answer rather than an
+// omission. The global view selects its nodes by presence and then draws the edges *among
+// them*: it never traverses out from a node, so there is no hop for a caller to widen and
+// nothing a number here could tighten. Depth becomes a real bound the moment a view starts
+// from one Entity and walks outward, which is #69's neighbourhood; it belongs beside that
+// selection, not in front of a projection that has no traversal to bound.
 
 // The two bars #67 turns on, both read by pg_trgm's `similarity()` over normalized
 // surface names. v3 §18.5's rule sets them: a wrong merge is more harmful than an

@@ -24,16 +24,18 @@ import { EmptyState, EntryList, PendingState, RetryableError } from "../componen
 // greyscale, and to anyone who cannot tell #1458a6 from #492e84.
 //
 // The inks are read from the Bureau tokens at draw time so the canvas cannot drift from
-// the legend beside it, which takes the same tokens through CSS. The fallbacks are for
-// jsdom, which resolves no custom properties.
-const KIND_MARK: Record<EntityKind, { shape: Css.NodeShape; token: string; fallback: string }> = {
-  person: { shape: "ellipse", token: "--proof-blue", fallback: "#1458a6" },
-  organization: { shape: "rectangle", token: "--proof-magenta", fallback: "#c51d62" },
-  location: { shape: "diamond", token: "--registered-overlap", fallback: "#492e84" },
+// the legend beside it, which takes the same tokens through CSS. No hex here: DESIGN.md
+// keeps the palette at `:root` and has pages consume it, and a fallback copy would be a
+// second palette to keep in step — jsdom resolves no custom properties, but jsdom also
+// renders no canvas, so nothing there ever observes the value.
+const KIND_MARK: Record<EntityKind, { shape: Css.NodeShape; token: string }> = {
+  person: { shape: "ellipse", token: "--proof-blue" },
+  organization: { shape: "rectangle", token: "--proof-magenta" },
+  location: { shape: "diamond", token: "--registered-overlap" },
 };
 
-function token(name: string, fallback: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+function token(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
 // The graph as Cytoscape wants it. Exported and pure so the mapping the picture rests on
@@ -80,14 +82,14 @@ function stylesheet(): StylesheetJson {
         width: "mapData(share, 0, 1, 16, 44)",
         height: "mapData(share, 0, 1, 16, 44)",
         "border-width": 1,
-        "border-color": token("--bureau-ink", "#171715"),
+        "border-color": token("--bureau-ink"),
         "font-family": "Arial, Helvetica, sans-serif",
         "font-size": 10,
         "font-weight": 700,
-        color: token("--bureau-ink", "#171715"),
+        color: token("--bureau-ink"),
         "text-valign": "bottom",
         "text-margin-y": 4,
-        "text-background-color": token("--stock-paper", "#f2f0e9"),
+        "text-background-color": token("--stock-paper"),
         "text-background-opacity": 0.85,
         "text-background-padding": "2px",
         "min-zoomed-font-size": 7,
@@ -95,13 +97,13 @@ function stylesheet(): StylesheetJson {
     },
     ...ENTITY_KINDS.map((kind) => ({
       selector: `node[kind="${kind}"]`,
-      style: { shape: KIND_MARK[kind].shape, "background-color": token(KIND_MARK[kind].token, KIND_MARK[kind].fallback) },
+      style: { shape: KIND_MARK[kind].shape, "background-color": token(KIND_MARK[kind].token) },
     })),
     {
       selector: "edge",
       style: {
         width: "mapData(share, 0, 1, 1, 5)",
-        "line-color": token("--quiet-ink", "#55534e"),
+        "line-color": token("--quiet-ink"),
         opacity: 0.55,
         "curve-style": "straight",
       },
@@ -148,9 +150,17 @@ function GraphPlot({ view }: { view: GraphView }) {
 const reports = (count: number) => `${count} report${count === 1 ? "" : "s"}`;
 
 // The corpus statement's measured half, in the ledger register every other surface states
-// its facts in: which corpus, which window, how much reporting, and how much of the graph
-// is on screen. Beside the prose rather than under the picture, because a reader who
-// mistakes this for the curated corpus has misread every name on the page.
+// its facts in: which corpus, under what retention, how much reporting and over what span,
+// and how much of the graph is on screen. Beside the prose rather than under the picture,
+// because a reader who mistakes this for the Curated Corpus has misread every name on the
+// page.
+//
+// The retention rule and the graph's span are two rows, not one value: CONTEXT.md's
+// *Retention Window* is narrow on purpose — it expires only `metadata_only` GDELT rows, so
+// the Curated Corpus, anything enriched with text, and any Article a Story or a Brief holds
+// all outlive it. "Rolling 7 days" is therefore true of the firehose and false of the graph,
+// and stamping it over a span is a claim this page cannot support. The measured span rides
+// with the measured count instead, where both are facts about what is actually cited.
 function Provenance({ view }: { view: GraphView }) {
   const drawn =
     view.nodes.length === view.entityCount
@@ -160,12 +170,16 @@ function Provenance({ view }: { view: GraphView }) {
     <dl className="graph-ledger">
       <div>
         <dt>Corpus</dt>
-        <dd>GDELT firehose, plus Tessera&rsquo;s curated corpus</dd>
+        <dd>GDELT firehose, plus Tessera&rsquo;s Curated Corpus</dd>
       </div>
       <div>
-        <dt>Window</dt>
+        <dt>Retention window</dt>
+        <dd>Rolling {view.retainedDays} days of firehose metadata</dd>
+      </div>
+      <div>
+        <dt>Reporting</dt>
         <dd>
-          Rolling {view.retainedDays} days
+          {reports(view.articleCount)} cited
           {view.from && view.to && (
             <>
               {" · "}
@@ -173,10 +187,6 @@ function Provenance({ view }: { view: GraphView }) {
             </>
           )}
         </dd>
-      </div>
-      <div>
-        <dt>Reporting</dt>
-        <dd>{reports(view.articleCount)} cited</dd>
       </div>
       <div>
         <dt>Drawn</dt>
@@ -216,8 +226,14 @@ function linksDrawn(view: GraphView): Map<string, { count: number; strongest: Gr
 
 // One name's ledger: its kind in the word the legend uses, and the two quantities the
 // picture encodes — reporting as node size, a link's weight as line width — written out.
-// A name whose every tie was to a name outside the bound carries no link row rather than a
-// zero pointing at nothing.
+// A name whose every tie was to a name outside the bound states `Links drawn 0` and no
+// strongest link: the zero is why the row beneath it is missing, so stating it is what
+// keeps the omission from reading as an oversight.
+//
+// The strongest link is named only when the name on its other end is one of the drawn ones.
+// It always is — the endpoint bounds edges to the nodes it returned — so this is a guard
+// against a future selection that stops being true, not against today's, and it costs one
+// `&&` rather than rendering the word "undefined" at a reader.
 function metaFor(
   node: GraphNode,
   links: Map<string, { count: number; strongest: GraphEdge }>,
@@ -226,11 +242,12 @@ function metaFor(
   const link = links.get(node.id);
   const other =
     link && (link.strongest.entityAId === node.id ? link.strongest.entityBId : link.strongest.entityAId);
+  const otherName = other && names.get(other);
   return [
     { term: "Kind", value: ENTITY_KIND_LABELS[node.kind] },
     { term: "Reporting", value: reports(node.articleCount) },
     { term: "Links drawn", value: link?.count ?? 0 },
-    ...(link && other ? [{ term: "Strongest link", value: `${names.get(other)} · ${reports(link.strongest.weight)}` }] : []),
+    ...(link && otherName ? [{ term: "Strongest link", value: `${otherName} · ${reports(link.strongest.weight)}` }] : []),
   ];
 }
 
@@ -251,15 +268,28 @@ export default function Graph() {
           retrying={query.isFetching}
         />
       )}
-      {/* Nothing resolved yet is not a failure and does not read like one: the request
-          answered, the graph is simply empty, and what would fill it is the rule stated. */}
+      {/* Nothing to draw is not a failure and does not read like one: the request answered,
+          and what would fill the picture is stated as the rule that governs it. But there
+          are two different empty graphs here and a reader is owed the one in front of them.
+          Nothing promoted is a floor not yet reached. Names promoted with no pair among them
+          is a graph of nodes and no edges — the view draws no isolate, because a dot joined
+          to nothing asserts nothing — and telling that reader about the promotion floor
+          would point them at a rule their graph has already cleared. */}
       {view && view.nodes.length === 0 && (
         <EmptyState>
-          <p>
-            No name has been resolved into the graph yet. A name enters once {view.promotionFloor} separate
-            reports have named it, so this fills in as the last {view.retainedDays} days of the GDELT
-            firehose are ingested and resolved.
-          </p>
+          {view.entityCount === 0 ? (
+            <p>
+              No name has been resolved into the graph yet. A name enters once {view.promotionFloor} separate
+              reports have named it, so this fills in as the last {view.retainedDays} days of the GDELT
+              firehose are ingested and resolved.
+            </p>
+          ) : (
+            <p>
+              {view.entityCount === 1 ? "One name has" : `${view.entityCount} names have`} been resolved, but
+              no two names have yet been reported together, so there is no link to draw and nothing to place.
+              A name joins the picture once one report names it alongside another.
+            </p>
+          )}
         </EmptyState>
       )}
       {view && view.nodes.length > 0 && (
@@ -267,7 +297,7 @@ export default function Graph() {
           <p className="record-prose">
             Drawn from the <strong>retained firehose</strong> — every report GDELT&rsquo;s Global Knowledge
             Graph has named an entity in over the last {view.retainedDays} days, together with
-            Tessera&rsquo;s curated corpus. That is a wider and rougher body of reporting than the Stories
+            Tessera&rsquo;s Curated Corpus. That is a wider and rougher body of reporting than the Stories
             and Briefs elsewhere in Tessera, so a name here will not always open onto a Story you can
             read. A name enters once {view.promotionFloor} separate reports have named it; a link means two
             names were reported together, and its weight is how many reports that was.

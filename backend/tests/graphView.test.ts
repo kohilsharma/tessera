@@ -5,7 +5,7 @@ import request from "supertest";
 import { createApp } from "../src/app";
 import { AppDataSource } from "../src/data-source";
 import { signToken } from "../src/auth/jwt";
-import { ENTITY_PROMOTION_FLOOR, VIEW_EDGES_PER_ENTITY, VIEW_NODES } from "../src/graph/config";
+import { ENTITY_PROMOTION_FLOOR, VIEW_EDGES_PER_ENTITY, VIEW_NODE_CAP } from "../src/graph/config";
 import { runEntityResolution } from "../src/graph/runEntityResolution";
 import { Article } from "../src/entities/Article";
 import type { GkgAnnotationKind } from "../src/entities/GkgAnnotation";
@@ -178,27 +178,27 @@ describe("the bounded global graph", () => {
 
   it("bounds the picture to the view's node count, and states the working set it was drawn from", async () => {
     const publisher = await createPublisher("wire.example");
-    const names = crowdNames(VIEW_NODES + 2);
+    const names = crowdNames(VIEW_NODE_CAP + 2);
     await coMention(publisher.id, names, ENTITY_PROMOTION_FLOOR, "crowd");
     await runEntityResolution();
 
     const body = await graph(await adminToken());
 
-    expect(body.nodes).toHaveLength(VIEW_NODES);
+    expect(body.nodes).toHaveLength(VIEW_NODE_CAP);
     expect(body.entityCount).toBe(names.length);
     // Which of a tied crowd is drawn is the ordering's business; that every drawn name
     // is one the pass promoted is the view's.
     expect(body.nodes.every((node) => names.includes(node.canonicalName))).toBe(true);
     // Each drawn node contributes at most its own strongest few, so this is the ceiling
     // the bound puts on the picture — not a count the fixture happens to produce.
-    expect(body.edges.length).toBeLessThanOrEqual(VIEW_NODES * VIEW_EDGES_PER_ENTITY);
+    expect(body.edges.length).toBeLessThanOrEqual(VIEW_NODE_CAP * VIEW_EDGES_PER_ENTITY);
     const drawn = new Set(body.nodes.map((node) => node.id));
     expect(body.edges.every((edge) => drawn.has(edge.entityAId) && drawn.has(edge.entityBId))).toBe(true);
   });
 
   it("ignores every parameter a caller could widen a bound with", async () => {
     const publisher = await createPublisher("wire.example");
-    await coMention(publisher.id, crowdNames(VIEW_NODES + 2), ENTITY_PROMOTION_FLOOR, "crowd");
+    await coMention(publisher.id, crowdNames(VIEW_NODE_CAP + 2), ENTITY_PROMOTION_FLOOR, "crowd");
     await runEntityResolution();
     const token = await reader("student");
 
@@ -206,7 +206,7 @@ describe("the bounded global graph", () => {
     const asked = await graph(token, "?nodes=5000&limit=5000&pageSize=5000&edgesPerEntity=500&depth=9");
 
     expect(asked).toEqual(bounded);
-    expect(asked.nodes).toHaveLength(VIEW_NODES);
+    expect(asked.nodes).toHaveLength(VIEW_NODE_CAP);
   });
 
   it("keeps a node's own strongest co-mention even where the other end has stronger ones", async () => {
@@ -270,5 +270,28 @@ describe("the bounded global graph", () => {
     expect(body.from).toBeNull();
     expect(body.to).toBeNull();
     expect(body.promotionFloor).toBe(ENTITY_PROMOTION_FLOOR);
+  });
+
+  // The second empty graph, and the reason `entityCount` is returned rather than derived
+  // from `nodes`: a name can clear the promotion floor and still be co-cited by nothing, in
+  // which case the view draws no isolate and there is a working set the picture cannot show.
+  // A reader told "no name has been resolved" here would be told the opposite of the truth,
+  // so the page needs the two states apart and this is the one that makes them different.
+  it("counts a promoted name nothing co-cites, and draws nothing", async () => {
+    const publisher = await createPublisher("wire.example");
+    // Every Article names one name only, so the floor is cleared and no pair exists.
+    for (let index = 0; index < ENTITY_PROMOTION_FLOOR; index += 1) {
+      const article = await createArticle(publisher.id, `alone ${index}`);
+      await annotate(article.id, ["Ada Lovelace"]);
+    }
+    await runEntityResolution();
+
+    const body = await graph(await reader("student"));
+
+    expect(body.entityCount).toBe(1);
+    expect(body.nodes).toEqual([]);
+    expect(body.edges).toEqual([]);
+    expect(body.articleCount).toBe(0);
+    expect(body.from).toBeNull();
   });
 });

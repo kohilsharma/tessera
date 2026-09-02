@@ -79,6 +79,18 @@ describe("Knowledge graph — UI states", () => {
     expect(screen.getByText(/5 separate reports/)).toBeInTheDocument();
     expect(screen.getByText(/last 7 days/)).toBeInTheDocument();
   });
+
+  // The second empty graph, and the one the promotion floor does not explain: names cleared
+  // the floor, nothing co-cited them, and the view draws no isolate. Telling this reader
+  // "no name has been resolved" would state the opposite of what they are looking at.
+  it("distinguishes a graph with names but no links from one with no names at all", async () => {
+    render({ nodes: [], edges: [], entityCount: 5, articleCount: 0, from: null, to: null });
+
+    expect(await screen.findByText(/5 names have been resolved/)).toBeInTheDocument();
+    expect(screen.getByText(/no two names have yet been reported together/)).toBeInTheDocument();
+    expect(screen.queryByText(/No name has been resolved/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
 });
 
 describe("Knowledge graph — the corpus it reads", () => {
@@ -94,8 +106,32 @@ describe("Knowledge graph — the corpus it reads", () => {
     // point — the same fact is stated per name below and over the whole graph up here.
     const ledger = within(screen.getByText("Corpus").closest("dl")!);
     expect(ledger.getByText("Corpus").closest("div")).toHaveTextContent("GDELT firehose");
-    expect(ledger.getByText("Window").closest("div")).toHaveTextContent("Rolling 7 days");
+    expect(ledger.getByText("Retention window").closest("div")).toHaveTextContent(
+      "Rolling 7 days of firehose metadata",
+    );
     expect(ledger.getByText("Reporting").closest("div")).toHaveTextContent("24 reports cited");
+  });
+
+  // Retention expires `metadata_only` GDELT rows and nothing else (CONTEXT.md, Retention
+  // Window), so the Curated Corpus and anything a Story or a Brief holds can be cited from
+  // outside the rolling window. The rule and the span are separate rows for that reason, and
+  // the span the page states is the one the endpoint measured. Asserted on `dateTime` rather
+  // than the rendered text, which is `toLocaleDateString` and so belongs to the runtime.
+  it("states the retention rule apart from the span of reporting it actually cites", async () => {
+    render({ from: "2026-07-02T06:00:00Z", to: "2026-09-01T18:00:00Z" });
+
+    const ledger = within((await screen.findByText("Corpus")).closest("dl")!);
+    const retention = ledger.getByText("Retention window").closest("div")!;
+    const reporting = ledger.getByText("Reporting").closest("div")!;
+
+    // A 61-day span under a 7-day rule: the rule must not be stamped across it.
+    expect([...reporting.querySelectorAll("time")].map((el) => el.getAttribute("dateTime"))).toEqual([
+      "2026-07-02T06:00:00Z",
+      "2026-09-01T18:00:00Z",
+    ]);
+    expect(reporting).toHaveTextContent("24 reports cited");
+    expect(retention).toHaveTextContent("Rolling 7 days of firehose metadata");
+    expect(retention.querySelector("time")).toBeNull();
   });
 
   it("states the bound it drew under rather than implying the graph is three names wide", async () => {
@@ -157,7 +193,7 @@ describe("Knowledge graph — the picture and its reading in words", () => {
     expect(rows[2]).toHaveTextContent("Strongest linkReserve Bank · 4 reports");
   });
 
-  it("carries no link row for a name whose every tie was to a name outside the bound", async () => {
+  it("states a zero for a name whose every tie was to a name outside the bound, and no strongest link", async () => {
     render({ edges: [] });
 
     const register = await screen.findByRole("region", { name: "Names in the graph" });
