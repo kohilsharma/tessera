@@ -44,13 +44,13 @@ trigger enqueues and answers `202 {status:"accepted"}`, so there is one executio
 reads from Postgres, never the queue, so a console renders with the worker stopped.
 
 **frontend/** — `App.tsx` is the route table alone, `components/AppShell.tsx` carries the chrome,
-`api/client.ts` is the one `fetch` layer. The **Bureau** rollout (#28–#37) is complete across its
-four archetypes — Index, Record, Form, Dashboard — with screenshots at both breakpoints in
-`docs/verification/bureau-rollout/`. Every route covers the four shared UI states, and says
-"nothing here" differently from a failed request. What two pages both draw lives in a shared
-register beside the thing it draws, reused rather than redrawn per page.
-`src/versions/BureauPrototype.tsx` at `/design-prototype` sits outside the app path — changing it
-changes no route a reader reaches.
+`api/client.ts` is the one `fetch` layer. The **Bureau** rollout (#28–#37) reached all four
+archetypes — Index, Record, Form, Dashboard — and is now **withdrawn** (ADR-0031): its prototype and
+its stylesheet block are deleted, `DESIGN.md` is rewritten around theme-by-role, and
+`docs/verification/bureau-rollout/` is kept only as evidence the rollout happened. What survives it:
+the four archetypes, the four shared UI states on every route — "nothing here" said differently from
+a failed request — and the shared register, so what two pages both draw lives beside the thing it
+draws rather than being redrawn per page. Every route in `App.tsx` is one a reader reaches.
 
 ## Reach for the decided stack
 

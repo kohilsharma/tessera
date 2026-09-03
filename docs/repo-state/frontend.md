@@ -99,8 +99,9 @@ not configuration. Those six Phase-3 registers live in `pages/adminRegisters.tsx
 its own request and commands; `pages/AdminDashboard.tsx` is the console that lays them out and
 the two registers reading its own payload. The
 **design prototype** for the Phase-3 flagship (`src/versions/BureauPrototype.tsx` +
-`bureau.tsx` over hardcoded `src/data.ts`, styled by `src/styles.css`) sits at
-`/design-prototype`, out of the Phase-1 path.
+`bureau.tsx` over hardcoded `src/data.ts`, styled by `src/styles.css`) sat at
+`/design-prototype`, out of the Phase-1 path — until #73 deleted all four with the design system
+they demonstrated (ADR-0031).
 
 `npm run migrate` (backend) applies migrations; `npm test` (backend) is the API-seam test
 pattern (supertest + an ephemeral Testcontainers Postgres) later Foundation tickets extend.

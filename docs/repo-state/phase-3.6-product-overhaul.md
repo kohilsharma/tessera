@@ -86,3 +86,51 @@ comparison of two random UUIDs. The test then asserts one specific headline. The
 because with two members neither article is more central than the other; the assertion
 over-specifies what the tie can answer. Worth knowing that the Story *slug* rides on the same coin
 flip, harmlessly, since it only has to be unique.
+
+**Bureau is retired** (#73). `DESIGN.md` had already been rewritten (cbbec4a), so this ticket was the
+other half of the reversal: delete the world it replaced, and record why in **ADR-0031**.
+
+The deletion is `frontend/src/versions/BureauPrototype.tsx`, `versions/bureau.tsx`, the hardcoded
+fixtures in `src/data.ts`, the `/design-prototype` route, and the `.design-bureau` block — HEAD lines
+691–896, **206 lines, 27.6% of the stylesheet by bytes** (21.3% by lines), styling a page no route in
+the app linked to. The spec's estimate of "~35%" measured from the block's banner to end of file,
+which also swept up the STUDY and KNOWLEDGE GRAPH sections that sit *after* it and are live app CSS;
+that range is 34.9%, and 27.6% is the block itself. `styles.css` goes 967 → 761 lines and
+77,698 → 56,468 bytes, and the shipped CSS bundle is 26.50 kB gzipped to 5.40 kB. **No test
+changed**: nothing in the suite ever rendered the prototype, so 183 tests across 15 files and
+`npm run build` were green on the deletion alone.
+
+Two things the cut swept up were **not** Bureau's and stayed. The
+`@media (prefers-reduced-motion: reduce)` block sat immediately after the block closed rather than
+inside it, and is app-wide — it is what collapses every transition in the app, and #78's sign-in
+sweep when that lands — so rather than leave a global rule stranded where a deleted section used to
+be, it moved up to the globals beside `:focus-visible`. It has to stay *after*
+`html { scroll-behavior: smooth }`: the reduce block's `html { scroll-behavior: auto }` carries the
+same specificity and no `!important`, so source order is the only thing deciding which wins. Nothing
+re-declares `scroll-behavior` after the new position, so the move is inert today and the constraint
+is written down here for whoever adds the next global. And `@keyframes registration-arrives`, the
+pending state's 320ms reveal, lives in the app section — after the cut it is the **one** keyframe
+left in the stylesheet, which was the whole indictment of the old system in the first place.
+
+The `:root` palette — `--bureau-ink`, `--proof-blue` and their siblings — was deliberately left
+alone. Those names are Bureau's but the tokens are not in the deleted block: every live page reads
+them, and `components/graphRegister.tsx` reads six of them at draw time — the ink, the paper, the
+quiet rule, and the three kind colours through `KIND_MARK` — so the graph's key and its picture
+cannot disagree. #74 replaces them wholesale with the token contract; replacing them here
+would have meant reskinning the whole app inside a deletion ticket. The stylesheet's other comments
+citing withdrawn `DESIGN.md` rules ("reserves motion for registration", "the Redundant Signal Rule",
+the offset registration shadow) were left for the same reason — #74–#77 replace that sheet with CSS
+Modules over the new contract, so rewriting prose scheduled for deletion is work that dies in three
+tickets. Only the one comment that pointed *at the deleted route* was rewritten.
+
+Stale pointers swept: `AGENTS.md` (which told every session the prototype was safe to change),
+`SETUP.md`, `docs/repo-state/frontend.md` — now past-tense with the ticket number — and one line in
+`docs/verification/bureau-rollout/README.md` that still sent a reader to `/design-prototype`. The
+directory itself is kept as the ticket asked, and only annotated: the rollout happened, it was
+verified at two widths, and deleting the proof would only make the history unreadable.
+
+One discrepancy for #74 to know about: **spec §1.2 lists fifteen tokens and then adds `--focus`,
+while the committed `DESIGN.md` §2 says twenty-two.** `DESIGN.md` is the later document and the
+authoritative one — the six it adds on top of the spec's sixteen are the three `-text` variants for
+small text on light accents, `--on-accent`, and `--up` / `--down` for market direction (deliberately
+not `--agree` / `--diverge`, because a price falling is not a claim being contradicted).

@@ -1,5 +1,4 @@
 import { Navigate, Route, Routes } from "react-router-dom";
-import BureauPrototype from "./versions/BureauPrototype";
 import AppShell from "./components/AppShell";
 import Masthead from "./components/Masthead";
 import HealthStatus from "./pages/HealthStatus";
@@ -24,13 +23,12 @@ import Study from "./pages/Study";
 // The route table, and nothing else. Chrome comes from AppShell (authenticated
 // routes) and Masthead (sign-in/register/status), applied once here per
 // variant rather than by each page. `/` lands on the user's own dashboard
-// (RequireAuth bounces a signed-out visitor to /login); the Phase-3 design
-// prototype keeps its own route, with no chrome, rather than standing in as
-// the front door.
+// (RequireAuth bounces a signed-out visitor to /login). Every route in here is
+// one a reader reaches: the Bureau design prototype that used to sit beside
+// them at /design-prototype went with the system it demonstrated (#73).
 function App() {
   return (
     <Routes>
-      <Route path="/design-prototype" element={<BureauPrototype />} />
       <Route element={<Masthead />}>
         <Route path="/status" element={<HealthStatus />} />
         <Route path="/register" element={<Register />} />

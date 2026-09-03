@@ -89,8 +89,7 @@ npm run build          # type-check plus a production bundle in dist/
 
 `/` sends you to your own role dashboard, or to `/login` if you're signed out. `/status` shows the
 health check fetched live from the API, proxied through Vite's dev server (see
-`frontend/vite.config.ts`). The design prototype sits at `/design-prototype`, outside the app
-proper.
+`frontend/vite.config.ts`).
 
 ## The worker
 

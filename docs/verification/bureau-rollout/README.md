@@ -23,3 +23,8 @@ Not captured here, verified in the browser and reported on #37: no element past 
 on any route at 390px, keyboard order from the shell into page content with the 3px amber ring
 at every stop, motion suppressed under `prefers-reduced-motion` across the application, and
 `/design-prototype` rendering byte-identical to its pre-rollout baseline at 1050/560/390.
+
+This whole set is **superseded evidence**, kept because the rollout happened. The Bureau system was
+withdrawn on 2026-09-03 (ADR-0031) and #73 deleted its prototype, so `/design-prototype` no longer
+exists — nothing above is reproducible against the current app. `docs/verification/phase-3.6/`
+replaces it as the current evidence.
