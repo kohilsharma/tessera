@@ -22,8 +22,10 @@ Each pointer names the branch that reaches it. Read what your task hits.
 
 ## Repo state
 
-Phases 1 and 2 are complete; Phase 3 through #58; Phase 3.5 in flight, with #64–#70 in. Follow
-ADR-0022's exit criteria; don't jump a phase ahead.
+Phases 1 through 3.5 are complete: #72 verified Phase 3.5's ADR-0022 exit criterion against a live
+corpus, with the screenshots in `docs/verification/phase-3.5/`. **Phase 3.6** (epic #71, scope in
+`docs/phase-3.6-spec.md`) is the current phase, and the eval harness now runs after it rather than
+before. Don't jump a phase ahead.
 
 **backend/** — one seam per module. Extend the seam rather than adding a parallel path.
 

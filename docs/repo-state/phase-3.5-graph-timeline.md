@@ -263,3 +263,9 @@ predicts), and one live NPR run attempted 10 candidates and raised 10 to `api_co
 `errorSummary`. `EXTRACTION_LIVE_SMOKE=1` is that measurement, kept: an injected `fetchPage` passes
 whether or not the real one can reach a publisher, which is how a pass that had never fetched a page
 shipped green.
+
+**The phase is closed.** #72 verified ADR-0022's exit criterion against a live corpus, with the
+screenshots in `docs/verification/phase-3.5/`. The measurements, the one deviation from a clean deploy
+and the four findings it turned up are all in
+[`phase-3.6-product-overhaul.md`](phase-3.6-product-overhaul.md), where the ticket lives.
+
