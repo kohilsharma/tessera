@@ -50,13 +50,12 @@ after a completed analysis, and the timeline's inert volume bars, are both alrea
 spec (§6) and belong to their own tickets.
 
 Three findings came out of the pass, plus one the closing test run turned up. Per #72's fourth
-bullet none was fixed here; they are written out below, and **filing them on the tracker is still
-outstanding** — the session that found them was not permitted to publish, so until someone files
-them these four paragraphs are the only record.
+bullet none was fixed here; each is filed as its own issue, and each is written out below too,
+because the phase file is where the next session looks first.
 
-The one confirmed defect is a **layout collapse in the edge-citation drawer**: every headline inside
-it renders one character per line, `a.entry-title` measuring `0px × 1829px`. The cause is not the
-drawer. `.entry` is `grid-template-columns: minmax(0, 1fr) auto` (`styles.css:223`), a row body
+The one confirmed defect is a **layout collapse in the edge-citation drawer** (#103): every headline
+inside it renders one character per line, `a.entry-title` measuring `0px × 1829px`. The cause is not
+the drawer. `.entry` is `grid-template-columns: minmax(0, 1fr) auto` (`styles.css:223`), a row body
 renders inside that first track, and the drawer puts an `EntryList` — more `.entry` rows — into a
 281px container, where the `auto` register track takes its 243px max-content and the name track,
 floored at zero, gets nothing. So the bug is `.entry`'s missing minimum, and the next register
@@ -65,20 +64,20 @@ a desktop-only bug, since `@media (max-width: 560px)` collapses `.entry` to one 
 why there is no 560 capture of it. The other `body=` caller, the merge-review queue
 (`adminRegisters.tsx:384`), draws `ul.claim-sides` instead and measures clean at 564px.
 
-The second is a **demo-readiness gap**: a clean `npm run seed` produces an empty graph.
+The second is a **demo-readiness gap** (#104): a clean `npm run seed` produces an empty graph.
 `runEntityResolution()` succeeds and `loadGraphView()` then returns `entityCount: 0`, because the
 seed's 137 GKG annotations cannot clear a promotion floor of 5 distinct Articles. The empty state is
 honest and well written, but ADR-0022's "renders for seeded Stories, degrades to fixtures if time is
 short" is satisfied by neither branch for the graph: there are no fixtures, and the seed does not
 reach the floor.
 
-The third is **node quality**. Of the 60 drawn names, 48 are typed `location`, 9 `organization`, 3
-`person`; about eleven are demonyms sitting under `location` ("American", "British", "Iranian",
-"Canadians"…), and "Los Angeles" is typed `person`. The promotion floor's rationale is that a
-mistake is rarely made five times — which holds for typos and does not hold for a demonym, because
-GKG makes that call consistently.
+The third is **node quality** (#105). Of the 60 drawn names, 48 are typed `location`, 9
+`organization`, 3 `person`; about eleven are demonyms sitting under `location` ("American",
+"British", "Iranian", "Canadians"…), and "Los Angeles" is typed `person`. The promotion floor's
+rationale is that a mistake is rarely made five times — which holds for typos and does not hold for
+a demonym, because GKG makes that call consistently.
 
-The fourth is a **50/50 flake in the backend suite**, standing at HEAD and unrelated to this
+The fourth is a **50/50 flake in the backend suite** (#106), standing at HEAD and unrelated to this
 ticket's docs: `clustering.test.ts` → "seeds and names nothing … when the synthesis config cannot
 build a provider" fails on about half of runs (measured: fail, pass, fail on three consecutive runs
 of the single test). `medoidOf` scores each member by its summed similarity to the others, so on a
