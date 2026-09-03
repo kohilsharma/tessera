@@ -11,7 +11,10 @@ Each pointer names the branch that reaches it. Read what your task hits.
 |---|---|
 | `CONTEXT.md` | Always — the domain glossary. Use these exact terms; `docs/agents/domain.md` says why. |
 | `docs/adr/` — the filenames are the index, so `ls` it | Touching a decided area. **An ADR overrides the spec**, and a decided area is never re-litigated by accident. |
-| `docs/repo-state.md` | Extending a shipped module — the per-ticket narrative and the measurements behind it. |
+| `docs/Tessera Directions.html` | The design canvas export — the primary source `DESIGN.md` was written from. Mine it with `grep`; it is 9.8 MB and must never be read whole. |
+| `DESIGN.md` | **Any** frontend work — the token contract, the six role palettes, the four states, the component rules. |
+| `docs/phase-3.6-spec.md` | Working a Phase 3.6 ticket (epic #71) — the whole agreed scope, in build order. |
+| `docs/repo-state.md` — an index; read only the **phase file** you are touching | Extending a shipped module — the per-ticket narrative and the measurements behind it. The whole history is ~14k tokens; one phase is a fraction of that. |
 | `project-docs/Tessera_Master_Build_Specification_v3.md` | Building something unbuilt, at §-level detail. |
 | `project-docs/project-statement.md` | Checking a course requirement. |
 | `project-docs/Tessera_Initial_Report.md` | Writing submission prose. |
@@ -53,6 +56,26 @@ Against the ecosystem default: Postgres tables and recursive CTEs carry the grap
 graph database), BullMQ carries the queue (0005), embeddings are a hosted API at `vector(1024)`
 (0017, 0023), and the model ID always comes from env, against an OpenAI-compatible host with a Mock
 provider beside it (0003). Compose runs Postgres and Redis; the app runs natively (0015).
+
+**The course mandates the base; everything above it is open.** Express, PostgreSQL, TypeORM, React
+and JWT are fixed. Nothing else is forbidden, so reach for a component, chart, icon or graph
+library rather than hand-rolling one — hand-rolled CSS bars and an icon-free UI are what the
+frontend is being rebuilt away from. This is a course project, not a business: free tiers and
+non-commercial licences are fine, and no decision here optimises for commercial rights.
+
+**Frontend work runs through the `impeccable` skill.** Invoke it before touching a route,
+component or stylesheet. It is what keeps the interface from reading as AI slop, which is the
+failure the whole redesign exists to correct.
+
+## Finishing a ticket
+
+A ticket is not done when the code works. Before it closes:
+
+1. **Append its narrative to its phase's file under `docs/repo-state/`** — what shipped, the decisions inside it, and
+   any measurement taken. That file is how the *next* session, in a fresh window, learns what
+   already exists; a ticket that leaves nothing there is invisible an hour later.
+2. **Tick its box in the epic** so the phase's remaining work reads at a glance.
+3. **Write the ADR** if the ticket names one. The reasoning dies with the session otherwise.
 
 ## Core invariants (must survive refactors)
 

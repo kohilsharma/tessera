@@ -187,6 +187,44 @@ Terms are canonical: use these words in code, docs, and conversation.
   the cited-synthesis pipeline; a timeline is assembled from rows that already exist, costs
   nothing per view, and no model writes any part of it. (ADR-0020, ADR-0028)
 
+## Coverage, markets and study (Phase 3.6)
+
+- **Publisher Leaning** — a publisher's political placement on a left / centre / right axis,
+  taken from a **published third-party rating** (AllSides, CC BY-NC 4.0) and always displayed with
+  its source named. It is a *cited claim about a publisher*, never Tessera's own inference — which
+  is what lets the product show it at all. A publisher with no rating is stated as unrated, never
+  guessed.
+
+- **Coverage Spectrum** — how one Story's accepted reporting distributes across Leanings. Counted
+  over Articles, not Publishers, so five reports from one outlet do not read as five viewpoints.
+
+- **Blindspot** — a Coverage Spectrum with effectively nothing from one side. Named as a finding on
+  screen rather than left for the reader to infer from a bar's shape.
+
+- **Ticker** — the market symbol a canonical Entity resolves to, set only for organizations. It is
+  what joins reporting to markets: a Story shows a market panel when its resolved organizations
+  carry Tickers, and shows nothing when they do not.
+
+- **Market Read** — a generated paragraph describing what the reporting and the computed indicators
+  each show. It states no causal link between them and never advises: the same
+  `prohibited_investor_language` validation that governs analysis governs this. Contrast: an
+  *indicator* is arithmetic we compute; a Read is a model call about it.
+
+- **Watchlist** — an Investor-owned set of Tickers and sectors they follow. The one piece of
+  per-user state on the Investor side, and what makes their dashboard their own rather than a
+  global rollup.
+
+- **Flashcard** *(revised, Phase 3.6)* — a Student-owned Q/A card that owns **its own** question,
+  answer and citations into a frozen EvidenceSet. Born either from a search (the matching Articles
+  freeze into the set) or from a completed analysis. Scheduled by spaced repetition (SM-2).
+  Supersedes the earlier definition in which a card was an AnalysisClaim with a question in front
+  of it.
+
+- **Role Theme** — the visual identity a signed-in role wears: Student → Studio, Investor →
+  Terminal, Admin → Newsroom, signed-out → Newsroom. A property of *who you are*, not a
+  preference, and not user-overridable. Light/dark is the separate axis the reader does control.
+  `DESIGN.md` is the contract.
+
 ## Roles
 
 - **Student** — Consumer role focused on learning/context. Distinct permissions & dashboard

@@ -199,7 +199,7 @@ it paces itself to one request per publisher every two seconds.
 - `DESIGN.md` — the Bureau design system the UI is built in
 - `AGENTS.md` — the working agreement: module seams, invariants, how to verify a change
 - `docs/adr/` — 29 architecture decisions. Where an ADR and the spec disagree, the ADR wins
-- `docs/repo-state.md` — per-ticket history and the measurements behind the decisions
+- `docs/repo-state.md` — an index into `docs/repo-state/`, the per-ticket history split by phase
 - `project-docs/` — the build specification, the course statement, and the initial report
 
 ## Status

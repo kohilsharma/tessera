@@ -1,186 +1,303 @@
----
-name: Tessera
-description: Registered evidence for defensible news intelligence
-colors:
-  proof-blue: "#1458a6"
-  proof-magenta: "#c51d62"
-  registered-overlap: "#492e84"
-  lens-specific: "#315f35"
-  bureau-ink: "#171715"
-  stock-paper: "#f2f0e9"
-  bench-stock: "#dedbd2"
-  quiet-ink: "#55534e"
-  registration-rule: "#b8b5ac"
-  proof-blue-stock: "#e1e9f2"
-  proof-magenta-stock: "#f3e2e9"
-  registered-overlap-stock: "#e7e2ef"
-  lens-specific-stock: "#e3ebe1"
-  focus-amber: "#f0a800"
-typography:
-  display:
-    fontFamily: "Arial, Helvetica, sans-serif"
-    fontSize: "clamp(3rem, 5.7vw, 6rem)"
-    fontWeight: 800
-    lineHeight: 0.92
-    letterSpacing: "-0.04em"
-  headline:
-    fontFamily: "Arial, Helvetica, sans-serif"
-    fontSize: "clamp(1.55rem, 2.6vw, 2.7rem)"
-    fontWeight: 700
-    lineHeight: 1.05
-    letterSpacing: "-0.025em"
-  body:
-    fontFamily: "Arial, Helvetica, sans-serif"
-    fontSize: "1rem"
-    fontWeight: 400
-    lineHeight: 1.55
-    letterSpacing: "normal"
-  measurement:
-    fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace"
-    fontSize: "0.66rem"
-    fontWeight: 500
-    lineHeight: 1.2
-    letterSpacing: "normal"
-rounded:
-  sheet: "0"
-  compact-control: "999px"
-spacing:
-  registration-gap: "7px"
-  compact: "12px"
-  sheet-inset: "28px"
-  section: "58px"
-components:
-  button-primary:
-    backgroundColor: "{colors.stock-paper}"
-    textColor: "{colors.bureau-ink}"
-    rounded: "{rounded.sheet}"
-    padding: "11px 18px"
-    height: "47px"
-  filter-selected:
-    backgroundColor: "{colors.bureau-ink}"
-    textColor: "{colors.stock-paper}"
-    rounded: "{rounded.compact-control}"
-    padding: "8px 12px"
-  evidence-sheet-blue:
-    backgroundColor: "{colors.proof-blue-stock}"
-    textColor: "{colors.bureau-ink}"
-    rounded: "{rounded.sheet}"
-    padding: "28px"
-  evidence-sheet-magenta:
-    backgroundColor: "{colors.proof-magenta-stock}"
-    textColor: "{colors.bureau-ink}"
-    rounded: "{rounded.sheet}"
-    padding: "28px"
-  validation-stamp:
-    backgroundColor: "{colors.registered-overlap}"
-    textColor: "{colors.stock-paper}"
-    rounded: "{rounded.sheet}"
-    padding: "10px 12px"
----
-
 # Design System: Tessera
 
-## Overview
+Supersedes the "Evidence Registration Bureau" system (#28–#37), withdrawn 2026-09-03. That system
+was made almost entirely of prohibitions — no ambient depth, no decorative motion, no colour without
+meaning, no icons — and what shipped was Arial on beige with one keyframe in the whole application.
+**A design system made only of prohibitions produces nothing.** This one says what to do.
 
-**Creative North Star: "The Evidence Registration Bureau"**
+Origin: the direction study at `docs/design-brief.md`, realised as the design canvas exported to
+`docs/Tessera Directions.html`. All six palettes below are the designer's own, with every value
+re-measured for contrast here.
 
-Tessera behaves like an institutional proofing room: exact, source-conscious, and visibly constructed from registered layers. Security-print linework, folio marks, source inks, hard sheet offsets, and registration crosses make provenance structural rather than decorative. Dense work surfaces remain calm because every mark has a reading function.
+---
 
-The system is procedural, not editorially theatrical. Claims and source snapshots visibly align, separate, and lock together; interaction should make evidence relationships easier to defend rather than merely making the interface feel animated.
+## 1. North star
 
-**Key Characteristics:**
-- Archival authority without nostalgia or crime-lab theater.
-- Source layers align to prove consensus and remain offset to expose contradiction.
-- Flat, ruled surfaces replace floating dashboard cards.
-- Semantic stock washes distinguish claim and source roles without sacrificing reading contrast.
-- Motion is reserved for evidence registration, positional continuity, and certain completion feedback.
+**The product looks like who you are.**
 
-## Colors
+Tessera has three users with genuinely different jobs — a student learning, an investor deciding, an
+admin operating — and it wears a different face for each. Not a different app: the *same*
+components, the same layouts, the same words, re-tinted and re-typed by role. Signing in is a small
+piece of theatre where the product becomes yours.
 
-Stock Paper and Bureau Ink own the canvas. Proof Blue and Proof Magenta identify source layers; Registered Overlap identifies agreement and validated registration. Student Context green is isolated to educational framing. Low-chroma stock variants may own selected rows and Evidence sheets while full inks remain reserved for borders, active controls, and relation marks.
+Underneath that, one thing never changes: **provenance is structural.** Every claim carries its
+citation, every citation opens, and "says who?" is always one click away. Colour, weight and
+position exist to make that relationship legible — and, where it earns it, delightful.
 
-**The Registered Color Rule.** Color identifies a source role, claim type, selection, or validation state. It never decorates an otherwise complete component.
+## 2. The token contract
 
-**The Redundant Signal Rule.** Every colored relationship also carries a label, border style, position, or registration geometry. Color never bears meaning alone.
+Every theme declares **the same twenty-two custom properties** and differs only in their values. This is
+the whole mechanism: a component that reaches for `var(--agree)` is correct under all six palettes,
+so the themes cannot drift apart and nothing is duplicated per role.
 
-## Typography
+| Token | Role |
+|---|---|
+| `--paper` | Page ground |
+| `--paper2` | Raised surface: cards, headers, panels |
+| `--ink` | Primary text |
+| `--quiet` | Secondary text, metadata |
+| `--rule` | Hairlines, dividers |
+| `--rule2` | Stronger borders, disabled edges |
+| `--left` `--centre` `--right` | The political spectrum axis |
+| `--agree` `--diverge` `--imply` | The claim-type axis (consensus / contradiction / implication) |
+| `--wash-agree` `--wash-diverge` `--wash-imply` | Tinted grounds for those three |
+| `--agree-text` `--diverge-text` `--imply-text` | The same three, safe for **small text** |
+| `--on-accent` | Text sitting on a filled accent |
+| `--up` `--down` | Market direction — price rising / falling. Named for meaning: "up" is not "agree". |
+| `--focus` | Focus ring |
 
-Platform sans faces handle reading and display; compact platform monospace handles Evidence IDs, hashes, timestamps, folios, labels, and measurements. Native stacks keep local demonstrations deterministic and offline-safe. Display type is oversized and procedural, capped at six rem with tracking no tighter than negative four hundredths of an em.
+**Rules.**
+1. No component hard-codes a colour. If you need one that isn't here, the contract is wrong — extend
+   it in all six palettes or don't use it.
+2. Accent tokens are for **marks** — bars, dots, rules, fills. Small text on an accent uses the
+   `-text` variant.
+3. Colour never carries meaning alone. Every coloured relationship also has a label, an icon, a
+   shape or a position. Remove all colour and the hierarchy must still read.
 
-**The Measurement Rule.** Monospaced type is reserved for values whose alignment or fixed identity matters.
+## 3. The six palettes
 
-**The Reading Rule.** Claims and Evidence excerpts remain sans-serif with a maximum measure near 68 characters; metadata may become compact, but never replaces prose hierarchy.
+| Signed in as | Theme | Native mode |
+|---|---|---|
+| Student | Studio | light |
+| Investor | Terminal | dark |
+| Admin | Newsroom | light |
+| *nobody — login, register, `/status`* | Newsroom | light |
 
-## Layout
+The role sets `data-theme` on `<html>` and is **not** user-overridable. Light/dark is the separate
+axis the reader controls: it follows `prefers-color-scheme` by default, with a per-account override
+applied as `.dark` on the same element. "Native mode" above is only what that role most often ends
+up in, never a lock.
 
-The page is capped at 1600 pixels. Wide workspaces use an asymmetric two-column grid: analysis register at roughly two-thirds and a sticky Evidence bench at one-third, with a 360-pixel minimum bench. The dark Story mast leads into a four-cell EvidenceSet ledger, then the ruled claim register and adjacent source bench.
+Contrast ratios are measured against that palette's `--paper`. Text tokens meet WCAG AA (≥4.5:1);
+marks and the focus ring meet ≥3:1.
 
-At 1050 pixels and below, navigation gains a dedicated second row, the ledger becomes two-by-two, and the Evidence bench stacks after claims. The stacked bench repeats active-claim context and provides a jump-back link so citation inspection retains origin. At 560 pixels, filters wrap, source tabs become two columns, controls stack, and the display title resolves to 2.5rem. Sticky behavior disables on wide viewports shorter than 780 pixels.
+### Newsroom — Admin
 
-Spacing uses contrast rather than uniform repetition: compact identity groups at 7–12 pixels, sheet interiors near 28 pixels, and major workspace insets near 58 pixels. Active and inactive claim rows reserve the same gutters so selection never changes document geometry.
+Editorial, typographic, warm. Instrument Serif over Archivo.
 
-## Elevation & Depth
+```css
+[data-theme="newsroom"] {
+  --paper:#faf8f4; --paper2:#ffffff; --ink:#16140f; --quiet:#6d685e;
+  --rule:#e2ddd2;  --rule2:#c9c3b6;
+  --left:#2f5c9e;  --centre:#7a746a; --right:#a84a2f;
+  --agree:#2d6a4a; --diverge:#a84a2f; --imply:#5b4a9c;
+  --wash-agree:#eaf1ec; --wash-diverge:#f7ebe6; --wash-imply:#eeebf5;
+  --agree-text:#2d6a4a; --diverge-text:#a84a2f; --imply-text:#5b4a9c;
+  --up:#2d6a4a; --down:#a84a2f;
+  --on-accent:#ffffff; --focus:#c08400;
+}
+[data-theme="newsroom"].dark {
+  --paper:#141310; --paper2:#1c1a16; --ink:#f2efe6; --quiet:#a29b8d;
+  --rule:#2e2b24;  --rule2:#464036;
+  --left:#7aa5e0;  --centre:#a29b8d; --right:#e08c6d;
+  --agree:#6cc295; --diverge:#e08c6d; --imply:#a695e6;
+  --wash-agree:#18251d; --wash-diverge:#2a1d17; --wash-imply:#1f1b2e;
+  --agree-text:#6cc295; --diverge-text:#e08c6d; --imply-text:#a695e6;
+  --up:#6cc295; --down:#e08c6d;
+  --on-accent:#141310; --focus:#e0b34a;
+}
+```
+Light: ink 17.4, quiet 5.2, accents 4.4–6.8, focus 3.0. `--centre` as small text is `#777167`
+(`#7a746a` measures 4.4:1).
+Dark: ink 16.2, quiet 6.7, accents 6.7–8.7.
 
-Surfaces are flat at rest and separated by ink density, rules, stock color, and overlap. Hard offset shadows communicate physical registration only: an active source tab lifts by 5 by 6 pixels, an Evidence sheet by 9 by 10 pixels, and the save command or confirmation uses one compact colored offset. Ambient shadows and soft floating-card elevation are forbidden.
+### Terminal — Investor
 
-**The Structural Shadow Rule.** A shadow means a sheet or tab has moved into active physical hierarchy. No active state, no shadow.
+Dense, data-first, cool. IBM Plex Sans over Spline Sans Mono. Dark is its native mode.
 
-## Shapes
+```css
+[data-theme="terminal"].dark {
+  --paper:#0b0e11; --paper2:#12171c; --ink:#dde5ec; --quiet:#7c8b98;
+  --rule:#1e252d;  --rule2:#313c46;
+  --left:#4b8fe0;  --centre:#8a99a6; --right:#e8794a;
+  --agree:#2fc48d; --diverge:#ff6f4d; --imply:#b78cff;
+  --wash-agree:#0e2620; --wash-diverge:#2a1410; --wash-imply:#1b1630;
+  --agree-text:#2fc48d; --diverge-text:#ff6f4d; --imply-text:#b78cff;
+  --up:#2fc48d; --down:#ff6f4d;
+  --on-accent:#0b0e11; --focus:#e0b34a;
+}
+[data-theme="terminal"] {
+  --paper:#eef1f4; --paper2:#ffffff; --ink:#0e1418; --quiet:#5a6b78;
+  --rule:#d3dae0;  --rule2:#b3bec7;
+  --left:#1f5fb8;  --centre:#5a6b78; --right:#c2481f;
+  --agree:#0e7a55; --diverge:#c2481f; --imply:#5b3ec2;
+  --wash-agree:#e2f2ec; --wash-diverge:#fbe9e3; --wash-imply:#ece7fa;
+  --agree-text:#0e7a55; --diverge-text:#be461e; --imply-text:#5b3ec2;
+  --up:#0e7a55; --down:#c2481f;
+  --on-accent:#ffffff; --focus:#a86b00;
+}
+```
+Dark: ink 15.2, quiet 5.5, accents 5.8–8.7, focus 9.9.
+Light: ink 16.4, quiet 4.9, accents 4.4–6.4. `--right` / `--diverge` as small text is `#be461e`.
 
-Corners are square. Pills are reserved for compact filters; they never define content containers or command sheets. Containers derive shape from sheet edges, clipped registration reveals, ruled tabs, seals, and crosshair geometry. Dashed borders identify Evidence outside the active claim; solid borders identify registered source records.
+### Studio — Student
 
-## Components
+Bright, generous, rounded. Bricolage Grotesque over DM Sans.
 
-### Buttons
-- **Command buttons:** Square Stock Paper fields on dark surfaces with hard Proof Magenta offset; hover moves to Proof Blue and active press collapses the offset.
-- **Filters:** Compact pills with ruled neutral rest state and Bureau Ink selected state.
-- **Focus:** Three-pixel Focus Amber outline outside every interactive control.
-- **Disabled:** Neutral stock, Quiet Ink, no shadow, and no implied interactivity.
+```css
+[data-theme="studio"] {
+  --paper:#faf6f0; --paper2:#ffffff; --ink:#191823; --quiet:#6c6885;
+  --rule:#ebe4db;  --rule2:#d3cbc1;
+  --left:#3d6bf5;  --centre:#8b8698; --right:#e0533d;
+  --agree:#12a06c; --diverge:#e0533d; --imply:#6b4ef0;
+  --wash-agree:#e5f6ee; --wash-diverge:#fdeae6; --wash-imply:#eeeafe;
+  --agree-text:#0e8157; --diverge-text:#c24835; --imply-text:#6b4ef0;
+  --up:#0e8157; --down:#c24835;
+  --on-accent:#ffffff; --focus:#be8300;
+}
+[data-theme="studio"].dark {
+  --paper:#16151d; --paper2:#1f1d29; --ink:#f4f1ff; --quiet:#a09cba;
+  --rule:#2c2a3a;  --rule2:#413d55;
+  --left:#7d9cff;  --centre:#a09cba; --right:#ff8a72;
+  --agree:#4bd3a0; --diverge:#ff8a72; --imply:#a894ff;
+  --wash-agree:#16302a; --wash-diverge:#33201e; --wash-imply:#241f3d;
+  --agree-text:#4bd3a0; --diverge-text:#ff8a72; --imply-text:#a894ff;
+  --up:#4bd3a0; --down:#ff8a72;
+  --on-accent:#16151d; --focus:#e0b34a;
+}
+```
+Light: ink 16.3, quiet 4.9, marks 3.1–4.9, focus 3.0. Small text uses the `-text` variants;
+`--left` becomes `#3a66eb`, `--centre` `#736f7e`.
+Dark: ink 16.3, quiet 6.9, accents 6.9–9.6.
 
-### Navigation
-- **Desktop:** Sticky 62-pixel bar with centered links and a three-pixel active underline.
-- **Stacked:** At 1050 pixels, links remain visible in a ruled second row rather than disappearing behind an invented menu.
+**The dark grounds are deliberately different from each other** — Newsroom a warm charcoal
+(`#141310`), Studio a violet-cast near-black (`#16151d`), Terminal a cold blue-black (`#0b0e11`).
+A shared dark ground would erase role theming exactly when it is being demonstrated.
 
-### Claim Register
-- **Structure:** Stable ruled rows contain claim type, Claim ID, statement, and explicit supporting or contradicting Evidence controls.
-- **Selection:** Claim-type stock wash plus a registered Blue/Overlap/Magenta rail and crosshair; row geometry does not shift.
-- **Citation:** Active support uses Proof Blue; active opposition uses Proof Magenta. `aria-pressed` and text labels preserve non-color meaning.
+All values above are the designer's own, taken from `docs/Tessera Directions.html`. Two were
+corrected here: `--focus` failed WCAG 2.2's 3:1 in both light themes, and the `-text` variants were
+added because several light-theme accents are marks-only at their given lightness.
 
-### Registration Bench
-- **Source tabs:** Source hue identifies Article layer; solid or dashed border and status text identify registered versus outside-claim state. Active tab rises and fills with its source ink.
-- **Relation lock:** Claim ID and Evidence ID join with a registration cross and explicit support, contradiction, or outside-claim label.
-- **Evidence sheet:** Frozen Article snapshot uses source-stock paper, an 11-pixel source edge, one hard offset shadow, and exact snapshot metadata.
+## 4. Typography
 
-### Validation And Save
-- **Validation stamp:** Registered Overlap field confirms citation validation without resembling an editable control.
-- **Saved state:** Bureau Ink confirmation contains an EvidenceSet seal, frozen-set identity, and dismiss action. Its intensity remains proportional to a routine save.
+Three families per theme: a **display** face, a **UI** face, and a **mono** for measurements.
 
-### Motion
-- **Evidence morph:** On wide screens with motion allowed and View Transitions supported, a selected citation morphs into the Evidence sheet over 520 milliseconds. Unsupported browsers, narrow layouts, and reduced-motion users receive the complete static update and existing positional feedback.
-- **Registration:** Relation locks and sheets use bounded clip-path and transform arrivals. No loops, ambient drift, parallax, or decorative motion.
+| Theme | Display | UI | Mono |
+|---|---|---|---|
+| Newsroom | Instrument Serif | Archivo | IBM Plex Mono |
+| Terminal | IBM Plex Sans 700 | IBM Plex Sans | Spline Sans Mono |
+| Studio | Bricolage Grotesque 800 | DM Sans | DM Mono |
 
-## Do's and Don'ts
+All from Google Fonts, each with a real fallback stack.
 
-### Do:
-- **Do** make claim-to-evidence relationships visible before interaction and exact after selection.
-- **Do** preserve readable hierarchy when all color is removed.
-- **Do** use dense linework only where it communicates registration, source grouping, or document identity.
-- **Do** keep source order, active-claim context, keyboard focus, and reduced-motion behavior intact across breakpoints.
-- **Do** reserve progressive browser effects for evidence continuity and provide a complete static fallback.
+Scale — `--t-display` is a **theme** token because the three directions carry display type very
+differently; the rest are shared.
 
-### Don't:
-- **Don't** turn proof texture into cheerful poster decoration.
-- **Don't** use generic rounded dashboard cards, glass, ornamental glow, ambient shadows, or gradient text.
-- **Don't** spend Proof Blue, Proof Magenta, Registered Overlap, or Student Context green on decoration.
-- **Don't** imply source completeness, factual verdicts, outlet bias, or numerical certainty the product cannot support.
-- **Don't** hide primary navigation or evidence context merely to make a narrow layout fit.
+```
+--t-display  newsroom 3.6rem · terminal 1.9rem · studio 2.9rem
+--t-title    1.75rem     --t-heading 1.5rem
+--t-body     1rem        --t-small   0.875rem
+--t-meta     0.8125rem   --t-micro   0.6875rem
+```
 
-## Implementation
+**The measurement rule.** Mono is reserved for values whose alignment or fixed identity matters:
+evidence ids (`A1`), hashes, tickers, prices, indicator readouts, timestamps, run counts. Never for
+prose.
 
-Bureau is the committed and only visual world, and since the rollout (#28) it reaches the whole application. Its tokens live at `:root` in `frontend/src/styles.css`; the live pages consume them through four page archetypes — index, record, form, dashboard — plus the application shell (`frontend/src/components/AppShell.tsx`) that `frontend/src/App.tsx`, now the route table alone, wraps them in. The Phase-3 design study keeps its own route (`/design-prototype`): `frontend/src/versions/BureauPrototype.tsx` owns that surface's shared state — filter, lens, active claim, active Evidence, and save lifecycle — and renders `versions/bureau.tsx` inside the `.design-bureau` wrapper, which keeps a duplicate token block of its own so a root-level token edit cannot change how the frozen reference renders.
+**The reading rule.** Claims and excerpts stay in the UI face at a measure of ~68 characters.
+Metadata may compress; it never replaces prose hierarchy.
 
-Nine exploratory worlds (Terminal, Shoebox, Specimen, Abyss, Pit, Archive, Stockroom, Darkroom, Cloud Quarry) were built to test this surface's mechanism against alternative grammars and have been removed now that Bureau is chosen. Their record lives in git history; no runtime switcher remains.
+## 5. Space, shape, depth
 
-The relation of the active Evidence to the active Claim is rendered with non-color semantics: a registration lock pairing Claim ID and Evidence ID with an explicit "Support registered", "Contradiction registered", or "Outside active claim" label.
+Spacing scale, in px: `4 8 12 16 22 28 40 56 80`. Use contrast rather than uniform repetition —
+tight identity groups at 4–12, card interiors at 22–28, major page insets at 40–56.
 
-**Demo affordance.** `?fail=1` forces save to fail, keeping the `role="alert"` rejection state reachable for demonstration without shipping demo chrome into the interface.
+Radii are a theme token: Newsroom `2px`, Terminal `0–2px`, Studio `12–26px`. Studio is where
+roundness lives; the other two earn their character from rules and density.
+
+Depth is a theme token too. Newsroom and Terminal separate surfaces with **rules and ink density**.
+Studio uses **soft layered shadows** — and only Studio. Nothing floats for decoration in any theme.
+
+## 6. Layout and breakpoints
+
+The page caps at **1600px** and centres. Three widths, inherited from the previous system so the
+existing verification screenshots stay comparable:
+
+| Width | What changes |
+|---|---|
+| **> 1050px** | Full layout. Record pages run a two-column grid — content at roughly two-thirds, an evidence or role rail at one-third with a 360px minimum. The rail may stick. |
+| **≤ 1050px** | Navigation takes its own row. The rail stacks *after* the content it supports and repeats enough context to stay useful. Ledgers go two-by-two. |
+| **≤ 560px** | Filters wrap, controls stack, the display size drops to the next step on the scale, tables become stacked rows rather than scrolling sideways. |
+
+Sticky behaviour switches off on viewports shorter than 780px — a sticky rail on a short screen
+eats the content it was helping.
+
+**Rules.** No page scrolls horizontally at any width; wide content (tables, the graph, code) scrolls
+inside its own container. Hit targets are never below 44px. Navigation is never hidden merely to
+make a narrow layout fit — it moves, it does not disappear.
+
+## 7. Motion
+
+| Purpose | Duration | Easing |
+|---|---|---|
+| Micro (hover, focus, press) | 140ms | `ease` |
+| Enter / exit, list transitions | 320ms | `cubic-bezier(.16,1,.3,1)` |
+| Sign-in transition | ~700ms | `cubic-bezier(.16,1,.3,1)` |
+
+**Motion carries information or it doesn't ship.** An element that appears should say where it came
+from; a list that reorders should let you follow a row. No ambient drift, no parallax, no looping
+decoration.
+
+The one piece of theatre is **the sign-in transition**: the page paints in signed-out Newsroom, then
+a single sweep retints the tokens — rules, then washes, then accents — with the wordmark the only
+fixed element, resolving onto a dashboard whose data has been loading underneath. The token change
+*is* the animation; there is no spinner, no logo bounce, no particles. Once per login, never on
+navigation.
+
+`prefers-reduced-motion: reduce` collapses every duration above to an instant state change. That
+includes the sign-in transition.
+
+## 8. Components
+
+Icons are **Phosphor** throughout — regular as the default, bold for emphasis, duotone where a
+surface wants warmth (Studio uses duotone most). Never emoji.
+
+The four page archetypes survive from the previous system and keep their names: **Index** (a
+filtered, paginated list), **Record** (one thing and its evidence), **Form** (create and edit),
+**Dashboard** (registers of one role's work).
+
+**The four states are mandatory on every route**, and three of them must look different from each
+other:
+- **Loading** — skeletons in `--rule2`, never a spinner alone.
+- **Empty** — says what *would* be here and how to make it happen. This is where first-time users
+  land; it is not an apology.
+- **Error** — says the request failed and offers a retry.
+- **Refused** — says you are not allowed, in `--diverge`, and never pretends the thing is empty.
+
+Recurring components and the tokens they own:
+
+- **Coverage spectrum** — a segmented bar in `--left --centre --right`, each segment labelled and
+  counted. A **blindspot** (coverage overwhelmingly one-sided) is called out in words, not only by
+  the shape of the bar.
+- **Claim** — grouped by type, tinted by `--wash-*`, labelled in `--*-text`. A contradiction renders
+  as **two opposed sides**, never a flat list.
+- **Citation chip** — mono, `A1 · Publisher`, always openable. If a citation cannot open, that is a
+  bug, not a style.
+- **Register row** — a name, a measure bar, and its metadata; the shared vocabulary behind every
+  dashboard and admin list.
+- **Role panel** — the block inside a Record that only one role sees. Marked as such, so a reader
+  knows it is theirs.
+
+**Every long list is bounded**: it scrolls inside a container, paginates, or virtualises, and states
+what it is showing ("5 of 31"). No page grows without limit; no page scrolls horizontally.
+
+## 9. Libraries
+
+See ADR-0030. Behaviour comes from **Base UI**, charts from **Recharts**, the graph from
+**Cytoscape**, motion from **Motion**, icons from **Phosphor**, tables from **TanStack Table**.
+Styling is **CSS Modules** over the token contract — no utility-class framework.
+
+Nothing is hand-rolled that a library does properly. The previous system's hand-drawn CSS bars and
+icon-free surfaces are the specific failure this replaces.
+
+## 10. Don'ts
+
+- Don't ship the generic AI-SaaS look: purple gradient hero, glassmorphism, uniformly rounded
+  floating cards, an emoji in every heading.
+- Don't use Inter, Roboto, Arial or Fraunces.
+- Don't add a number, badge or stat tile because a layout looked empty.
+- Don't let colour carry meaning alone.
+- Don't animate something that isn't telling the reader anything.
+- Don't imply source completeness or factual verdicts the product can't support. A publisher's
+  leaning is shown **only** as a sourced third-party rating with its attribution — a cited claim
+  about a publisher, never our inference.
