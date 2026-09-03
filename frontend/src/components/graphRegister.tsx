@@ -175,7 +175,7 @@ function stylesheet(): StylesheetJson {
         height: "mapData(share, 0, 1, 16, 44)",
         "border-width": 1,
         "border-color": token("--bureau-ink"),
-        "font-family": "Arial, Helvetica, sans-serif",
+        "font-family": token("--font-ui"),
         "font-size": 10,
         "font-weight": 700,
         color: token("--bureau-ink"),

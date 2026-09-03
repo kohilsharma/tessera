@@ -1,14 +1,19 @@
 :root {
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-ui);
   color: #171715;
   background: #f2f0e9;
   font-synthesis: none;
 }
 
-/* The palette every live page consumes. Named from the withdrawn Bureau system
-   (#73), and replaced wholesale by DESIGN.md §2's token contract and the six
-   role palettes in #74 — until then these are the only colours in the app, and
-   nothing here hard-codes one. */
+/* The colours every live page still consumes, named from the withdrawn Bureau
+   system (#73). The token contract and the six role palettes now exist beside
+   them in tokens.css (#74); migrating these thirteen names onto it is #76's
+   primitives pass, which rewrites the surfaces that read them. Until then the
+   only contract token wired here is --focus, whose value #74 corrected against
+   DESIGN.md §3's basis, --paper: 3.03:1 there, where Bureau's #f0a800 was 1.79.
+   On the ground actually painted below — Bureau's #f2f0e9 — it measures 2.82, so
+   the ring clears WCAG 2.2's 3:1 only once #76 paints --paper. Better, not yet
+   passing, and the two move together. */
 :root {
   --proof-blue: #1458a6;
   --proof-magenta: #c51d62;
@@ -23,7 +28,6 @@
   --proof-magenta-stock: #f3e2e9;
   --registered-overlap-stock: #e7e2ef;
   --student-context-stock: #e3ebe1;
-  --focus-amber: #f0a800;
 }
 
 * { box-sizing: border-box; }
@@ -31,11 +35,11 @@ html { scroll-behavior: smooth; overflow-x: clip; }
 body { margin: 0; min-width: 320px; min-height: 100vh; overflow-x: clip; }
 button, a { font: inherit; }
 button { color: inherit; }
-/* DESIGN.md: a three-pixel Focus Amber outline outside *every* interactive
-   control — fields included, which the browser's own ring would otherwise
-   handle in its own voice (and did before #34). */
+/* A three-pixel ring outside *every* interactive control — fields included,
+   which the browser's own ring would otherwise handle in its own voice (and did
+   before #34). The colour is the theme's, so it re-tints with the role. */
 button:focus-visible, a:focus-visible, summary:focus-visible,
-input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid var(--focus-amber); outline-offset: 3px; }
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
 
 /* Global, and it stays global: DESIGN.md §7 collapses every duration in the app
    to an instant state change here, the sign-in transition included. Must sit
@@ -67,7 +71,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .site-nav a[aria-current="page"] { color: var(--bureau-ink); box-shadow: inset 0 -3px var(--bureau-ink); }
 
 .identity-menu { justify-self: end; position: relative; }
-.identity-menu summary { list-style: none; border: 1px solid var(--registration-rule); background: none; font: 500 .78rem ui-monospace, SFMono-Regular, Consolas, monospace; cursor: pointer; padding: 7px 12px; color: var(--bureau-ink); transition: border-color 140ms ease; }
+.identity-menu summary { list-style: none; border: 1px solid var(--registration-rule); background: none; font: 500 .78rem var(--font-mono); cursor: pointer; padding: 7px 12px; color: var(--bureau-ink); transition: border-color 140ms ease; }
 .identity-menu summary::-webkit-details-marker { display: none; }
 .identity-menu summary:hover, .identity-menu[open] summary { border-color: var(--bureau-ink); }
 .identity-menu .role-tag { border-left: 1px solid var(--registration-rule); margin-left: 8px; padding-left: 8px; color: var(--quiet-ink); }
@@ -150,16 +154,16 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    ============================================================ */
 /* Compact pills, per the design record's one licensed use of a radius: ruled
    neutral at rest, Bureau Ink when applied. */
-.filter-field { display: inline-flex; align-items: center; gap: 9px; margin: 0 7px 9px 0; padding: 6px 14px; border: 1px solid var(--registration-rule); border-radius: 999px; background: var(--stock-paper); color: var(--quiet-ink); font: 500 .68rem ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease; }
+.filter-field { display: inline-flex; align-items: center; gap: 9px; margin: 0 7px 9px 0; padding: 6px 14px; border: 1px solid var(--registration-rule); border-radius: 999px; background: var(--stock-paper); color: var(--quiet-ink); font: 500 .68rem var(--font-mono); text-transform: uppercase; letter-spacing: .04em; transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease; }
 .filter-field:hover { border-color: var(--bureau-ink); }
-.filter-field :is(select, input) { min-width: 0; max-width: 100%; border: 0; background: none; padding: 2px 0; color: inherit; font: 400 .84rem/1.3 Arial, Helvetica, sans-serif; text-transform: none; letter-spacing: normal; }
+.filter-field :is(select, input) { min-width: 0; max-width: 100%; border: 0; background: none; padding: 2px 0; color: inherit; font: 400 .84rem/1.3 var(--font-ui); text-transform: none; letter-spacing: normal; }
 .filter-field:not(.filter-field--applied) :is(select, input) { color: var(--bureau-ink); }
 /* The dropped-open option list is the browser's own surface, not the pill's, so
    it states its colours rather than inheriting paper ink onto a paper popup. */
 .filter-field option { color: var(--bureau-ink); background: var(--stock-paper); }
 /* The pill supplies the boundary, so the control inside it has no border of
    its own — which makes its own focus ring non-negotiable. */
-.filter-field :is(select, input):focus-visible { outline: 3px solid var(--focus-amber); outline-offset: 3px; }
+.filter-field :is(select, input):focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
 
 /* Applied filters read as registered: the pill fills with ink and its value
    goes bold. Fill and weight, not colour alone, carry the distinction — it
@@ -169,7 +173,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .filter-field--applied :is(select, input) { font-weight: 700; }
 
 .pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 22px 0 0; padding-top: 15px; border-top: 1px solid var(--registration-rule); }
-.pagination p { margin: 0 auto 0 0; color: var(--quiet-ink); font: 500 .68rem ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.pagination p { margin: 0 auto 0 0; color: var(--quiet-ink); font: 500 .68rem var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
 
 /* One button treatment for every action the states, controls, and records offer
    that is not the page's one command (.index-action / .record-command): ruled
@@ -192,8 +196,11 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    ============================================================ */
 /* The headline scale a page-level title takes outside the record mast's display —
    an index's, a form's (#35), a dashboard's (#36), and a stated page's (#37) are
-   the same title in four archetypes. */
-.index h1, .form-page h1, .dashboard h1, .stated-page h1 { margin: 0; font-size: clamp(1.75rem, 3vw, 2.7rem); font-weight: 700; line-height: 1.05; letter-spacing: -.025em; text-wrap: balance; }
+   the same title in four archetypes. The face and its weight are the theme's
+   (#74) — 400 for a serif that carries no bold, 700 and 800 for the two that do;
+   the size stays Bureau's fluid clamp until #76 makes the per-surface type pass,
+   because DESIGN.md §4 gives --t-display one value and no responsive story. */
+.index h1, .form-page h1, .dashboard h1, .stated-page h1 { margin: 0; font-family: var(--font-display); font-size: clamp(1.75rem, 3vw, 2.7rem); font-weight: var(--w-display); line-height: 1.05; letter-spacing: -.025em; text-wrap: balance; }
 
 /* The title and the index's one action share a baseline band, and the band owns
    the space below it — the title and the action can't drift apart by editing one
@@ -239,7 +246,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .entry-register > div { padding: 0 17px; border-left: 1px solid var(--registration-rule); }
 .entry-register > div:first-child { border-left: 0; }
 .entry-register > div:last-child { padding-right: 0; }
-.entry-register dt { margin: 0 0 5px; color: var(--quiet-ink); font: 500 .66rem/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.entry-register dt { margin: 0 0 5px; color: var(--quiet-ink); font: 500 .66rem/1.2 var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
 /* A value wraps inside its cell rather than setting the cell's width from its own
    length: an unbounded cell (a search result's Story title, a Publisher's domain)
    takes the row off the entry's name, and two rows whose longest value differs
@@ -332,11 +339,13 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    the exit names its destination, and a long name right-aligned would run
    under the mast's ink band. Capped and wrapping for the same reason. */
 .record-mast-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; margin-bottom: 24px; }
-.record-folio { margin: 0; color: var(--mast-quiet); font: 500 .66rem ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .08em; }
+.record-folio { margin: 0; color: var(--mast-quiet); font: 500 .66rem var(--font-mono); text-transform: uppercase; letter-spacing: .08em; }
 .record-return { max-width: 46ch; color: var(--mast-quiet); font-size: .8rem; line-height: 1.45; text-underline-offset: 3px; }
 .record-return:hover, .record-return:focus-visible { color: var(--stock-paper); }
 
-.record-mast h1 { margin: 0; font-size: clamp(1.95rem, 4.5vw, 3.9rem); font-weight: 800; line-height: .96; letter-spacing: -.035em; max-width: 22ch; text-wrap: balance; overflow-wrap: anywhere; }
+/* The one title a Record wears at display size. Same #74 split as the index's:
+   the theme owns the face and the weight, #76 owns the size. */
+.record-mast h1 { margin: 0; font-family: var(--font-display); font-size: clamp(1.95rem, 4.5vw, 3.9rem); font-weight: var(--w-display); line-height: .96; letter-spacing: -.035em; max-width: 22ch; text-wrap: balance; overflow-wrap: anywhere; }
 .record-dek { margin: 26px 0 0; max-width: 60ch; color: var(--mast-quiet); font-size: 1.05rem; line-height: 1.55; }
 
 /* The ledger spans the sheet rather than sitting inside its inset. Its rules are
@@ -349,7 +358,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    gap did, visible on Article detail at 560px before #34. */
 .record-ledger { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 185px), 1fr)); gap: 1px; margin: 0; background: var(--mast-stock); border-top: 1px solid var(--mast-rule); }
 .record-ledger > div { background: var(--mast-stock); box-shadow: -1px 0 0 var(--mast-rule), 0 -1px 0 var(--mast-rule); padding: 15px 4vw 16px; }
-.record-ledger dt { margin: 0 0 6px; color: var(--mast-quiet); font: 500 .66rem/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.record-ledger dt { margin: 0 0 6px; color: var(--mast-quiet); font: 500 .66rem/1.2 var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
 .record-ledger dd { margin: 0; font-size: .82rem; font-weight: 650; overflow-wrap: anywhere; }
 
 /* The body: sections of substance under the identity, each opening on a rule so
@@ -379,7 +388,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .timeline-volume > i { flex: 1 1 0; min-width: 2px; height: calc(var(--share) * 100%); background: var(--proof-blue); }
 /* The axis' two ends, in the measurement face: a row of bars states a shape, and a
    shape with no span stated under it is a picture of nothing. */
-.timeline-axis { display: flex; justify-content: space-between; gap: 12px; margin: 9px 0 0; color: var(--quiet-ink); font: 500 .66rem ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.timeline-axis { display: flex; justify-content: space-between; gap: 12px; margin: 9px 0 0; color: var(--quiet-ink); font: 500 .66rem var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
 
 /* #65's lanes: one register per Story under the search timeline's shared axis. A lane is
    a register on a surface, so it takes the heading scale and the head band a dashboard
@@ -397,7 +406,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    measurement face, because theirs hold identities rather than sentences. */
 .record-note { margin: 22px 0 0; }
 .record-note > div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 4px 24px; padding: 13px 2px; border-bottom: 1px solid var(--registration-rule); }
-.record-note dt { color: var(--quiet-ink); font: 500 .66rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.record-note dt { color: var(--quiet-ink); font: 500 .66rem/1.5 var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
 .record-note dd { margin: 0; max-width: 68ch; font-size: .9rem; line-height: 1.6; }
 .record-note a { color: var(--bureau-ink); font-weight: 700; text-underline-offset: 3px; overflow-wrap: anywhere; }
 
@@ -409,7 +418,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .claim-list > li + li { margin-top: 15px; padding-top: 15px; border-top: 1px dashed var(--registration-rule); }
 .claim-list p { margin: 0; }
 .claim-list .claim-cites { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 9px 0 0; }
-.claim-cites a { font: 500 .68rem ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.claim-cites a { font: 500 .68rem var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
 
 /* The Investor reading of the same register (#56). Two additions: what an agreement is
    worth counted in newsrooms, and the sides of a disagreement as a ruled pair. The
@@ -433,7 +442,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 /* The headline is the reporting, so it stays in the text face; only the evidence id
    it resolves through is set as provenance. */
 .claim-sides .side-cite { margin: 4px 0 0; font-size: .84rem; line-height: 1.5; }
-.claim-sides .side-cite span { font: 500 .68rem ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .04em; }
+.claim-sides .side-cite span { font: 500 .68rem var(--font-mono); letter-spacing: .04em; }
 
 /* ---- The owned registration (#34) ----------------------------------------
    A Brief is the reader's own artefact; a Story and an Article are the corpus'.
@@ -468,7 +477,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .record-plate img, .form-plate img { display: block; width: 100%; height: 100%; object-fit: cover; }
 /* The control names itself in the measurement face, like a ledger term, and the
    native file input stays native (#28: no custom widgets). */
-.record-cover-control { display: block; margin-top: 14px; color: var(--quiet-ink); font: 500 .66rem/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.record-cover-control { display: block; margin-top: 14px; color: var(--quiet-ink); font: 500 .66rem/1.4 var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
 .record-cover-control input { display: block; max-width: 100%; margin-top: 8px; font-size: .76rem; }
 /* In a 260px column the shared state blocks would spend most of it on padding. */
 .record-cover :is(.state-pending, .state-error) { margin: 14px 0 0; padding: 13px 14px; font-size: .84rem; }
@@ -481,7 +490,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    only its measure is this control's own, because it sits in a row with its
    command rather than in a panel. */
 .record-attach { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 16px; margin: 22px 0 0; }
-.record-attach label { display: flex; flex-direction: column; gap: 7px; color: var(--quiet-ink); font: 500 .66rem/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.record-attach label { display: flex; flex-direction: column; gap: 7px; color: var(--quiet-ink); font: 500 .66rem/1.2 var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
 .record-attach input { width: min(38ch, 100%); }
 
 @media (max-width: 560px) {
@@ -512,7 +521,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    before it asks. The auth forms have nothing behind them and close with their
    one link instead (.form-aside). */
 .form-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; margin-bottom: 14px; }
-.form-folio { margin: 0; color: var(--quiet-ink); font: 500 .66rem ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .08em; }
+.form-folio { margin: 0; color: var(--quiet-ink); font: 500 .66rem var(--font-mono); text-transform: uppercase; letter-spacing: .08em; }
 .form-return { color: var(--quiet-ink); font-size: .8rem; line-height: 1.45; text-underline-offset: 3px; }
 .form-return:hover, .form-return:focus-visible { color: var(--bureau-ink); }
 /* The index's headline scale, not the record mast's display: a form is a task,
@@ -530,12 +539,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    would read as a table of something rather than one sheet to fill in. */
 .form-field { margin-top: 24px; }
 .form-field:first-child { margin-top: 0; }
-.form-field > label { display: block; margin-bottom: 8px; color: var(--quiet-ink); font: 500 .66rem/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.form-field > label { display: block; margin-bottom: 8px; color: var(--quiet-ink); font: 500 .66rem/1.2 var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
 
 /* One field treatment, shared with the record page's attach control (#34) so the
    app has a single input: paper stock inside an ink rule, reading face, native
    control. */
-.form-field :is(input, select, textarea), .record-attach input { border: 1px solid var(--bureau-ink); background: var(--stock-paper); padding: 10px 12px; color: var(--bureau-ink); font: 400 .92rem Arial, Helvetica, sans-serif; }
+.form-field :is(input, select, textarea), .record-attach input { border: 1px solid var(--bureau-ink); background: var(--stock-paper); padding: 10px 12px; color: var(--bureau-ink); font: 400 .92rem var(--font-ui); }
 .form-field :is(input, select, textarea):disabled, .record-attach input:disabled { border-color: var(--registration-rule); background: var(--bench-stock); color: var(--quiet-ink); }
 /* Fields take the sheet's measure rather than each guessing its own: a form of
    four boxes at four widths reads as an accident, and the panel is already
@@ -573,7 +582,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 /* Which image the plate is showing, in the measurement face like a ledger term —
    the image itself is decorative, so this is what states it in words. The file's
    own name is not a label and keeps its own case. */
-.form-plate-note { margin: 9px 0 0; color: var(--quiet-ink); font: 500 .66rem/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; overflow-wrap: anywhere; }
+.form-plate-note { margin: 9px 0 0; color: var(--quiet-ink); font: 500 .66rem/1.4 var(--font-mono); text-transform: uppercase; letter-spacing: .04em; overflow-wrap: anywhere; }
 .form-plate-file { text-transform: none; }
 
 /* The panel's own refusal — the API's, not a field's — in the shared error
@@ -626,7 +635,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 /* The surface opens on its own edge, at a weight that reads as a registered edge
    rather than one more hairline rule. */
 .dash-head { border-top: 5px solid var(--role-ink); padding-top: 18px; }
-.dash-folio { margin: 0 0 11px; color: var(--quiet-ink); font: 500 .66rem ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .08em; }
+.dash-folio { margin: 0 0 11px; color: var(--quiet-ink); font: 500 .66rem var(--font-mono); text-transform: uppercase; letter-spacing: .08em; }
 .dash-dek { margin: 15px 0 0; max-width: 60ch; color: var(--quiet-ink); font-size: 1.02rem; line-height: 1.55; }
 
 /* A register: its heading and its own folio on one rule — the rule a record's
@@ -635,7 +644,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .dash-register { margin-top: 42px; }
 .dash-register-head, .timeline-lane-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 20px; padding-bottom: 13px; border-bottom: 1px solid var(--bureau-ink); }
 .dash-register h2, .timeline-lane h2 { margin: 0; }
-.dash-register-folio, .timeline-lane-folio { margin: 0; color: var(--quiet-ink); font: 500 .66rem ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.dash-register-folio, .timeline-lane-folio { margin: 0; color: var(--quiet-ink); font: 500 .66rem var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
 /* Rows open on the heading's rule rather than ruling again 22px under it — the
    record archetype's own choice for the same pair. An empty state keeps its
    margin: it is an unregistered sheet on the ground, not a row in the register. */
@@ -650,7 +659,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 /* A row's address line — a connector's endpoint. The measurement face, because
    an endpoint is a value of fixed identity, and wrapping anywhere because a URL
    is the one value here that can outrun its column. */
-.dash-entry-note { margin: 7px 0 0; color: var(--quiet-ink); font: 500 .74rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
+.dash-entry-note { margin: 7px 0 0; color: var(--quiet-ink); font: 500 .74rem/1.45 var(--font-mono); overflow-wrap: anywhere; }
 /* The measure: a rule as long as the value stated beside it, on the bench, in
    the surface's ink. It restates the count and says nothing the count does not —
    DESIGN.md's Redundant Signal Rule, and no claim of certainty the data can't
@@ -663,7 +672,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    source layer, so it spends no ink. */
 .dash-counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 148px), 1fr)); gap: 12px; margin: 22px 0 0; }
 .dash-counts > div { border: 1px solid var(--registration-rule); background: var(--bench-stock); padding: 15px 17px 17px; }
-.dash-counts dt { margin: 0 0 9px; color: var(--quiet-ink); font: 500 .66rem/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.dash-counts dt { margin: 0 0 9px; color: var(--quiet-ink); font: 500 .66rem/1.2 var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
 .dash-counts dd { margin: 0; font-size: clamp(1.7rem, 3vw, 2.2rem); font-weight: 800; line-height: 1; letter-spacing: -.03em; }
 
 /* The way off the surface: ruled destinations under everything the dashboard
@@ -695,7 +704,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    the prose measure because the rights note it was built for is sentences; there
    is no sentence on either of these pages. */
 .stated-page .record-note { margin-top: 26px; }
-.stated-page .record-note dd { max-width: none; font: 500 .82rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.stated-page .record-note dd { max-width: none; font: 500 .82rem/1.5 var(--font-mono); }
 
 /* ============================================================
    STUDY — one due Flashcard at a time (#58). A card is a sheet on
@@ -703,11 +712,11 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    the cited answer it reveals, and the four SM-2 outcomes.
    ============================================================ */
 .study-card { margin-top: 30px; border: 1px solid var(--bureau-ink); background: var(--stock-paper); padding: clamp(24px, 5vw, 44px); box-shadow: 7px 7px 0 var(--bench-stock); }
-.study-folio { display: flex; justify-content: space-between; gap: 12px 24px; margin: 0 0 28px; padding-bottom: 12px; border-bottom: 1px solid var(--registration-rule); color: var(--quiet-ink); font: 500 .66rem/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .06em; }
+.study-folio { display: flex; justify-content: space-between; gap: 12px 24px; margin: 0 0 28px; padding-bottom: 12px; border-bottom: 1px solid var(--registration-rule); color: var(--quiet-ink); font: 500 .66rem/1.4 var(--font-mono); text-transform: uppercase; letter-spacing: .06em; }
 .study-question { margin: 0; max-width: 28ch; font-size: clamp(1.5rem, 4vw, 2.5rem); font-weight: 750; line-height: 1.12; letter-spacing: -.025em; text-wrap: balance; }
 .study-answer { margin: 30px 0 0; padding: 22px 0 0; border-top: 3px solid var(--proof-blue); font-size: 1.05rem; line-height: 1.65; }
 .study-card .claim-cites { display: flex; flex-wrap: wrap; gap: 7px 16px; margin: 18px 0 0; }
-.study-card .claim-cites a { color: var(--bureau-ink); font: 500 .68rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; text-underline-offset: 3px; }
+.study-card .claim-cites a { color: var(--bureau-ink); font: 500 .68rem/1.5 var(--font-mono); text-transform: uppercase; letter-spacing: .04em; text-underline-offset: 3px; }
 /* Where the card came from is a sentence naming a Story, so it reads as prose here
    too — the ids above it are the provenance. */
 .study-card .claim-note { margin-top: 14px; }
@@ -731,14 +740,14 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    the statement reads as the page's own footing and not as one more filter band. */
 .graph-ledger { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 208px), 1fr)); gap: 12px; margin: 24px 0 0; border-top: 3px solid var(--bureau-ink); padding-top: 18px; }
 .graph-ledger > div { border: 1px solid var(--registration-rule); background: var(--bench-stock); padding: 13px 15px 15px; }
-.graph-ledger dt { margin: 0 0 7px; color: var(--quiet-ink); font: 500 .66rem/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
-.graph-ledger dd { margin: 0; font: 700 .82rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.graph-ledger dt { margin: 0 0 7px; color: var(--quiet-ink); font: 500 .66rem/1.2 var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
+.graph-ledger dd { margin: 0; font: 700 .82rem/1.5 var(--font-mono); }
 
 /* The legend, carrying kind three ways at once so it survives greyscale and colour
    blindness (DESIGN.md's Redundant Signal Rule): the ink, the shape the canvas draws
    that kind as, and the word. Same tokens the canvas reads at draw time
    (components/graphRegister.tsx), so the key and the picture cannot disagree. */
-.graph-key { display: flex; flex-wrap: wrap; gap: 9px 22px; margin: 22px 0 0; padding: 0; list-style: none; color: var(--quiet-ink); font: 500 .68rem/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.graph-key { display: flex; flex-wrap: wrap; gap: 9px 22px; margin: 22px 0 0; padding: 0; list-style: none; color: var(--quiet-ink); font: 500 .68rem/1.4 var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
 .graph-key li { display: flex; align-items: center; gap: 9px; }
 .graph-key-mark { flex: none; width: 12px; height: 12px; border: 1px solid var(--bureau-ink); }
 .graph-key-mark--person { border-radius: 50%; background: var(--proof-blue); }
@@ -757,5 +766,5 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    it rests on. The rows inside are the corpus's own entry rows, so a citation here reads and
    links exactly as it does in a Story's coverage. */
 .graph-evidence { margin: 15px 0 4px; border-left: 3px solid var(--bureau-ink); padding-left: 15px; }
-.graph-evidence-note { margin: 0; color: var(--quiet-ink); font: 400 .82rem/1.5 Arial, Helvetica, sans-serif; }
+.graph-evidence-note { margin: 0; color: var(--quiet-ink); font: 400 .82rem/1.5 var(--font-ui); }
 .graph-evidence .entry-list { margin-top: 13px; }

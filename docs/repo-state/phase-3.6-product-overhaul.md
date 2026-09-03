@@ -134,3 +134,118 @@ while the committed `DESIGN.md` §2 says twenty-two.** `DESIGN.md` is the later 
 authoritative one — the six it adds on top of the spec's sixteen are the three `-text` variants for
 small text on light accents, `--on-accent`, and `--up` / `--down` for market direction (deliberately
 not `--agree` / `--diverge`, because a price falling is not a claim being contradicted).
+
+**#74 — the token contract and the six role palettes.** The contract lands as
+`frontend/src/tokens.css`, 147 lines, imported before `styles.css` in `main.tsx`. Six palettes —
+Newsroom, Terminal and Studio, each light and dark — every one declaring the same twenty-two colour
+names, which is the whole mechanism: a component reaching for `var(--agree)` is correct under all
+six, and the palettes cannot drift apart because a missing or extra name fails the build. The
+discrepancy above was resolved in `DESIGN.md`'s favour, as the ticket directs. Values were copied
+from §3 rather than re-derived, and the file says so.
+
+The one structural decision: the non-colour tokens a theme owns — `--font-display` / `--font-ui` /
+`--font-mono`, `--t-display`, `--w-display`, `--radius`, `--radius-lg`, `--shadow` — are declared on
+the *light* selector only. `[data-theme="studio"]` and `[data-theme="studio"].dark` match the same
+`<html>` element, so dark inherits them; type and shape are theme-level facts, not mode-level ones,
+and writing them three times instead of six removes the only place the two modes of a theme could
+disagree about a typeface. The single exception is Studio's dark `--shadow`, which is genuinely
+mode-dependent: the light one is tinted from Studio's own ink at .05/.10/.12 alpha, and a shadow
+tinted from a light ink is invisible on a dark ground, so dark re-declares it in black at
+.5/.55/.6.
+
+Contrast is re-verified, which was the ticket's actual demand. `src/tokens.test.ts` parses
+`tokens.css` itself — not a transcribed table — and recomputes WCAG relative luminance for every
+pairing against that palette's own `--paper`. Text tokens land 4.54–17.35:1 and marks 3.03–9.88:1
+across all six, so every palette clears 4.5 for text and 3.0 for marks as `DESIGN.md` §2 states.
+The two corrected focus rings sit at exactly **3.03:1** in Newsroom and Studio light: that is #73's
+correction made measurable, and the margin is three hundredths, so any later darkening of a light
+paper or lightening of `--focus` fails the suite rather than shipping. Tightest text is Terminal
+light's `--diverge-text` and Studio light's `--agree-text`, both 4.54.
+
+One honesty note about that ring, because two comments used to overstate it. Every ratio above is
+measured against `--paper`, which is §3's stated basis and the only correct basis for a palette —
+but no page paints `--paper` yet. On the ground actually painted today, Bureau's `#f2f0e9`,
+`#c08400` measures **2.82**, so the ring is an improvement on Bureau's amber (1.79 on that same
+ground) and still short of 3:1 until #76 migrates the ground. The correction and its pass arrive in
+different tickets; `styles.css` says so where `--focus` is wired.
+
+Measuring the whole matrix turned up three thin pairings `DESIGN.md` does not record, and #76 has
+to respect all three. **`--on-accent` on a filled accent bottoms out at 3.35:1** — Studio light's
+`--agree`, with `--diverge` at 3.84 — which passes 1.4.11 as a mark and AA Large at ≥18.66px, and
+fails AA for body text: a filled Studio pill needs large or bold text, or the `-text` value on its
+wash instead. **Each `--*-text` on its own `--wash-*` lands 4.23–4.49 in Studio light** and 4.37 for
+Terminal light's `--diverge-text`, marginally under 4.5 — and that is precisely the pairing §8's
+claim rendering asks for, a tinted card with a coloured stance label, so #76 either darkens those
+three values or sets the label large. **`--rule2` against `--paper` is 1.49–1.81** in all six:
+correct for a hairline between two content blocks, wrong for a control boundary, so an input border
+or an unchecked checkbox drawn in it fails 1.4.11 and wants `--quiet` (4.54 or better everywhere).
+The tests pin these three at 3:1 rather than 4.5 with the reason in a comment, so the suite records
+where the ceiling is instead of pretending there isn't one.
+
+Beyond ratios the 38 assertions pin the shape of the contract: the exact six selectors; exactly the
+twenty-two names per palette; the three dark grounds distinct (`#141310`, `#0b0e11`, `#16151d`); the
+eight theme-level tokens present on each light block; `--shadow` non-`none` in Studio alone, which is
+§5's depth rule as a test; and `:root` carrying the six `--t-*` and nine `--s-*` in order. The last
+assertion re-parses `DESIGN.md` §3 and compares hex for hex, so specification and implementation
+cannot fall out of step in either direction. Proved the check bites by mutation — lightening
+`--quiet` from `#6d685e` to `#9d988e` failed two assertions at 2.71:1 before it was restored. The
+suite reads both files with `readFileSync(new URL(…))`, which is why `@types/node` is now a frontend
+devDependency: `import "…/DESIGN.md?raw"` needs `server.fs.allow` widened to the repo root, and vite
+hands the allow check the id *with* its `?raw` query, so an exact-file entry never matches. A types
+package that touches nothing at runtime was cheaper than widening dev-server filesystem access.
+
+Type is wired per theme, so all three faces render rather than merely existing. The UI and mono
+stacks swapped app-wide: 29 sites in `styles.css` — four `Arial, Helvetica, sans-serif` to
+`var(--font-ui)`, twenty-five mono stacks to `var(--font-mono)` — plus
+`:root { font-family: var(--font-ui) }`, and a thirtieth outside the stylesheet, since
+`graphRegister.tsx` sets Cytoscape's node-label font in JS and was still passing Arial into the
+canvas in all three themes; it now reads `token("--font-ui")` through the helper it already uses for
+colour, so the graph's labels and its key cannot disagree about a typeface. The display face is
+wired at the two rules that own a page title — `.index/.form-page/.dashboard/.stated-page h1` and
+`.record-mast h1` — taking `var(--font-display)` and `var(--w-display)`, which is what makes 400 for
+a serif carrying no bold, 700 for Terminal and 800 for Studio a theme fact rather than a hard-coded
+one. Without it the three display families were being fetched and never drawn.
+
+`--focus-amber: #f0a800` is deleted and both its consumers read `var(--focus)`, so the ticket's
+second correction is live rather than documented. Font *sizes* did not move: the `--t-*` scale
+exists, `--t-display` included, and the two title rules keep Bureau's fluid `clamp()` — `DESIGN.md`
+§4 gives `--t-display` one value and no responsive story, and a flat 3.6rem at 390px overflows, so
+the clamp that replaces it is #76's per-surface judgment. Nor did colour: the thirteen surviving
+Bureau names, and `:root`'s own `color` and `background`, stay on Bureau's values, since swapping
+ground and ink piecemeal would put two different warm-whites side by side on one page. #76 replaces
+all of them in a single pass.
+
+Last, the surfaces nobody draws. A closing block themes what ships with a browser default:
+`color-scheme` per mode — without it the three dark palettes render a white native scrollbar down
+the side — plus `caret-color`, `accent-color` and `scrollbar-color`. `::selection` takes `--rule2`
+rather than a claim wash: `--wash-imply` would paint "implication" across a selected contradiction,
+and §2 gives every token one meaning. `--ink` on `--rule2` measures 8.84–10.94 across the six, and
+`--rule2` sits 1.49–1.81 off its own paper, so the band reads without competing with the tint under
+it. `index.html` gains `data-theme="newsroom"` (the authored default and the signed-out theme, which
+#75's role swap replaces at sign-in), **one** `theme-color` — Bureau's `#f2f0e9`, because the chrome
+has to match the ground actually painted, and a `prefers-color-scheme: dark` meta would have put
+near-black browser chrome above a page that only renders light until #75 makes `.dark` apply at all
+— and one Google Fonts request for the eight families the three themes name. Eight, not nine:
+Terminal spends one family on both display and UI and separates them by weight. Browsers fetch only
+the woff2 of a family they actually render, so a reader in one theme does not pay for the other two.
+
+Three things the next tickets need from here. **#75 must guarantee `data-theme` always resolves to
+one of the three names**: about twenty-five label rules put `var(--font-mono)` inside the `font`
+shorthand, and an unmatched theme leaves the property unresolved, which invalidates the *whole*
+declaration at computed-value time — the labels would lose their size and weight, not just their
+family. **#76 inherits a contract gap**: §3 records small-text substitutes (`#777167`, `#736f7e`,
+`#3a66eb`) that no token names, so the spectrum axis has no `-text` variants the way the claim axis
+does, and a surface needing small spectrum text has to hard-code against §2 rule 1. And the label
+shape itself — `font: 500 .66rem var(--font-mono)` with uppercase and tracking, repeated at some
+twenty-five sites — was left duplicated on purpose: one shared class would touch every rule *and*
+every component that names them, inside a 762-line sheet #76 replaces with CSS Modules over this
+contract. Collapsing it there costs one sweep instead of two.
+
+Verified: 221 frontend tests across 16 files, `tsc --noEmit` clean, build green. A headless Chromium
+probe resolved all six theme×mode combinations against the live dev server — every palette's paper,
+ink and focus correct, `color-scheme` flipping, Studio's dark shadow overriding, and `/login`
+rendering in Archivo + IBM Plex Mono under Newsroom and DM Sans + DM Mono under Studio with layout
+intact at 1440 and 390. The token layer costs 3.26 kB of CSS, 1.27 kB gzipped (26.50 → 29.76 kB;
+5.40 → 6.67 kB).
+
+

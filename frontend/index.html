@@ -1,10 +1,27 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="newsroom">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Newsroom's two grounds: signed-out surfaces wear it, and it is the
+         authored default the role swaps at sign-in (DESIGN.md §3). One value, not
+         two: the chrome has to match the ground actually painted, and until #76
+         migrates it that is still Bureau's #f2f0e9 rather than --paper. #75 adds
+         the dark half, since it is the ticket that makes .dark apply at all —
+         advertising a dark chrome over a page that only renders light is worse
+         than saying nothing. -->
     <meta name="theme-color" content="#f2f0e9" />
     <title>Tessera | Story analysis</title>
+    <!-- The three faces per theme DESIGN.md §4 assigns — eight families, not
+         nine: Terminal spends one on both display and UI, separated by weight.
+         One request: the browser fetches only the woff2 of a family it actually
+         renders, so a reader in one theme does not pay for the other two. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Archivo:wght@400..700&family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400..700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Instrument+Serif&family=Spline+Sans+Mono:wght@400;500&display=swap"
+    />
   </head>
   <body>
     <div id="root"></div>

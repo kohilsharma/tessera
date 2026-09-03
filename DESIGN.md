@@ -30,6 +30,10 @@ Every theme declares **the same twenty-two custom properties** and differs only 
 the whole mechanism: a component that reaches for `var(--agree)` is correct under all six palettes,
 so the themes cannot drift apart and nothing is duplicated per role.
 
+Implemented in `frontend/src/tokens.css` (#74). `frontend/src/tokens.test.ts` holds that file to
+this section hex for hex and re-measures every ratio, so §2 and §3 are the specification in both
+directions: edit them and the suite fails until the stylesheet follows.
+
 | Token | Role |
 |---|---|
 | `--paper` | Page ground |

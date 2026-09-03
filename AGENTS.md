@@ -125,6 +125,9 @@ Backend (`backend/`, after `docker compose up -d` — see `SETUP.md`):
   fresh volume — see `SETUP.md`.
 
 Frontend (`frontend/`): `npm run build`, and `npm test` (vitest + jsdom + React Testing Library).
+`src/tokens.test.ts` reads `DESIGN.md` from the repo root, so the frontend suite depends on a file
+outside `frontend/` — it re-measures every palette's contrast and fails if the stylesheet and
+`DESIGN.md` §3 disagree by one hex digit.
 
 No lint script exists in either package. Say lint passes only once one does.
 

@@ -1,0 +1,152 @@
+/* ============================================================
+   THE TOKEN CONTRACT — DESIGN.md §2–§5.
+   Every theme declares the same twenty-two colour tokens and differs only in
+   their values, which is what stops the six palettes drifting apart: a
+   component reaching for var(--agree) is correct under all of them. Values are
+   the designer's own, taken from docs/Tessera Directions.html via DESIGN.md §3
+   — this file implements that specification and does not re-derive it.
+
+   Written as six-digit hex on purpose: tokens.test.ts parses these blocks and
+   re-measures every ratio against that palette's --paper, so a value that drops
+   below its threshold fails the build rather than shipping (#74).
+
+   Colour is theme + mode. Type, radii and depth are theme alone, so they sit on
+   the light selector — .dark matches the same element and inherits them.
+   ============================================================ */
+
+/* ---- Shared: the scales that do not vary by role (DESIGN.md §4, §5) ---- */
+:root {
+  --t-title: 1.75rem;
+  --t-heading: 1.5rem;
+  --t-body: 1rem;
+  --t-small: 0.875rem;
+  --t-meta: 0.8125rem;
+  --t-micro: 0.6875rem;
+
+  /* Use contrast rather than uniform repetition: identity groups at 1–3, card
+     interiors at 5–6, major page insets at 7–8. */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 22px;
+  --s-6: 28px;
+  --s-7: 40px;
+  --s-8: 56px;
+  --s-9: 80px;
+}
+
+/* ---- Newsroom — Admin, and the signed-out surfaces ---------------------
+   Editorial, typographic, warm. Instrument Serif carries no bold, which is why
+   font-synthesis stays off globally. Depth is rules and ink density, not shadow. */
+[data-theme="newsroom"] {
+  --font-display: "Instrument Serif", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-ui: Archivo, "Helvetica Neue", Helvetica, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --t-display: 3.6rem;
+  --w-display: 400;
+  --radius: 2px;
+  --radius-lg: 2px;
+  --shadow: none;
+
+  --paper:#faf8f4; --paper2:#ffffff; --ink:#16140f; --quiet:#6d685e;
+  --rule:#e2ddd2;  --rule2:#c9c3b6;
+  --left:#2f5c9e;  --centre:#7a746a; --right:#a84a2f;
+  --agree:#2d6a4a; --diverge:#a84a2f; --imply:#5b4a9c;
+  --wash-agree:#eaf1ec; --wash-diverge:#f7ebe6; --wash-imply:#eeebf5;
+  --agree-text:#2d6a4a; --diverge-text:#a84a2f; --imply-text:#5b4a9c;
+  --up:#2d6a4a; --down:#a84a2f;
+  --on-accent:#ffffff; --focus:#c08400;
+}
+[data-theme="newsroom"].dark {
+  --paper:#141310; --paper2:#1c1a16; --ink:#f2efe6; --quiet:#a29b8d;
+  --rule:#2e2b24;  --rule2:#464036;
+  --left:#7aa5e0;  --centre:#a29b8d; --right:#e08c6d;
+  --agree:#6cc295; --diverge:#e08c6d; --imply:#a695e6;
+  --wash-agree:#18251d; --wash-diverge:#2a1d17; --wash-imply:#1f1b2e;
+  --agree-text:#6cc295; --diverge-text:#e08c6d; --imply-text:#a695e6;
+  --up:#6cc295; --down:#e08c6d;
+  --on-accent:#141310; --focus:#e0b34a;
+}
+
+/* ---- Terminal — Investor ----------------------------------------------
+   Dense, data-first, cool. One family for display and UI, separated by weight;
+   the mono is the one that matters here, since prices and indicators align. */
+[data-theme="terminal"] {
+  --font-display: "IBM Plex Sans", system-ui, "Segoe UI", Helvetica, sans-serif;
+  --font-ui: "IBM Plex Sans", system-ui, "Segoe UI", Helvetica, sans-serif;
+  --font-mono: "Spline Sans Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --t-display: 1.9rem;
+  --w-display: 700;
+  --radius: 0;
+  --radius-lg: 2px;
+  --shadow: none;
+
+  --paper:#eef1f4; --paper2:#ffffff; --ink:#0e1418; --quiet:#5a6b78;
+  --rule:#d3dae0;  --rule2:#b3bec7;
+  --left:#1f5fb8;  --centre:#5a6b78; --right:#c2481f;
+  --agree:#0e7a55; --diverge:#c2481f; --imply:#5b3ec2;
+  --wash-agree:#e2f2ec; --wash-diverge:#fbe9e3; --wash-imply:#ece7fa;
+  --agree-text:#0e7a55; --diverge-text:#be461e; --imply-text:#5b3ec2;
+  --up:#0e7a55; --down:#c2481f;
+  --on-accent:#ffffff; --focus:#a86b00;
+}
+[data-theme="terminal"].dark {
+  --paper:#0b0e11; --paper2:#12171c; --ink:#dde5ec; --quiet:#7c8b98;
+  --rule:#1e252d;  --rule2:#313c46;
+  --left:#4b8fe0;  --centre:#8a99a6; --right:#e8794a;
+  --agree:#2fc48d; --diverge:#ff6f4d; --imply:#b78cff;
+  --wash-agree:#0e2620; --wash-diverge:#2a1410; --wash-imply:#1b1630;
+  --agree-text:#2fc48d; --diverge-text:#ff6f4d; --imply-text:#b78cff;
+  --up:#2fc48d; --down:#ff6f4d;
+  --on-accent:#0b0e11; --focus:#e0b34a;
+}
+
+/* ---- Studio — Student -------------------------------------------------
+   Bright, generous, rounded. The only theme with depth: soft layered shadows,
+   tinted from its own ink rather than black, with a real offset and blur. */
+[data-theme="studio"] {
+  --font-display: "Bricolage Grotesque", system-ui, "Segoe UI", Helvetica, sans-serif;
+  --font-ui: "DM Sans", system-ui, "Segoe UI", Helvetica, sans-serif;
+  --font-mono: "DM Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --t-display: 2.9rem;
+  --w-display: 800;
+  --radius: 12px;
+  --radius-lg: 26px;
+  --shadow: 0 1px 2px rgba(25, 24, 35, .05), 0 6px 16px -4px rgba(25, 24, 35, .10), 0 18px 40px -12px rgba(25, 24, 35, .12);
+
+  --paper:#faf6f0; --paper2:#ffffff; --ink:#191823; --quiet:#6c6885;
+  --rule:#ebe4db;  --rule2:#d3cbc1;
+  --left:#3d6bf5;  --centre:#8b8698; --right:#e0533d;
+  --agree:#12a06c; --diverge:#e0533d; --imply:#6b4ef0;
+  --wash-agree:#e5f6ee; --wash-diverge:#fdeae6; --wash-imply:#eeeafe;
+  --agree-text:#0e8157; --diverge-text:#c24835; --imply-text:#6b4ef0;
+  --up:#0e8157; --down:#c24835;
+  --on-accent:#ffffff; --focus:#be8300;
+}
+[data-theme="studio"].dark {
+  --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 20px -4px rgba(0, 0, 0, .55), 0 22px 48px -14px rgba(0, 0, 0, .6);
+
+  --paper:#16151d; --paper2:#1f1d29; --ink:#f4f1ff; --quiet:#a09cba;
+  --rule:#2c2a3a;  --rule2:#413d55;
+  --left:#7d9cff;  --centre:#a09cba; --right:#ff8a72;
+  --agree:#4bd3a0; --diverge:#ff8a72; --imply:#a894ff;
+  --wash-agree:#16302a; --wash-diverge:#33201e; --wash-imply:#241f3d;
+  --agree-text:#4bd3a0; --diverge-text:#ff8a72; --imply-text:#a894ff;
+  --up:#4bd3a0; --down:#ff8a72;
+  --on-accent:#16151d; --focus:#e0b34a;
+}
+
+/* ---- The surfaces we did not draw -------------------------------------
+   Selection, caret, native controls and the scrollbar all ship with a default
+   that belongs to no design system — and on a dark ground they ship *wrong*
+   (a white scrollbar down the side of Terminal). color-scheme is what tells the
+   browser which of its own two sets to use; the rest come from the contract. */
+[data-theme] { color-scheme: light; caret-color: var(--ink); accent-color: var(--ink); scrollbar-color: var(--rule2) transparent; }
+[data-theme].dark { color-scheme: dark; }
+/* Selection is chrome, so it takes the neutral edge token rather than a claim
+   wash: --wash-imply would paint "implication" over a selected contradiction,
+   and §2 rule 1 gives every token exactly one meaning. --ink on --rule2 measures
+   8.84–10.94 across the six, and --rule2 sits 1.49–1.81 off its own paper, so the
+   band reads as a band without competing with the tint underneath it. */
+::selection { background: var(--rule2); color: var(--ink); }
