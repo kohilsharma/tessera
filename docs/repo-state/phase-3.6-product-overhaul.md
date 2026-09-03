@@ -318,5 +318,15 @@ paint rather than a simulated one, seeding a token and a hint into `localStorage
 token nobody has heard of → `newsroom` rather than nothing. The third re-measured the border split
 above. The ticket names no ADR; ADR-0031 already carries theme-by-role.
 
-
+**#76 — shared component primitives and library stack.** The frontend now declares the settled
+ADR-0030 dependencies: Base UI for headless behaviour, Phosphor for icons, Recharts for charts,
+Motion for authored transitions, and TanStack Table/Virtual for bounded data surfaces. A new
+`components/primitives.tsx` entry point provides token-only PageShell, List, RegisterRow, Card, Stat,
+Chip, Button, Base UI-backed form fields, CitationChip, RolePanel, and Loading/Empty/Error/Refused states. Its
+colocated CSS Module keeps the primitive contract independent of the legacy route stylesheet, so
+existing pages retain their class-name API while later tickets can adopt the shared primitives
+without a second visual vocabulary. The refused state has an explicit accessible name; loading uses
+skeletons rather than a spinner, and citations remain openable links. Added one focused primitive
+test. `npm run build` and the full frontend suite pass: 249 tests across 18 files. No backend changes
+were needed, and full route migration is left to the tickets that consume each primitive.
 

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+export { LoadingState, RefusedState } from "./primitives";
 
 // The four UI states, one treatment each, shared by every data page — so
 // loading on Search looks like loading on Briefs. Extracted here rather than
