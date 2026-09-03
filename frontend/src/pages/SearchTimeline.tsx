@@ -51,7 +51,7 @@ function Lane({
         peak={peak}
         label={`${lane.story.title}: ${points.length} matching reports ${periodLabel}, on the same axis as every other Story here.`}
       />
-      <EntryList>
+      <EntryList total={points.length}>
         {points.map((point) => (
           <ArticleEntry key={point.id} article={point} />
         ))}

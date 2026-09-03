@@ -90,7 +90,7 @@ function EdgeEvidence({
         or, for reporting that belongs to no Story, the original at the Publisher, which is the
         only place there is to read it.
       </p>
-      <EntryList>
+      <EntryList total={weight}>
         {citations.map((citation) => (
           <Entry
             key={citation.id}
@@ -318,7 +318,7 @@ export default function EntityNeighbourhood() {
           heading="Reported alongside"
           folio={`${neighbours.length} drawn · most reported together first`}
         >
-          <EntryList>
+          <EntryList total={neighbourCount}>
             {neighbours.map((node) => {
               const weight = ties.get(node.id) ?? 0;
               // The interlinks this neighbour carries: the lines the picture draws from it to

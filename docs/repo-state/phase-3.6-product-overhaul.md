@@ -330,3 +330,13 @@ skeletons rather than a spinner, and citations remain openable links. Added one 
 test. `npm run build` and the full frontend suite pass: 249 tests across 18 files. No backend changes
 were needed, and full route migration is left to the tickets that consume each primitive.
 
+**#77 — bounded lists.** `EntryList` now owns a bounded scroll frame (`30rem` high, vertical
+overflow only) and a visible `Showing X of Y` summary. Paginated index lists pass their API total;
+the clustering and entity-merge queues pass their server totals; graph names pass the measured
+working-set count; neighbourhoods pass the endpoint bound; and timeline/article registers state
+their drawn total. This covers the three dashboards, all ten Admin registers, graph names,
+neighbourhoods, Story timelines, search-timeline lanes, and nested citation lists without changing
+their data or pagination contracts. `min-width: 0`, `overflow-x: hidden`, and the existing page
+`overflow-x: clip` keep long names, URLs, and register metadata inside the viewport. Added a
+primitive assertion for the count contract. Verified with the full frontend suite (**250 tests**)
+and `npm run build` (`tsc` + Vite).

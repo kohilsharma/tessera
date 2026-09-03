@@ -167,7 +167,7 @@ export default function Graph() {
             heading="Names in the graph"
             folio={`${view.nodes.length} drawn · most reported first`}
           >
-            <EntryList>
+            <EntryList total={view.entityCount}>
               {view.nodes.map((node) => (
                 <RegisterRow
                   key={node.id}

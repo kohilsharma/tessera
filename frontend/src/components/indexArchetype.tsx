@@ -64,7 +64,7 @@ export function EntryRegister({
 }) {
   return (
     <>
-      <EntryList>{children}</EntryList>
+      <EntryList total={envelope.total}>{children}</EntryList>
       <Pagination envelope={envelope} onGoToPage={onGoToPage} />
     </>
   );

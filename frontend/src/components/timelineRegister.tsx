@@ -117,7 +117,7 @@ export function TimelineRegister({ timeline }: { timeline: Timeline }) {
         />
       )}
       <TimelineAxis from={timeline.from} to={timeline.to} granularity={timeline.granularity} />
-      <EntryList>{marks.map((mark) => mark.node)}</EntryList>
+      <EntryList total={marks.length}>{marks.map((mark) => mark.node)}</EntryList>
     </>
   );
 }

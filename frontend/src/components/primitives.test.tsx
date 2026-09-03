@@ -23,4 +23,20 @@ describe("shared primitives", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "A1 · Example" })).toHaveAttribute("href", "/articles/1");
   });
+
+  it("states the visible and total rows in a bounded list", async () => {
+    const { EntryList } = await import("./uiStates");
+    render(
+      <EntryList total={31}>
+        <li>One</li>
+        <li>Two</li>
+        <li>Three</li>
+        <li>Four</li>
+        <li>Five</li>
+      </EntryList>,
+    );
+
+    expect(screen.getByText("Showing 5 of 31")).toBeInTheDocument();
+    expect(screen.getByRole("list")).toBeInTheDocument();
+  });
 });

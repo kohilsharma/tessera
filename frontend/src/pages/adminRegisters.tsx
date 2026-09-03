@@ -229,7 +229,7 @@ export function ClusteringReviewRegister() {
             </p>
           </EmptyState>
         ) : (
-          <EntryList>
+          <EntryList total={review.data.total}>
             {review.data.items.map((proposal) => {
               const deciding = decide.isPending && decide.variables?.articleId === proposal.id;
               return (
@@ -371,7 +371,7 @@ export function EntityMergeReviewRegister() {
             </p>
           </EmptyState>
         ) : (
-          <EntryList>
+          <EntryList total={review.data.total}>
             {review.data.items.map((proposal) => {
               const deciding = decide.isPending && decide.variables?.proposalId === proposal.id;
               return (

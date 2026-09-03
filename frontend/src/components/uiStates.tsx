@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Children, type ReactNode } from "react";
 export { LoadingState, RefusedState } from "./primitives";
 
 // The four UI states, one treatment each, shared by every data page — so
@@ -55,6 +55,13 @@ export function RetryableError({
 // The populated state's shared frame: a bordered register of entries, ruled
 // between rows. What an entry itself contains is the Index archetype's job
 // (#31) — this is only the frame all the lists share.
-export function EntryList({ children }: { children: ReactNode }) {
-  return <ul className="entry-list">{children}</ul>;
+export function EntryList({ children, total }: { children: ReactNode; total?: number }) {
+  const shown = Children.toArray(children).length;
+  const whole = total ?? shown;
+  return (
+    <div className="entry-list-frame">
+      <p className="entry-list-summary">Showing {shown} of {whole}</p>
+      <ul className="entry-list">{children}</ul>
+    </div>
+  );
 }
