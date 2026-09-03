@@ -136,6 +136,42 @@ describe("Login", () => {
     expect(document.documentElement).toHaveClass("dark");
   });
 
+  // #78. The sweep retints the page a reader is looking at, so the navigation has
+  // to wait for it — /login and /dashboard are different layouts, and leaving at
+  // once replaces every node before a frame paints, which is a transition on
+  // nothing. What pays for the wait is the dashboard already being in flight.
+  it("holds the signed-out page for the sweep, with the dashboard loading under it", async () => {
+    vi.mocked(fetch).mockImplementation((input) =>
+      Promise.resolve(
+        String(input).includes("/auth/login")
+          ? jsonResponse(authResponse)
+          : jsonResponse({ role: "student", studyCollections: [], flashcards: {} }),
+      ),
+    );
+
+    renderWithProviders(<Login />, {
+      route: "/login",
+      path: "/login",
+      probe: { path: "/dashboard", element: <p>Dashboard reached</p> },
+    });
+    await userEvent.type(screen.getByLabelText("Email"), "student@tessera.local");
+    await userEvent.type(screen.getByLabelText("Password"), "tessera-demo");
+    await userEvent.click(screen.getByRole("button", { name: "Log in" }));
+
+    await waitFor(() => expect(document.documentElement).toHaveClass("theme-transition"));
+    // Still the page being retinted, and its successor's data already requested.
+    expect(screen.getByLabelText("Email")).toBeInTheDocument();
+    // #78 forbids a spinner, and a button reading "Logging in…" through the whole
+    // sweep is one with a label on: the request is done, so it stops saying so.
+    // Still disabled, because the page is leaving and a second submit must not land.
+    expect(screen.getByRole("button", { name: "Log in" })).toBeDisabled();
+    expect(screen.queryByText("Dashboard reached")).not.toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url))).toContain("/api/v1/dashboard/student");
+
+    // …and the sweep does end, on the dashboard rather than on the login page.
+    expect(await screen.findByText("Dashboard reached", undefined, { timeout: 3000 })).toBeInTheDocument();
+  });
+
   it("puts the signed-out product back on sign-out", async () => {
     document.documentElement.dataset.theme = "terminal";
     document.documentElement.classList.add("dark");

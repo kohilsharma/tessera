@@ -56,14 +56,29 @@ body { margin: 0; min-width: 320px; min-height: 100vh; overflow-x: clip; }
 button, a { font: inherit; }
 button { color: inherit; }
 
-/* The one authored transition: a successful login retints the existing page while
-   the dashboard begins loading. Rules settle first, then washes, then accents;
-   the wordmark stays fixed so the identity survives the product swap. */
+/* The one authored transition (DESIGN.md §7): a successful login retints the page
+   already on screen while the dashboard loads underneath it. Rules settle first,
+   then washes, then accents; the wordmark below stays outside the sweep, so the
+   identity is the fixed point the product swaps around. The longest delay plus the
+   duration must equal THEME_SWEEP_MS in theme.ts — that constant is when the class
+   comes off, and a sweep still mid-flight would be cut short. One delay per
+   property, positionally: add a property here and add its delay too. */
 html.theme-transition, html.theme-transition *, html.theme-transition *::before, html.theme-transition *::after {
   transition-property: color, background, background-color, border, border-color, box-shadow, fill, stroke !important;
   transition-duration: 400ms !important;
   transition-timing-function: cubic-bezier(.16, 1, .3, 1) !important;
   transition-delay: 300ms, 160ms, 160ms, 0ms, 0ms, 300ms, 300ms, 300ms !important;
+}
+/* The one case the cross-fade cannot serve. Crossing light/dark swaps ink and
+   paper between the two ends, so easing both walks them through each other: at the
+   crossing the text is its own background (measured 1.15:1 for ~122ms on Newsroom
+   light -> Terminal dark, against §3's 4.5:1 floor). Here those two tokens change
+   outright and the rules and accents still sweep, so the moment keeps its shape
+   without a window where the page cannot be read. Same specificity as the block
+   above, so this must stay after it. */
+html.theme-transition--mode-flip, html.theme-transition--mode-flip *, html.theme-transition--mode-flip *::before, html.theme-transition--mode-flip *::after {
+  transition-property: border, border-color, box-shadow, fill, stroke !important;
+  transition-delay: 0ms, 0ms, 300ms, 300ms, 300ms !important;
 }
 html.theme-transition .site-wordmark,
 html.theme-transition .site-wordmark::before,
@@ -83,6 +98,14 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { transition-duration: .01ms !important; animation: none !important; }
+  /* The sign-in sweep needs naming, not just covering. Between !important author
+     rules specificity decides before order, and the line above is (0,0,0) while the
+     sweep's selectors are (0,1,1) — so the collapse never reached it, and only the
+     JS guard in transitionTheme was holding §7 up (#78). The delay has to go too: a
+     .01ms transition that still waits 300ms is not an instant swap. */
+  html.theme-transition, html.theme-transition *, html.theme-transition *::before, html.theme-transition *::after {
+    transition-duration: .01ms !important; transition-delay: 0ms !important;
+  }
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
 }
 

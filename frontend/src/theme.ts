@@ -67,27 +67,66 @@ export function applyTheme(role: string | null | undefined, mode: ColorMode): vo
   if (paper && meta) meta.setAttribute("content", paper);
 }
 
+// DESIGN.md §7's one piece of theatre, and the one number behind it: the CSS block
+// in styles.css stages its delays to land the last property exactly here, so the
+// class comes off as the sweep ends rather than before or after it.
+export const THEME_SWEEP_MS = 700;
+
+// The two classes the sweep wears. The second is added only when the sweep also
+// crosses light/dark, because that case cannot be cross-faded: ink and paper swap
+// ends, so interpolating both passes them through each other and the text is
+// briefly invisible against its own background (measured: 1.15:1 for ~122ms,
+// against DESIGN.md §3's 4.5:1 floor). styles.css answers it by swapping those two
+// tokens outright there and letting the rules and accents sweep as usual.
+const SWEEP_CLASS = "theme-transition";
+const MODE_FLIP_CLASS = "theme-transition--mode-flip";
+
 let transitionTimer: number | undefined;
+let resolveSweep: (() => void) | undefined;
+let sweepSettled: Promise<void> = Promise.resolve();
+
+/**
+ * Resolves when the sweep started by transitionTheme() is over — already resolved
+ * when none is running, so awaiting it is always safe.
+ *
+ * A caller navigating away from the page it just retinted has to wait on this: a
+ * CSS transition cannot run on a node the browser has only just inserted, so
+ * replacing the DOM mid-sweep (and /login and /dashboard are different layouts,
+ * so navigating does exactly that) leaves nothing painted to retint (#78).
+ */
+export function themeTransitionSettled(): Promise<void> {
+  return sweepSettled;
+}
 
 export function cancelThemeTransition(): void {
   if (transitionTimer !== undefined) window.clearTimeout(transitionTimer);
   transitionTimer = undefined;
-  document.documentElement.classList.remove("theme-transition");
+  document.documentElement.classList.remove(SWEEP_CLASS, MODE_FLIP_CLASS);
+  // Resolved, not abandoned: a sign-out mid-sweep must not strand whoever is
+  // waiting to navigate on a promise that will now never be kept.
+  resolveSweep?.();
+  resolveSweep = undefined;
 }
 
 export function transitionTheme(role: string | null | undefined, mode: ColorMode): void {
   const html = document.documentElement;
   cancelThemeTransition();
   if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
-    html.classList.remove("theme-transition");
     applyTheme(role, mode);
     return;
   }
 
-  html.classList.add("theme-transition");
+  // Read before applyTheme, which is what changes it.
+  const crossesMode = html.classList.contains("dark") !== isDark(mode);
+
+  sweepSettled = new Promise<void>((resolve) => (resolveSweep = resolve));
+  html.classList.add(SWEEP_CLASS);
+  html.classList.toggle(MODE_FLIP_CLASS, crossesMode);
   applyTheme(role, mode);
   transitionTimer = window.setTimeout(() => {
-    html.classList.remove("theme-transition");
     transitionTimer = undefined;
-  }, 700);
+    html.classList.remove(SWEEP_CLASS, MODE_FLIP_CLASS);
+    resolveSweep?.();
+    resolveSweep = undefined;
+  }, THEME_SWEEP_MS);
 }

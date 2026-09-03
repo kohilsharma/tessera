@@ -3,6 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { login } from "../api/client";
 import { Field, FormPage, FormSubmit } from "../components/formArchetype";
 import { ErrorState } from "../components/uiStates";
+import { themeTransitionSettled } from "../theme";
 
 type FieldErrors = { email?: string; password?: string; form?: string };
 
@@ -12,6 +13,11 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [errors, setErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
+  // The request is done and the sweep is running: still not interactive, but no
+  // longer working. #78 rules out a spinner, and a button narrating "Logging in…"
+  // across the whole 700ms is the same thing wearing a label — it tells the reader
+  // the app is busy through the one moment it is meant to be performing.
+  const [sweeping, setSweeping] = useState(false);
 
   // Presence only. Login must not tell a visitor which half of a wrong pair was
   // wrong, so anything beyond "you left this blank" is the backend's 401 to give
@@ -35,11 +41,20 @@ export default function Login() {
     setSubmitting(true);
     try {
       await login({ email, password });
+      setSweeping(true);
+      // The sweep retints *this* page (#78, DESIGN.md §7), so the navigation waits
+      // for it: /login and /dashboard are different layouts, and leaving now would
+      // replace every node mid-transition, leaving nothing painted to retint.
+      // login() has already put the dashboard's data in flight, so the wait buys
+      // the arrival rather than costing it — and under reduced motion there is no
+      // sweep to wait for and this resolves at once.
+      await themeTransitionSettled();
       navigate("/dashboard");
     } catch (err) {
       setErrors({ form: (err as Error).message });
     } finally {
       setSubmitting(false);
+      setSweeping(false);
     }
   }
 
@@ -83,7 +98,7 @@ export default function Login() {
         )}
       </Field>
       {errors.form && <ErrorState>{errors.form}</ErrorState>}
-      <FormSubmit pending={submitting} pendingLabel="Logging in…">
+      <FormSubmit pending={submitting} pendingLabel={sweeping ? "Log in" : "Logging in…"}>
         Log in
       </FormSubmit>
     </FormPage>

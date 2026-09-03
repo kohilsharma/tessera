@@ -50,11 +50,23 @@ async function postForToken(path: string, body: unknown, errorMessage: string, a
   // would otherwise survive into the next identity: logging in as a second user
   // without reloading would read the first user's role and route by it.
   queryClient.clear();
+  // The answer *is* ["me"] — the same User getMe returns — so seeding it spares
+  // ThemeSync, IdentityMenu and DashboardRedirect a round trip they each wait on.
+  // Account.tsx writes the same key from the same shape after a mode change.
+  queryClient.setQueryData(["me"], data.user);
   // Repainted here, at the one seam a session begins, rather than waiting for
   // ThemeSync's refetch: this is the whole "switching accounts visibly switches
   // products" of #75, and the answer already carries both halves of the theme.
   writeModeHint(data.user.colorMode);
   (animate ? transitionTheme : applyTheme)(data.user.role, data.user.colorMode);
+  // What loads underneath the sign-in sweep (#78), so the dashboard it resolves
+  // onto is already populated. Not awaited, and prefetchQuery swallows its own
+  // rejection: the dashboard's useQuery is what reads this, and a failure here
+  // must leave it to fetch and report on mount like any other.
+  void queryClient.prefetchQuery({
+    queryKey: ["dashboard", data.user.role],
+    queryFn: DASHBOARD_QUERIES[data.user.role],
+  });
   return data;
 }
 
@@ -299,6 +311,15 @@ export function getInvestorDashboard(): Promise<InvestorDashboardData> {
 export function getAdminDashboard(): Promise<AdminDashboardData> {
   return getJson("/api/v1/dashboard/admin", "Could not load this dashboard");
 }
+
+// Keyed exactly as the three dashboard pages key their own query, so what login
+// prefetches is the entry those pages then read rather than a second copy of it.
+// Referenced from postForToken above, which cannot run before this is evaluated.
+const DASHBOARD_QUERIES: Record<UserRole, () => Promise<unknown>> = {
+  student: getStudentDashboard,
+  investor: getInvestorDashboard,
+  admin: getAdminDashboard,
+};
 
 // #19: mirrors backend/src/entities/Story.ts's constrained vocabulary.
 export const STORY_CATEGORIES = [

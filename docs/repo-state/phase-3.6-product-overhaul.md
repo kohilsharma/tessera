@@ -340,13 +340,101 @@ their data or pagination contracts. `min-width: 0`, `overflow-x: hidden`, and th
 `overflow-x: clip` keep long names, URLs, and register metadata inside the viewport. Added a
 primitive assertion for the count contract. Verified with the full frontend suite (**250 tests**)
 and `npm run build` (`tsc` + Vite).
+**#78 — the sign-in transition.** Login retints through a `transitionTheme` seam in `theme.ts`:
+after the auth response stores the token and clears the query cache, it adds a `theme-transition`
+class to `<html>` and applies the role and mode in the same frame, so the CSS block in `styles.css`
+eases the already-painted signed-out surface into the signed-in product. Rules settle first
+(0ms delay), washes next (160ms), accents last (300ms), each over 400ms, which lands the final
+property at exactly the 700ms the class is removed at. The wordmark sits outside the sweep, so the
+identity is the fixed point the product swaps around. `THEME_SWEEP_MS` is the one number, and the
+CSS comment states the arithmetic that must match it.
 
-**#78 — the sign-in transition.** Login now uses a dedicated `transitionTheme` seam after the
-auth response has stored the token and cleared the query cache. It applies the role and light/dark
-mode immediately, while a temporary `theme-transition` class lets the already-painted signed-out
-surface retint in place; the wordmark is explicitly excluded and the dashboard navigation is not
-delayed. CSS transitions run for 700ms with rules first, washes next, and accent properties last.
-The class is removed by one resettable timer, so repeated account switches cannot leave stale cleanup
-behind. `prefers-reduced-motion: reduce` skips the class and timer entirely. Added seam tests for
-the 700ms lifecycle and reduced-motion path, plus a login integration assertion. Verified with the
-full frontend suite and production build; no new dependency or ADR was needed.
+**The first implementation of this never played, and the fix is the interesting part.** It applied
+the class correctly and navigated on the next microtask. But `/login` sits under `Masthead` and
+`/dashboard` under `AppShell` — different layout elements — so React replaced every node in the
+subtree before a frame painted. A CSS transition needs a before-change style on a node the browser
+has already laid out; on one just inserted there is nothing to interpolate from, so only the
+persisting `html`/`body` background cross-faded and the staged rules → washes → accents sweep
+applied to a DOM that no longer existed. The tests passed because they asserted the class lifecycle
+and never that anything was still painted under it.
+
+So the sweep became awaitable. `themeTransitionSettled()` returns a module-level promise resolved by
+the sweep's own timer, pre-resolved when no sweep is running, resolved (not abandoned) by
+`cancelThemeTransition` so a sign-out mid-sweep cannot strand its waiter, and already-resolved under
+reduced motion. `Login.tsx` awaits it before `navigate("/dashboard")` — it holds the page it is
+retinting. What pays for the hold is the other half of the ticket: `postForToken` seeds `["me"]` from
+the answer it already has and fires `prefetchQuery` for the role's dashboard through a
+`DASHBOARD_QUERIES` map keyed exactly as the three dashboard pages key their own query, so the wait
+buys the arrival rather than costing it. The prefetch is not awaited and `prefetchQuery` swallows its
+own rejection, so a failure there leaves the dashboard's `useQuery` to fetch and report on mount like
+any other. Seeding `["me"]` is what keeps `DashboardRedirect` from spending a round trip *after* the
+sweep deciding where to go; `register()` shares `postForToken` and so gets the prefetch but not the
+sweep, which is right — §1.5 says "on successful login".
+
+**Three defects the review found, and what they cost to fix.**
+
+*The cross-fade cannot serve a light/dark crossing.* The sweep stages by CSS property, so `color`
+rode with the accents at 300ms while `background-color` moved at 160ms. On a login where the
+signed-out page is light and the account is dark, ink and paper swap ends, and easing both walks the
+text through its own background: measured in Chrome at **1.15:1 for ~122ms**, bottoming at
+`rgb(22,20,15)` ink on `rgb(32,34,37)` paper, against DESIGN.md §3's 4.5:1 floor. Text vanished.
+The obvious repair — move `color` to the wash tier so ink and paper travel together — makes it
+*worse*: travelling together they cross simultaneously and both sit at mid-grey at the midpoint,
+which is ~1:1. There is no stagger that fixes it, because the two endpoints are inverted. So
+`transitionTheme` now compares the incoming mode against the current one and adds
+`theme-transition--mode-flip` when they differ; that block drops `color` and `background` from the
+transition entirely, so those two swap outright while rules, shadows, fills and strokes sweep as
+usual. Re-measured through a real login: **contrast holds at 15.2:1 across every frame of the sweep,
+zero frames below AA**, with the rule still easing `rgb(201,195,182)` → `rgb(49,60,70)`. The moment
+keeps its motion; only the unreadable interpolation is gone.
+
+*The reduced-motion collapse never reached the sweep.* §7's app-wide block is
+`*, *::before, *::after` at specificity (0,0,0); the sweep's selectors are `html.theme-transition *`
+at (0,1,1). Between `!important` author declarations specificity decides before order, so the
+collapse lost, and only the JS guard in `transitionTheme` was holding §7 up — the CSS half was
+inert, and the comment above it claimed otherwise. The block now names the sweep's selectors at
+equal specificity and zeroes `transition-delay` as well as the duration, since a `.01ms` transition
+that still waits 300ms is not an instant swap. Verified by applying the class directly, bypassing
+the JS guard: computed `transition-duration` reads `1e-05s` and `transition-delay` `0s`.
+
+*The button narrated progress through the whole moment.* `Login.tsx` held `submitting` until after
+`navigate`, so a disabled button read "Logging in…" for the full 700ms — the ticket's forbidden
+spinner wearing a label, across the one moment meant to be performing rather than waiting. The
+request is finished when the sweep starts, so the button now reverts to its resting "Log in" while
+staying disabled, which keeps a second submit off the wire without claiming work is still happening.
+
+**Measured in Chrome against the live stack, since "never adds perceived latency" is not assumable.**
+Sampling computed styles through a real `investor@tessera.local` login: at t≈241ms `data-theme` was
+`terminal` with the class on and the rule colour *between* the two palettes
+(`rgb(192,193,189)`, Newsroom `#c9c3b6` → Terminal `#b3bec7`); rules finished by ~481ms; the `h1` ink
+held Newsroom's `rgb(22,20,15)` until t≈567ms then eased to `#0e1418` — rules-first, accents-last,
+confirmed rather than asserted. Resource timings relative to submit: `/auth/login` +5→+203ms,
+`/dashboard/investor` **+214→+634ms** — requested and complete inside the sweep, ~300ms before the
+navigation — and the arrived dashboard sampled as populated seeded content, no skeleton frame. The
+`/auth/me` at +990ms and second dashboard call at +1196ms are react-query background revalidation
+from the app's default `staleTime: 0`: non-blocking, pre-existing, deliberately left alone. A full
+light→dark login end to end: mode-flip class applied by `transitionTheme` itself, sweep t=179→860ms,
+navigation at 878ms, button reading "Log in" throughout, ending Terminal dark.
+
+Reduced motion was checked in the browser too, not just in jsdom: with the media emulated, the class
+never appears at all (`sawSweep: false`), `data-theme` flips at 201ms and the navigation lands at
+**213ms** — twelve milliseconds later, so the awaited seam costs nothing when there is no sweep.
+And the "never on subsequent navigation" condition: four client-side hops across `/stories`,
+`/search`, `/graph` and `/briefs` while signed in produced no sweep and no theme change.
+
+Font family and `--t-display` are theme tokens, so the display face and its size cut in one frame
+rather than easing. That is intended: the spec's sweep is a *retint*, and cross-fading two text
+layers to smooth it is the decoration the ticket rules out. The wordmark's own opt-out is
+`transition: none`, which means it cuts at t=0 rather than easing — on a same-mode login that is
+`#16140f` → `#0e1418`, imperceptible, and on a mode flip the whole page's ink now cuts with it, so it
+reads as the anchor rather than the anomaly. Seven frames in `docs/verification/phase-3.6/`
+(`78-1`…`78-7`, desktop and 390px, including the mode-flip path) hold the signed-out page, the
+mid-sweep frames, and the arrival; the README there says what each has to show.
+
+Seam tests cover the 700ms lifecycle, both reduced-motion paths, the cancelled-sweep resolution, the
+mode-flip class going on and coming off, and a login integration test asserting the form still
+mounted, `/api/v1/dashboard/student` already requested, and the button resting-labelled while the
+class is on. Three of those were mutation-checked — swapping the await for `Promise.resolve()`,
+pinning `crossesMode` to `false`, and restoring the static pending label each fail their test. Full
+frontend suite **260 tests across 18 files** and `npm run build` pass; no new dependency, and #78
+names no ADR.

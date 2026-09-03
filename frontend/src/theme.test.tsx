@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { applyTheme, cancelThemeTransition, isDark, readModeHint, themeForRole, transitionTheme, writeModeHint } from "./theme";
+import { applyTheme, cancelThemeTransition, isDark, readModeHint, THEME_SWEEP_MS, themeForRole, themeTransitionSettled, transitionTheme, writeModeHint } from "./theme";
 import { roleFromToken, setToken } from "./auth/token";
 import { ThemeSync } from "./components/ThemeSync";
 import { jsonResponse, renderWithProviders } from "./test/renderWithProviders";
@@ -30,6 +30,8 @@ function stubPrefersDark(matches: boolean) {
 beforeEach(() => {
   html().removeAttribute("data-theme");
   html().classList.remove("dark");
+  // Leaves no sweep — and no unsettled promise — running into the next test.
+  cancelThemeTransition();
 });
 
 afterEach(() => {
@@ -131,6 +133,81 @@ describe("the sign-in transition", () => {
     expect(html()).not.toHaveClass("theme-transition");
     vi.advanceTimersByTime(700);
     expect(html()).not.toHaveClass("theme-transition");
+  });
+
+  // The reason the sweep is awaitable at all (#78): /login and /dashboard are
+  // different layouts, so navigating replaces every node, and a CSS transition
+  // cannot run on one the browser has only just inserted. Login holds the page
+  // it is retinting until this settles.
+  it("does not settle until the sweep is over", async () => {
+    vi.useFakeTimers();
+    transitionTheme("investor", "dark");
+
+    let arrived = false;
+    void themeTransitionSettled().then(() => (arrived = true));
+
+    await vi.advanceTimersByTimeAsync(THEME_SWEEP_MS - 1);
+    expect(arrived).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(arrived).toBe(true);
+  });
+
+  it("settles at once under reduced motion, so the swap costs nothing", async () => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: query.includes("prefers-reduced-motion: reduce"),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+
+    transitionTheme("student", "light");
+
+    await expect(themeTransitionSettled()).resolves.toBeUndefined();
+  });
+
+  // The cross-fade is safe only while ink and paper stay on the same sides of the
+  // page. Crossing light/dark swaps them, so easing both walks the text through its
+  // own background — 1.15:1 for ~122ms, measured in Chrome. styles.css keys the
+  // exception off this class, so the class is the contract worth asserting.
+  it("marks a sweep that also crosses light/dark, so ink and paper swap outright", () => {
+    vi.useFakeTimers();
+    applyTheme("admin", "light");
+
+    transitionTheme("investor", "dark");
+
+    expect(html()).toHaveClass("theme-transition");
+    expect(html()).toHaveClass("theme-transition--mode-flip");
+  });
+
+  it("leaves a same-mode sweep to cross-fade, which is the common login", () => {
+    vi.useFakeTimers();
+    applyTheme("admin", "light");
+
+    transitionTheme("investor", "light");
+
+    expect(html()).toHaveClass("theme-transition");
+    expect(html()).not.toHaveClass("theme-transition--mode-flip");
+  });
+
+  it("takes the mode-flip class off with the sweep", () => {
+    vi.useFakeTimers();
+    applyTheme("admin", "light");
+    transitionTheme("investor", "dark");
+
+    vi.advanceTimersByTime(THEME_SWEEP_MS);
+
+    expect(html()).not.toHaveClass("theme-transition--mode-flip");
+  });
+
+  it("settles a cancelled sweep rather than stranding whoever waited on it", async () => {
+    vi.useFakeTimers();
+    transitionTheme("investor", "dark");
+
+    let arrived = false;
+    void themeTransitionSettled().then(() => (arrived = true));
+    cancelThemeTransition();
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(arrived).toBe(true);
   });
 });
 
