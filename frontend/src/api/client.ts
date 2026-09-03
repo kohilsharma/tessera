@@ -1,6 +1,6 @@
 import { clearToken, getToken, setToken } from "../auth/token";
 import { queryClient } from "../queryClient";
-import { applyTheme, readModeHint, writeModeHint, type ColorMode } from "../theme";
+import { applyTheme, cancelThemeTransition, readModeHint, transitionTheme, writeModeHint, type ColorMode } from "../theme";
 
 export type HealthResponse = {
   status: "ok" | "error";
@@ -37,7 +37,7 @@ export type UserRole = (typeof USER_ROLES)[number];
 export type User = { id: string; email: string; role: UserRole; colorMode: ColorMode };
 export type AuthResponse = { token: string; user: User };
 
-async function postForToken(path: string, body: unknown, errorMessage: string): Promise<AuthResponse> {
+async function postForToken(path: string, body: unknown, errorMessage: string, animate = false): Promise<AuthResponse> {
   const res = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -54,7 +54,7 @@ async function postForToken(path: string, body: unknown, errorMessage: string): 
   // ThemeSync's refetch: this is the whole "switching accounts visibly switches
   // products" of #75, and the answer already carries both halves of the theme.
   writeModeHint(data.user.colorMode);
-  applyTheme(data.user.role, data.user.colorMode);
+  (animate ? transitionTheme : applyTheme)(data.user.role, data.user.colorMode);
   return data;
 }
 
@@ -67,12 +67,13 @@ export function register(input: {
 }
 
 export function login(input: { email: string; password: string }): Promise<AuthResponse> {
-  return postForToken("/api/v1/auth/login", input, "Login failed");
+  return postForToken("/api/v1/auth/login", input, "Login failed", true);
 }
 
 export function logout(): void {
   clearToken();
   queryClient.clear();
+  cancelThemeTransition();
   // Back to the signed-out theme immediately. The mode hint is kept: it is a
   // fact about this device, and flipping the login page to light behind a reader
   // who chose dark reads as a bug rather than as a sign-out.

@@ -340,3 +340,13 @@ their data or pagination contracts. `min-width: 0`, `overflow-x: hidden`, and th
 `overflow-x: clip` keep long names, URLs, and register metadata inside the viewport. Added a
 primitive assertion for the count contract. Verified with the full frontend suite (**250 tests**)
 and `npm run build` (`tsc` + Vite).
+
+**#78 — the sign-in transition.** Login now uses a dedicated `transitionTheme` seam after the
+auth response has stored the token and cleared the query cache. It applies the role and light/dark
+mode immediately, while a temporary `theme-transition` class lets the already-painted signed-out
+surface retint in place; the wordmark is explicitly excluded and the dashboard navigation is not
+delayed. CSS transitions run for 700ms with rules first, washes next, and accent properties last.
+The class is removed by one resettable timer, so repeated account switches cannot leave stale cleanup
+behind. `prefers-reduced-motion: reduce` skips the class and timer entirely. Added seam tests for
+the 700ms lifecycle and reduced-motion path, plus a login integration assertion. Verified with the
+full frontend suite and production build; no new dependency or ADR was needed.

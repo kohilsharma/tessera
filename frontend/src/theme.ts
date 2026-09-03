@@ -66,3 +66,28 @@ export function applyTheme(role: string | null | undefined, mode: ColorMode): vo
   const meta = document.querySelector('meta[name="theme-color"]');
   if (paper && meta) meta.setAttribute("content", paper);
 }
+
+let transitionTimer: number | undefined;
+
+export function cancelThemeTransition(): void {
+  if (transitionTimer !== undefined) window.clearTimeout(transitionTimer);
+  transitionTimer = undefined;
+  document.documentElement.classList.remove("theme-transition");
+}
+
+export function transitionTheme(role: string | null | undefined, mode: ColorMode): void {
+  const html = document.documentElement;
+  cancelThemeTransition();
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+    html.classList.remove("theme-transition");
+    applyTheme(role, mode);
+    return;
+  }
+
+  html.classList.add("theme-transition");
+  applyTheme(role, mode);
+  transitionTimer = window.setTimeout(() => {
+    html.classList.remove("theme-transition");
+    transitionTimer = undefined;
+  }, 700);
+}

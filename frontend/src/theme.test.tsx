@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { applyTheme, isDark, readModeHint, themeForRole, writeModeHint } from "./theme";
+import { applyTheme, cancelThemeTransition, isDark, readModeHint, themeForRole, transitionTheme, writeModeHint } from "./theme";
 import { roleFromToken, setToken } from "./auth/token";
 import { ThemeSync } from "./components/ThemeSync";
 import { jsonResponse, renderWithProviders } from "./test/renderWithProviders";
@@ -33,6 +33,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -89,6 +90,47 @@ describe("light/dark is the reader's half", () => {
     applyTheme("investor", "light");
     expect(html().dataset.theme).toBe("terminal");
     expect(html()).not.toHaveClass("dark");
+  });
+});
+
+describe("the sign-in transition", () => {
+  it("retints once and removes its transition state after 700ms", () => {
+    vi.useFakeTimers();
+    applyTheme(null, "light");
+
+    transitionTheme("investor", "dark");
+
+    expect(html()).toHaveClass("theme-transition");
+    expect(html().dataset.theme).toBe("terminal");
+    expect(html()).toHaveClass("dark");
+
+    vi.advanceTimersByTime(699);
+    expect(html()).toHaveClass("theme-transition");
+    vi.advanceTimersByTime(1);
+    expect(html()).not.toHaveClass("theme-transition");
+    vi.useRealTimers();
+  });
+
+  it("swaps immediately when reduced motion is preferred", () => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: query.includes("prefers-reduced-motion: reduce"),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+
+    transitionTheme("student", "light");
+
+    expect(html().dataset.theme).toBe("studio");
+    expect(html()).not.toHaveClass("theme-transition");
+  });
+
+  it("can cancel the sweep before signing out", () => {
+    vi.useFakeTimers();
+    transitionTheme("investor", "dark");
+    cancelThemeTransition();
+    expect(html()).not.toHaveClass("theme-transition");
+    vi.advanceTimersByTime(700);
+    expect(html()).not.toHaveClass("theme-transition");
   });
 });
 

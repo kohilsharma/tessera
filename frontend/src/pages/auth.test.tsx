@@ -115,6 +115,7 @@ describe("Login", () => {
     await userEvent.click(screen.getByRole("button", { name: "Log in" }));
 
     await waitFor(() => expect(getToken()).toBe("a.jwt.token"));
+    expect(document.documentElement).toHaveClass("theme-transition");
   });
 
   // #75's "switching accounts visibly switches products", at the seam where a
