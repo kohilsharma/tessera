@@ -1655,4 +1655,44 @@ describe("the clustering worker job", () => {
   it("refuses a job name it does not know", async () => {
     await expect(runClusteringJob({ name: "sweep" })).rejects.toThrow(/Unknown clustering job/);
   });
+
+  // Naming may fail quietly; a half-configured SYNTHESIS_* block used to fail the
+  // whole pass instead, because the provider was resolved before the run started.
+  it("seeds and names nothing, rather than failing, when the synthesis config cannot build a provider", async () => {
+    const first = await createPublisher("broken-one.example");
+    const second = await createPublisher("broken-two.example");
+    const medoid = await createArticle({
+      publisherId: first.id,
+      title: "Regional ceasefire talks resume",
+      vector: axisVector(0),
+      publishedAt: hoursAgo(3),
+    });
+    await createArticle({
+      publisherId: second.id,
+      title: "Talks resume, mediators say",
+      vector: axisVector(0, -0.2),
+      publishedAt: hoursAgo(1),
+    });
+
+    // A provider that cannot be constructed at all: openai selected, no approved origin.
+    process.env.SYNTHESIS_PROVIDER = "openai";
+    process.env.SYNTHESIS_API_KEY = "test-key";
+    process.env.SYNTHESIS_API_BASE = "https://provider.example/v1";
+    delete process.env.SYNTHESIS_ALLOWED_ORIGIN;
+    try {
+      await runClusteringJob({ name: CLUSTERING_RUN_JOB });
+    } finally {
+      process.env.SYNTHESIS_PROVIDER = "";
+      process.env.SYNTHESIS_API_KEY = "";
+      process.env.SYNTHESIS_API_BASE = "";
+    }
+
+    const runs = await AppDataSource.getRepository(ClusteringRun).find();
+    expect(runs).toHaveLength(1);
+    expect(runs[0].status).toBe("succeeded");
+    // The membership the pass computed stands; only the title falls back.
+    const story = await AppDataSource.getRepository(Story).findOneByOrFail({});
+    expect(story.title).toBe(medoid.title);
+    expect(await AppDataSource.getRepository(Article).countBy({ storyId: story.id })).toBe(2);
+  });
 });
