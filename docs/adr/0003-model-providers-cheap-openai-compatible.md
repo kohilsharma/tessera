@@ -1,7 +1,10 @@
 # 3. Model providers: cheap OpenAI-compatible models + own validate-repair loop
 
 Date: 2026-07-25
-Status: Accepted
+Status: Accepted — the interfaces, the env-configured model IDs, the validate-repair loop and the
+Mock all stand. The "paid, contractually no-training provider" that ADR-0018 and ADR-0023 later
+attributed to this ADR is **superseded by ADR-0033**: no paid provider was ever chosen here, and the
+running config is two free tiers.
 
 ## Context
 

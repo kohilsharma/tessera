@@ -41,8 +41,9 @@ articlesRouter.get(
       ...toPublicArticle(article),
       // CONTEXT.md "Terms Class" (#40): the Publisher's rights class decides
       // whether its text may be served, so rights enforcement is one rule in one
-      // place. Anything a connector created is `internal_only` until someone
-      // classifies it by hand, so the gate fails closed.
+      // place. Since ADR-0032 the default class clears it, so this is where a
+      // reader who asks "says who?" actually reads the reporting; a publisher
+      // reclassified by hand is what puts the gate back.
       analysisText: mayServeText(article.publisher.termsClass, article.analysisTextMode)
         ? article.analysisText
         : null,

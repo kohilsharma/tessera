@@ -41,11 +41,16 @@ beforeAll(async () => {
   const publisherA = await publishers.save({
     name: "Publisher A",
     domain: "publisher-a.example",
-    // Cleared to serve its text (#40); Publisher B is left at the fail-closed
-    // `internal_only` default, so the two cover both sides of the rights gate.
+    // Cleared to serve its text (#40); Publisher B is pinned to `internal_only`,
+    // so the two cover both sides of the rights gate. Pinned rather than defaulted
+    // because since ADR-0032 the default is `licensed`.
     termsClass: "licensed",
   });
-  const publisherB = await publishers.save({ name: "Publisher B", domain: "publisher-b.example" });
+  const publisherB = await publishers.save({
+    name: "Publisher B",
+    domain: "publisher-b.example",
+    termsClass: "internal_only" as const,
+  });
 
   const storyAlpha = await stories.save({
     slug: "story-alpha",
@@ -123,8 +128,9 @@ beforeAll(async () => {
     publishedAt: new Date("2026-01-03T09:00:00Z"),
   });
   licensedFullTextArticleId = licensedFullTextArticle.id;
-  // A body Tessera extracted from the page itself, under a cleared Publisher:
-  // ADR-0018's floor, which no Terms Class lifts.
+  // A body Tessera extracted from the page itself, under a cleared Publisher.
+  // ADR-0032 lifted the floor that used to refuse this whatever the class: it is
+  // the text the analysis rests on, and a citation has to open onto something.
   const extractedTextArticle = await articles.save({
     storyId: storyBeta.id,
     storyAssignmentStatus: "auto_accepted" as const,
@@ -575,14 +581,14 @@ describe("GET /api/v1/articles/:id", () => {
     expect(res.body.analysisText).toBeNull();
   });
 
-  it("never serves text Tessera extracted itself, even for a cleared Publisher (ADR-0018)", async () => {
+  it("serves text Tessera extracted itself once the Publisher is cleared (ADR-0032)", async () => {
     const res = await request(app())
       .get(`/api/v1/articles/${extractedTextArticleId}`)
       .set("Authorization", `Bearer ${token}`);
 
     expect(res.status).toBe(200);
     expect(res.body.analysisTextMode).toBe("api_content");
-    expect(res.body.analysisText).toBeNull();
+    expect(res.body.analysisText).toBe("Body text Tessera extracted from the page itself.");
   });
 
   it("returns 404 for a well-formed but unknown Article id", async () => {

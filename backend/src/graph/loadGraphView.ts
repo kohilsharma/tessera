@@ -379,12 +379,12 @@ export async function loadEntityNeighbourhood(
 // observed in, so the weight a line is drawn at is a count of reporting a reader can read
 // rather than a number to take on trust.
 //
-// Metadata only, and that is the Terms Class gate rather than a gap in it: ADR-0018 keeps
-// metadata open and bodies internal, and `toPublicArticle` does not select `analysisText` at
-// all, so this list is fail-closed by construction — even for a `licensed` Publisher whose
-// text `mayServeText` would clear. Text a reader may read is reachable through the Article
-// record, where that gate lives; a second surface serving bodies would be a second place to
-// get it wrong. The mode rides along so a reader knows what Tessera holds.
+// Metadata only, and that is one surface for body text rather than a gap in the Terms Class
+// gate: `toPublicArticle` does not select `analysisText` at all, so this list carries none
+// whatever the Publisher's class clears (ADR-0032 clears a good deal more than it used to).
+// Text a reader may read is reachable through the Article record, where that gate lives; a
+// second surface serving bodies would be a second place to get it wrong. The mode rides
+// along so a reader knows what Tessera holds.
 export type EdgeCitation = ReturnType<typeof toPublicArticle> & {
   // Where the reporting is also part of a Story a reader can open. Null for reporting the
   // clustering pass is still unsure about, and for the firehose half the graph rests on,

@@ -438,3 +438,89 @@ class is on. Three of those were mutation-checked — swapping the await for `Pr
 pinning `crossesMode` to `false`, and restoring the static pending label each fail their test. Full
 frontend suite **260 tests across 18 files** and `npm run build` pass; no new dependency, and #78
 names no ADR.
+
+**#79 — the rights policy relaxed, so a citation opens onto something.** The bug was a sentence in
+`Publisher.ts` and a column default, and between them they emptied the product's central promise.
+`mayServeText` refused the `api_content` rung under *every* Terms Class, and connector-created
+publishers defaulted to `internal_only`, which is every publisher outside the eight fixture ones the
+seed classifies by hand. So
+`routes/articles.ts` stripped `analysisText` and `runGeneration` nulled each citation's excerpt across
+the whole live corpus: Tessera fetched a body, stored it, embedded it, selected it as evidence,
+reasoned over it, and then would not show the reader the sentence the claim came from. DESIGN.md §8
+says a citation that cannot open is a bug rather than a style, and this was that bug at corpus scale.
+
+The resolution is a **single axis**: the Terms Class governs *serving*, and storing a body for
+internal analysis is cleared globally. That keeps every bullet of the ticket literally — `terms_class`,
+`mayServeText` and `mayStoreText` all stay as modelled concepts, because they are spec §8 and they
+earn marks — while making the policy one expression in one file. `licensed` now clears every rung
+including `api_content`, `syndicated_excerpt` clears `feed_excerpt` alone, and `internal_only` and
+`open_metadata` still clear nothing, so the vocabulary keeps its full range and re-tightening is a
+`UPDATE publishers SET "termsClass" = …` rather than a code change. Both read paths call `mayServeText`
+per row at read time and cache no decision, which is what makes that true. ADR-0032 records it and
+what each degree of re-tightening would cost; ADR-0033 supersedes the "paid, contractually
+no-training provider" that ADR-0018 and ADR-0023 both attributed to ADR-0003, because the running
+`.env` is two free tiers — and the synthesis one is Google's, the provider ADR-0023 itself established
+is training-eligible on the free tier. ADR-0003 never decided a paid provider; the claim accreted.
+
+`runGeneration.ts` needed **no code change at all**. It already asked `mayServeText`; the answer
+changing was the entire fix, which is the seam paying for itself. The migration
+(`1755767000000-RelaxPublisherTermsPolicy`) flips the column default and moves existing
+`internal_only` rows up, and its `down` restores the default only — the column carries no provenance,
+so a hand-assigned `internal_only` is indistinguishable from a defaulted one and the comment says so
+rather than pretending to reverse cleanly.
+
+Two things that were not in the ticket and mattered more than most of what was. First, the storage
+gate was **losing data**: `mayStoreText` refused text for `open_metadata`, and `runConnector`
+implemented that by discarding the whole sighting as `rejectedByPolicy` — the open metadata went into
+the bin with the body it happened to arrive attached to, so a publisher that had cleared its metadata
+and nothing else contributed no Article, no entities, no edges, no timeline point. That path is gone;
+the renamed test asserts three inserts, zero rejections, bodies stored, and serving still refused.
+The `rejectedByPolicy` ledger — the `ItemOutcome` member, the `Counters` key, the `IngestionRun`
+column, the Admin console's "Rejected" row — is deliberately **kept and dormant**, reading 0 on every
+run, because it is the line a re-tightening repopulates rather than has to re-add.
+
+Second, the trap. `EXTRACTABLE_TERMS_CLASSES` was derived as
+`mayStoreText && !mayServeText(feed_excerpt)` — "we may hold the body, and the excerpt is not already
+servable". With `licensed` as the default that predicate matches **nobody**, and the Readability
+extraction pass would have silently become a no-op still reporting success. It now asks whether the
+class clears the rung extraction *produces*:
+`mayStoreText && (!mayServeText(feed_excerpt) || mayServeText(api_content))`, which leaves
+`syndicated_excerpt` as the one excluded class — so the candidate-rule test dropped from three cases
+to two, and its unattempted count from 3 to 2. Caught by tracing the predicate across all four
+classes before editing rather than by a failing test, which is worth recording: no test would have
+failed.
+
+On the frontend the same two falsehoods were on screen. The `api_content` label said the body came
+from "the GDELT DOC API" — stale since #47, since Extraction reads the publisher's own page and the
+DOC API produces `metadata_only` rows — and is now **"Extracted text"**, using CONTEXT.md's own word
+for the operation; it appears on exactly one surface, so nothing else drifts. The rights block's
+"Redistribution" row told the reader body text "is never redistributed or republished" directly
+beneath the body it was showing, which is as flat a contradiction as a page can carry. It is now
+**"Terms Class"** — CONTEXT.md's own term rather than a paraphrase — over three cases keyed on the
+same condition the section above already reads, since `analysisText` is absent exactly where the
+class refuses to serve it. Each case is attributed to *Tessera's* classification ("Tessera classifies
+this Publisher's text as cleared to show"), not to the Publisher: the class is our judgement over a
+column default nobody verified, and asserting a third party's licence as fact is a verdict this
+product cannot support. Copy only, inside `.record-note dd`'s existing `68ch` measure, and both
+length-sensitive strings are shorter than ones the page already ships, so no browser round was spent
+on a wrap a stylesheet already decides.
+
+Verification: `npx tsc --noEmit` clean in both packages. `publisher.test.ts` was rewritten TDD-first
+and went red on `mayStoreText("open_metadata")` before the policy change (2 failed / 2 passed → 4
+passed). Backend, by file: publisher + stories + dashboard **50 passed**, ingestion **84 passed, 8
+skipped**, and the six files that only depended on the old default — generation, seed, graphView,
+entityNeighbourhood, flashcards, search — **182 passed**; the whole backend suite **509 passed, 11
+skipped across 21 files**. Frontend **261 tests across 18 files** (one
+new: an extracted body is named as extracted, not as API content) and `npm run build` pass. CONTEXT.md's
+*Terms Class* and *Extraction* entries and AGENTS.md's rights invariant are rewritten to the new
+policy, and ADR-0003, ADR-0018, ADR-0023 and ADR-0024 carry supersede notes on their `Status:` lines.
+
+`/code-review` against `HEAD` found no correctness defect on either axis and three stale comments
+still asserting the superseded policy, each at a site the change had touched but not read:
+`runConnector.ts` at the very line that creates the Publisher row, `routes/dashboard.ts` describing
+the Admin publisher register, and `runGeneration.ts:59` — whose frontend mirror had already been
+corrected, so the two ends of one read path disagreed in prose about the same rule. Fixed with the
+review. The Standards axis also argued, and it was right, that the served-case copy asserted a third
+party's licence as fact when the value came from a column default nobody had verified; hence the
+attribution to Tessera above.
+

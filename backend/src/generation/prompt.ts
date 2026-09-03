@@ -71,10 +71,11 @@ const EXCERPT_WORDING = [
 // no-key path depends on `[A1]` appearing before any other bracket. The end-to-end
 // Mock test in tests/generation.test.ts is what fails if that ordering drifts.
 //
-// The excerpts go out whatever the Publisher's Terms Class says, which is ADR-0003's
-// documented exception to bodies staying internal (ADR-0018): synthesis evidence text
-// goes to the paid, contractually no-training provider. Serving that text back to a
-// reader is a separate decision, made per Publisher, in runGeneration's view.
+// The excerpts go out whatever the Publisher's Terms Class says: sending evidence text
+// to the synthesis provider is a documented exception to bodies staying internal
+// (ADR-0018), and ADR-0033 records which provider that is and on what terms — access
+// and cost, not a no-training contract. Serving that same text back to a reader is a
+// separate decision, made per Publisher, in runGeneration's view.
 export function buildAnalysisPrompt(
   evidence: SelectedEvidence[],
   lens: GenerationLens,

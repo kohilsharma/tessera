@@ -1,7 +1,11 @@
 # 23. Embeddings: hosted API is the default; TEI is optional
 
 Date: 2026-08-21
-Status: Accepted
+Status: Accepted — except the **provider choice** and the "ADR-0003's paid provider … where
+no-training is contractual" clause in its rights exception, both **superseded by ADR-0033**: what runs
+is an NVIDIA endpoint for embeddings and Google's free tier for synthesis, which is the provider this
+ADR's own research calls training-eligible. The exception itself survives, on ADR-0032's reasoning
+rather than on a contract. The RAM analysis, the TEI demotion and `vector(1024)` are unchanged.
 Partially supersedes: ADR-0017 (serving path + fallback list only — `vector(1024)`,
   the HNSW cosine index, and the `EmbeddingProvider` interface are unchanged)
 Depends on: ADR-0003 (provider interfaces), ADR-0015 (local demo)

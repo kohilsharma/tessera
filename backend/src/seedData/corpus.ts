@@ -10,8 +10,8 @@ export type SeedPublisher = { name: string; domain: string; termsClass: TermsCla
 
 // `licensed` across the board: every word of fixture text below is our own
 // synthetic writing (ADR-0007), so serving it is a rights decision we can
-// actually make. Live publishers a connector discovers get the fail-closed
-// `internal_only` default instead, until an Admin classifies them by hand (#40).
+// actually make. Since ADR-0032 that is also the default a connector's
+// discovered publishers get — this list is no longer the exception it was.
 export const SEED_PUBLISHERS: SeedPublisher[] = [
   { name: "Meridian Wire", domain: "meridianwire.example", termsClass: "licensed" },
   { name: "Harbor Press", domain: "harborpress.example", termsClass: "licensed" },

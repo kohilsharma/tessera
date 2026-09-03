@@ -37,9 +37,9 @@ import { EmptyState, EntryList, PendingState, RetryableError } from "../componen
 // and its own four states: a reader who opens a link is owed either the evidence or the reason
 // there is none, and neither is the neighbourhood's business.
 //
-// Metadata only, and it says so. The endpoint serves what a Publisher's Terms Class allows a
-// list to carry (ADR-0018); article text lives on the Article record, where the mode that
-// governs it is stated beside it.
+// Metadata only, and it says so. A list carries no body whatever a Publisher's Terms Class
+// allows; article text lives on the Article record, where the class is consulted and the mode
+// that governs it is stated beside it (ADR-0032).
 function EdgeEvidence({
   focus,
   neighbour,

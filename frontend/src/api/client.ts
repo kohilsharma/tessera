@@ -375,8 +375,9 @@ export type ArticleDetail = {
   id: string;
   title: string;
   url: string;
-  // null when the Article's Analysis Text Mode is not ours to redistribute
-  // (ADR-0018) — the body is held for analysis but never served.
+  // null where this Publisher's Terms Class does not clear its text for serving
+  // (ADR-0032) — the body is still held for analysis, just not shown. Since the
+  // default class became `licensed` this is the exception rather than the rule.
   analysisText: string | null;
   analysisTextMode: AnalysisTextMode;
   publishedAt: string;
@@ -437,8 +438,9 @@ export function getArticle(id: string): Promise<ArticleDetail> {
 // #22: mirrors backend/src/routes/search.ts's hybrid (FTS + vector, RRF) search.
 export type SearchSortField = "relevance" | "publishedAt";
 
-// No analysisText: body text is served only by the Article detail endpoint
-// (ADR-0018), so a result links through to it rather than carrying it.
+// No analysisText: body text is served only by the Article detail endpoint, so a
+// result links through to it rather than carrying it. That is one read path per
+// body, which is what keeps the Terms Class check in one place (ADR-0032).
 export type SearchResult = ArticleSummary & {
   story: { id: string; slug: string; title: string };
   score: number;
@@ -820,8 +822,9 @@ export type Neighbourhood = {
 
 // The reporting one edge was observed in — the citation invariant made openable. Metadata
 // only, whatever a Publisher's Terms Class allows: a body is served from the Article
-// record alone (ADR-0018). `story` is null while an Article's Story membership is not
-// accepted, so the link is offered only where it resolves.
+// record alone, which is the one place that class is consulted (ADR-0032). `story` is null
+// while an Article's Story membership is not accepted, so the link is offered only where
+// it resolves.
 export type EdgeCitation = ArticleSummary & { story: { id: string; slug: string; title: string } | null };
 
 // `weight` is the edge's whole weight, which may exceed the citations returned — the page
@@ -875,7 +878,8 @@ export type ClaimType = CoreClaimType | GenerationLens;
 
 // A row of the frozen EvidenceSet: the stable id a claim cites and the Article it
 // resolves to. `excerpt` is null where the Publisher's Terms Class does not clear
-// that text for serving (#40) — the analysis still rests on it.
+// that text for serving (#40) — the analysis still rests on it. Since ADR-0032 that
+// is the exception: a citation normally opens onto the words the claim came from.
 export type EvidenceRow = {
   evidenceId: string;
   articleId: string;

@@ -159,13 +159,29 @@ export const EXTRACTION_MIN_DOMAIN_INTERVAL_MS = 2_000;
 // into a burst.
 export const MAX_EXTRACTION_ATTEMPTS = 20;
 
-// A candidate's Publisher must let Tessera store the body at all, and must not
-// already have cleared its excerpt for serving: no Terms Class clears text
-// Tessera extracted itself (CONTEXT.md "Terms Class"), so raising such an Article
-// would take out of the API exactly the text #40 put there. Derived from the two
+// A candidate's Publisher must let Tessera store the body, and raising the rung
+// must not cost the Article a serving right it already has. Derived from the two
 // rights functions rather than restated, so a new class is classified once.
+//
+// ADR-0032 is what makes this two clauses rather than one: an extracted body used
+// to be unservable whatever the class, so any publisher whose excerpt was already
+// cleared had to be left alone — raising it would have taken text out of the API.
+// A `licensed` publisher now clears `api_content` too, so it is extractable again,
+// which matters more than it reads: `licensed` is the default, so the old rule
+// would have left this pass with nothing to do. `syndicated_excerpt` is the class
+// the rule still bites on — it clears the feed's excerpt and nothing stronger.
+//
+// The `mayStoreText` clause is a tautology today, since ADR-0032 clears storage for
+// every class. It stays because it is the precondition rather than a filter: without
+// it, re-tightening that one line would narrow what Tessera stores while leaving this
+// pass still fetching the bodies it may no longer keep. It also means `open_metadata`
+// is an extraction candidate now where it was excluded before — consistent, since its
+// body is stored for analysis and served to nobody, but it is a real change in which
+// pages the pass will fetch.
 const EXTRACTABLE_TERMS_CLASSES = TERMS_CLASSES.filter(
-  (termsClass) => mayStoreText(termsClass) && !mayServeText(termsClass, "feed_excerpt"),
+  (termsClass) =>
+    mayStoreText(termsClass) &&
+    (!mayServeText(termsClass, "feed_excerpt") || mayServeText(termsClass, "api_content")),
 );
 // The connector half of the candidate rule, named once: discoverExtraction's SQL
 // filters on these values and the live smoke picks the feeds it covers with the
@@ -438,6 +454,12 @@ export async function httpFetchPage(rawUrl: string, deps: PageFetchDeps = pageFe
 
 // The five terminal outcomes for one discovered item. Every item ends in exactly
 // one, which is what makes the counters on an IngestionRun sum to `discovered`.
+//
+// `rejectedByPolicy` is dormant rather than gone: ADR-0032 left no path that
+// refuses a body on rights grounds, so the counter reads 0 on every run, and it
+// stays because it is the ledger line a re-tightening repopulates — an outcome
+// nothing can currently reach is cheaper to keep than a column to drop and
+// re-add.
 type ItemOutcome = "inserted" | "enriched" | "duplicate" | "rejectedByPolicy" | "failed";
 
 type Counters = Record<ItemOutcome, number>;
@@ -456,8 +478,9 @@ function fail(reason: string): never {
 // domain. orIgnore + read-back rather than an upsert: two connectors can sight a
 // new publisher at the same moment, and an upsert would overwrite the name of a
 // publisher someone had already curated by hand.
-// A new Publisher takes the column's `internal_only` default (#40), so its text
-// is held for analysis but never served until an Admin classifies it.
+// A new Publisher takes the column's `licensed` default (ADR-0032), so its text is
+// both held for analysis and readable by the reader who asks "says who?". Narrowing
+// one is an Admin reclassification, never a code change.
 async function resolvePublisher(manager: EntityManager, domain: string, name: string): Promise<Publisher> {
   const publishers = manager.getRepository(Publisher);
   await publishers.createQueryBuilder().insert().values({ domain, name }).orIgnore().execute();
@@ -543,12 +566,16 @@ async function reconcileWithHeld(
 
   let publisherUpdated = false;
   if (sourcePublisher && sourcePublisher.id !== held.publisherId) {
-    const heldHasText = held.analysisTextMode !== "metadata_only";
+    // Storage is no longer the class's to refuse (ADR-0032), so repointing an
+    // Article at the authoritative source Publisher turns on one question: whether
+    // it would newly expose text the Publisher this Article currently names has not
+    // cleared. A correction to provenance must not be a serving decision taken
+    // sideways.
     const raisesServingRights =
-      heldHasText &&
+      held.analysisTextMode !== "metadata_only" &&
       mayServeText(sourcePublisher.termsClass, held.analysisTextMode) &&
       !mayServeText(heldPublisher.termsClass, held.analysisTextMode);
-    if ((!heldHasText || mayStoreText(sourcePublisher.termsClass)) && !raisesServingRights) {
+    if (!raisesServingRights) {
       // Match both identity and mode so a concurrent text enrichment or Publisher
       // correction cannot invalidate the rights decision made above.
       publisherUpdated =
@@ -583,10 +610,6 @@ async function reconcileWithHeld(
 
   let current = publisherUpdated ? { ...held, publisherId: sourcePublisher!.id } : held;
   while (isStrongerAnalysisTextMode(mode, current.analysisTextMode)) {
-    if (text !== null) {
-      const currentPublisher = await publishers.findOneByOrFail({ id: current.publisherId });
-      if (!mayStoreText(currentPublisher.termsClass)) return "rejectedByPolicy";
-    }
     // Compare-and-set the rung and Publisher: concurrent sightings may hold
     // different dedupe locks, so only the transaction that still sees this exact
     // state may count the transition as enrichment.
@@ -680,7 +703,8 @@ async function reconcileAndStage(
     sourcePublisherId,
     item.publisherName,
   );
-  // An item declined on rights grounds must leave no derived rows behind.
+  // An item declined on rights grounds must leave no derived rows behind. Nothing
+  // declines one today (ADR-0032) — this is the shape a re-tightening returns to.
   if (outcome === "rejectedByPolicy") return outcome;
   const staged = await stageAnnotations(manager, existing.id, item.annotations);
   // A sighting that staged occurrences nobody held contributed something, so it
@@ -929,9 +953,9 @@ async function discoverExtraction(deps: RunConnectorDeps): Promise<Discovery> {
       link: candidate.url,
       publishedAt: candidate.publishedAt,
       text,
-      // ADR-0024: a body Tessera extracted itself, which mayServeText refuses to
-      // serve whatever the Publisher's Terms Class (#40) — it is text no
-      // publisher handed us.
+      // ADR-0024's third rung: a body Tessera read off the publisher's own page.
+      // Servable where the Publisher's class clears it, which since ADR-0032 is
+      // the default — the whole reason this pass is worth running.
       mode: "api_content",
       // Tone is GKG's alone.
       tone: null,
@@ -1037,16 +1061,9 @@ async function ingestItem(item: DiscoveredItem, connector: IngestionConnector): 
       return reconcileAndStage(manager, held, item, connector.id, text, sourcePublisher?.id ?? null);
     }
 
-    const existingPublisher = await manager.getRepository(Publisher).findOneBy({ domain });
-    if (text !== null && existingPublisher && !mayStoreText(existingPublisher.termsClass)) {
-      return "rejectedByPolicy";
-    }
     if (await findDuplicateId(manager, domain, title, publishedAt)) return "duplicate";
 
     const publisher = await resolvePublisher(manager, domain, item.publisherName ?? domain);
-    // The rights gate (#40). On inserts the discovered Publisher decides; held
-    // Articles are checked against the Publisher they retain in reconcileWithHeld.
-    if (text !== null && !mayStoreText(publisher.termsClass)) return "rejectedByPolicy";
 
     const inserted = await articles
       .createQueryBuilder()

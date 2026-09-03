@@ -1,7 +1,10 @@
 # 24. Analysis Text Mode is an ordered ladder; connector overlap enriches, never duplicates
 
 Date: 2026-08-30
-Status: Accepted
+Status: Accepted — the ladder, the one-way rule and enrichment-over-duplication are all unchanged.
+What each rung may be **served** under is **superseded by ADR-0032**, whose one correction to this
+document is that `api_content` is servable where a Publisher's class clears it. Item 2's
+"`metadata_only` is never redistributable" stands as written — that rung holds no text to serve.
 Depends on: ADR-0007 (timebox + fixtures), ADR-0018 (GKG ingestion), ADR-0022 (build order)
 
 ## Context

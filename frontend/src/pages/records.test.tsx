@@ -581,10 +581,11 @@ describe("Article detail — the record's own terms", () => {
     ).toBeInTheDocument();
   });
 
-  it("states that body text is never redistributed, and links the original", async () => {
+  it("says the body it is showing is cleared by Tessera's own classification, and links the original", async () => {
     renderArticle();
 
-    expect(await screen.findByText(/never redistributed or republished/)).toBeInTheDocument();
+    expect(await screen.findByText(/Tessera classifies this Publisher's text as cleared to show/)).toBeInTheDocument();
+    expect(screen.queryByText(/never redistributed or republished/)).not.toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: `Read the original at ${publisher.domain}` }),
     ).toHaveAttribute("href", article.url);
@@ -595,6 +596,19 @@ describe("Article detail — the record's own terms", () => {
 
     expect(await screen.findByText(/held for analysis only/)).toBeInTheDocument();
     expect(screen.getByText("Licensed full text")).toBeInTheDocument();
+    // The rule behind the withholding, not just its effect: a reader who sees no
+    // body is told whose decision that was.
+    expect(screen.getByText(/does not classify this Publisher's text as cleared to show/)).toBeInTheDocument();
+  });
+
+  // #79: the rung Extraction produces is served now that a Publisher defaults to
+  // `licensed` (ADR-0032), and no API ever served it — the old label said one did.
+  it("names an extracted body as extracted rather than as API content", async () => {
+    renderArticle({ analysisTextMode: "api_content" });
+
+    expect(await screen.findByText("Extracted text")).toBeInTheDocument();
+    expect(screen.queryByText(/API content/)).not.toBeInTheDocument();
+    expect(screen.getByText(/read from this Publisher's own page/)).toBeInTheDocument();
   });
 
   it("states when an Article has metadata but no analysable text", async () => {

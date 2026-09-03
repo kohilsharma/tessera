@@ -260,9 +260,10 @@ describe("runConnector over an RSS feed", () => {
       expect(article.publisher.domain).toBe("npr.org");
       // Named from the feed's channel title, keyed on the unique domain.
       expect(article.publisher.name).toBe("NPR Topics: World");
-      // #40: a Publisher nobody has classified is `internal_only`, so its text is
-      // held for analysis and never served — the rights gate fails closed.
-      expect(article.publisher.termsClass).toBe("internal_only");
+      // ADR-0032: a Publisher nobody has classified is `licensed`, so its text is
+      // held for analysis *and* readable — the reader who asks "says who?" gets an
+      // answer without an Admin classifying anything first.
+      expect(article.publisher.termsClass).toBe("licensed");
     }
 
     // content:encoded is HTML in a CDATA block: what lands is the text, not the
@@ -486,10 +487,12 @@ describe("runConnector over an RSS feed", () => {
     expect(after.discoveredByConnectorId).toBeNull();
   });
 
-  it("rejects text-bearing items from a metadata-only Publisher on rights grounds", async () => {
+  it("keeps a metadata-only Publisher's reporting instead of discarding it", async () => {
     const connector = await createRssConnector("https://bbc-metadata-only.example/feed.xml");
-    // Hand-classified: this publisher has cleared its metadata and nothing else,
-    // so an RSS excerpt is text Tessera may not keep at all (#40).
+    // Hand-classified `open_metadata`: this publisher has cleared its metadata and
+    // nothing else. Before ADR-0032 that refused *storage*, and ingestion answered
+    // by throwing the whole sighting away — three items in, nothing kept, the open
+    // metadata gone with the body. Now the class governs serving alone.
     await AppDataSource.getRepository(Publisher).save({
       name: "BBC News",
       domain: "bbc.co.uk",
@@ -500,11 +503,20 @@ describe("runConnector over an RSS feed", () => {
 
     expect(run!.status).toBe("succeeded");
     expect(run!.discovered).toBe(3);
-    expect(run!.rejectedByPolicy).toBe(3);
-    expect(run!.inserted).toBe(0);
+    expect(run!.inserted).toBe(3);
+    expect(run!.rejectedByPolicy).toBe(0);
     expect(run!.failed).toBe(0);
     expect(countersSumToDiscovered(run!)).toBe(true);
-    expect(await AppDataSource.getRepository(Article).count()).toBe(0);
+
+    const articles = await AppDataSource.getRepository(Article).find({ relations: { publisher: true } });
+    expect(articles).toHaveLength(3);
+    // Stored on the rung it can honestly claim, and every body held for analysis.
+    expect(articles.every((article) => article.analysisTextMode === "feed_excerpt")).toBe(true);
+    expect(articles.every((article) => article.analysisText !== null)).toBe(true);
+    // What the class still decides: none of it may be served.
+    expect(articles.every((article) => !mayServeText(article.publisher.termsClass, article.analysisTextMode))).toBe(
+      true,
+    );
   });
 
   it("fails a malformed item and not the run, and says why", async () => {
@@ -630,8 +642,8 @@ describe("runConnector over a GKG window", () => {
       expect(article.analysisText).toBeNull();
       // Retained for the Phase-3.5 timeline overlay.
       expect(article.tone).not.toBeNull();
-      // Auto-created and fail-closed, exactly as for RSS (#40).
-      expect(article.publisher.termsClass).toBe("internal_only");
+      // Auto-created and `licensed`, exactly as for RSS (ADR-0032).
+      expect(article.publisher.termsClass).toBe("licensed");
     }
     // One Publisher per GKG source domain, even when the document is served from
     // a more specific host.
@@ -999,9 +1011,13 @@ describe("runConnector over a GKG window", () => {
   it("does not let GKG attribution grant serving rights to held text", async () => {
     const gkgConnector = await createGkgConnector();
     const publishers = AppDataSource.getRepository(Publisher);
+    // Both classes are pinned rather than defaulted: since ADR-0032 the default is
+    // `licensed`, and a repoint between two `licensed` publishers grants nothing, so
+    // a test of the rule has to name a document host whose text is not servable.
     const documentHost = await publishers.save({
       name: "Times of India",
       domain: "timesofindia.indiatimes.com",
+      termsClass: "internal_only",
     });
     await publishers.save({ name: "India Times", domain: "indiatimes.com", termsClass: "licensed" });
     const held = await AppDataSource.getRepository(Article).save({
@@ -1010,7 +1026,7 @@ describe("runConnector over a GKG window", () => {
       discoveredByConnectorId: null,
       title: "An RSS headline for the same document",
       url: "https://timesofindia.indiatimes.com/city/guwahati/manipur-cm-khemchand-urges-people-to-avoid-bandhs-amid-nrc-demand/articleshow/133635705.cms",
-      analysisText: "Text cleared by the document-host Publisher.",
+      analysisText: "Text the document-host Publisher has not cleared.",
       analysisTextMode: "feed_excerpt",
       publishedAt: new Date("2026-08-30T19:00:00Z"),
     });
@@ -1023,11 +1039,14 @@ describe("runConnector over a GKG window", () => {
 
     expect(run!.enriched).toBe(1);
     expect(after.publisher.domain).toBe("timesofindia.indiatimes.com");
-    expect(after.analysisText).toBe("Text cleared by the document-host Publisher.");
+    expect(after.analysisText).toBe("Text the document-host Publisher has not cleared.");
     expect(after.tone).not.toBeNull();
+    // The surviving half of the rights rule in reconcileWithHeld: a correction to
+    // provenance must not be a serving decision taken sideways.
+    expect(mayServeText(after.publisher.termsClass, after.analysisTextMode)).toBe(false);
   });
 
-  it("rejects RSS text when the held GKG source Publisher is open_metadata", async () => {
+  it("enriches a GKG-held Article with RSS text whatever the Publisher's class", async () => {
     await AppDataSource.getRepository(Publisher).save({
       name: "India Times",
       domain: "indiatimes.com",
@@ -1048,40 +1067,16 @@ describe("runConnector over a GKG window", () => {
       relations: { publisher: true },
     });
 
-    expect(run!.rejectedByPolicy).toBe(1);
-    expect(run!.enriched).toBe(0);
-    expect(article.publisher.domain).toBe("indiatimes.com");
-    expect(article.analysisText).toBeNull();
-    expect(article.analysisTextMode).toBe("metadata_only");
-  });
-
-  it("uses the held source Publisher's terms for RSS enrichment", async () => {
-    const publishers = AppDataSource.getRepository(Publisher);
-    await publishers.save({ name: "India Times", domain: "indiatimes.com" });
-    await publishers.save({
-      name: "Times document host",
-      domain: "timesofindia.indiatimes.com",
-      termsClass: "open_metadata",
-    });
-    const gkgConnector = await createGkgConnector();
-    await runConnector(gkgConnector, gkgFixture("20260830190000.gkg.csv"));
-
-    const rssConnector = await createRssConnector("https://times.example/feed.xml");
-    const run = await runConnector(rssConnector, {
-      fetchText: async () =>
-        `<?xml version="1.0"?><rss version="2.0"><channel><title>Times of India</title><item><title>Same document with text</title><link>https://timesofindia.indiatimes.com/city/guwahati/manipur-cm-khemchand-urges-people-to-avoid-bandhs-amid-nrc-demand/articleshow/133635705.cms</link><pubDate>Sun, 30 Aug 2026 19:00:00 GMT</pubDate><description>Feed excerpt.</description></item></channel></rss>`,
-    });
-    const article = await AppDataSource.getRepository(Article).findOneOrFail({
-      where: {
-        url: "https://timesofindia.indiatimes.com/city/guwahati/manipur-cm-khemchand-urges-people-to-avoid-bandhs-amid-nrc-demand/articleshow/133635705.cms",
-      },
-      relations: { publisher: true },
-    });
-
+    // The rung the newcomer can honestly claim is the rung it gets: before
+    // ADR-0032 this enrichment was refused outright and the Article stayed
+    // text-less, which threw away the excerpt the feed handed us.
     expect(run!.enriched).toBe(1);
     expect(run!.rejectedByPolicy).toBe(0);
     expect(article.publisher.domain).toBe("indiatimes.com");
     expect(article.analysisText).toBe("Feed excerpt.");
+    expect(article.analysisTextMode).toBe("feed_excerpt");
+    // Held for analysis, served to nobody: the class still decides that half.
+    expect(mayServeText(article.publisher.termsClass, article.analysisTextMode)).toBe(false);
   });
 
   // GKG reports no publisher name, so an RSS channel title should improve the
@@ -1306,7 +1301,7 @@ describe("runConnector over the GDELT DOC API", () => {
       expect(article.analysisText).toBeNull();
       // Tone is GKG's alone.
       expect(article.tone).toBeNull();
-      expect(article.publisher.termsClass).toBe("internal_only");
+      expect(article.publisher.termsClass).toBe("licensed");
       // DOC names no publisher beyond the host, so the domain names it.
       expect(article.publisher.name).toBe(article.publisher.domain);
     }
@@ -1531,22 +1526,26 @@ describe("runConnector over Readability extraction", () => {
     expect(refused.every((article) => article.analysisText !== null)).toBe(true);
   });
 
-  it("stores the extracted body for analysis and serves it to nobody", async () => {
+  it("clears the extracted body for serving, but leaves it unreachable until it clusters", async () => {
     const rss = await createRssConnector("https://feeds.npr.org/1004/rss.xml");
     await runConnector(rss, { fetchText: nprFeed });
     const connector = await createExtractionConnector();
     await runConnector(connector, { fetchText: noFeed, fetchPage: () => page("npr-lake-ontario.html") });
-    const extracted = await AppDataSource.getRepository(Article).findOneByOrFail({ url: nprUrl });
+    const extracted = await AppDataSource.getRepository(Article).findOneOrFail({
+      where: { url: nprUrl },
+      relations: { publisher: true },
+    });
     expect(extracted.analysisTextMode).toBe("api_content");
 
-    // The strongest form of the rule: even hand-classified as `licensed`, a body
-    // Tessera extracted itself is not the publisher's to grant (CONTEXT.md "Terms
-    // Class"), so no Terms Class clears it.
-    await AppDataSource.getRepository(Publisher).update({ id: extracted.publisherId }, { termsClass: "licensed" });
-    expect(mayServeText("licensed", "api_content")).toBe(false);
+    // ADR-0032. The publisher is the one the feed created, at the `licensed`
+    // default, and the rung is the one extraction lands — so the body Tessera read
+    // off the page is text a reader may read. That is the whole point of the pass:
+    // under the old floor it could never be shown to anyone.
+    expect(extracted.publisher.termsClass).toBe("licensed");
+    expect(mayServeText(extracted.publisher.termsClass, extracted.analysisTextMode)).toBe(true);
 
-    // And today it is not reachable at all: ingestion leaves the Article
-    // unclustered, and every public read path joins through Story.
+    // Reachability is a separate gate and it still holds: ingestion leaves the
+    // Article unclustered, and every public read path joins through Story.
     const token = await registerAndLogin("extraction-reader@example.com", "student");
     const res = await request(app())
       .get(`/api/v1/articles/${extracted.id}`)
@@ -1638,10 +1637,9 @@ describe("runConnector over Readability extraction", () => {
     const rss = await createRssConnector("https://example.test/feed.xml");
     const fullTextRss = await createRssConnector("https://example.test/full-feed.xml", true, true);
     const publishers = AppDataSource.getRepository(Publisher);
-    const [internal, syndicated, open] = await Promise.all([
+    const [internal, syndicated] = await Promise.all([
       publishers.save({ name: "Internal", domain: "internal.test", termsClass: "internal_only" as const }),
       publishers.save({ name: "Syndicated", domain: "syndicated.test", termsClass: "syndicated_excerpt" as const }),
-      publishers.save({ name: "Open", domain: "open.test", termsClass: "open_metadata" as const }),
     ]);
     const teaser = "A one-line teaser.";
     await AppDataSource.getRepository(Article).insert([
@@ -1656,23 +1654,14 @@ describe("runConnector over Readability extraction", () => {
         analysisTextMode: "feed_excerpt" as const,
         publishedAt: new Date(),
       },
-      // #40 cleared this publisher's excerpt for serving, and no Terms Class clears
-      // an extracted body — so extracting would take text out of the API.
+      // The one class the candidate rule still bites on after ADR-0032: it clears
+      // the feed's excerpt and nothing stronger, so raising this Article to
+      // `api_content` would take text out of the API rather than add any.
       {
         publisherId: syndicated.id,
         discoveredByConnectorId: rss.id,
-        title: "Excerpt already cleared",
+        title: "Excerpt cleared, and nothing stronger",
         url: "https://syndicated.test/teased",
-        analysisText: teaser,
-        analysisTextMode: "feed_excerpt" as const,
-        publishedAt: new Date(),
-      },
-      // An open_metadata publisher's text is not Tessera's to hold at all.
-      {
-        publisherId: open.id,
-        discoveredByConnectorId: rss.id,
-        title: "Metadata only rights",
-        url: "https://open.test/teased",
         analysisText: teaser,
         analysisTextMode: "feed_excerpt" as const,
         publishedAt: new Date(),
@@ -1688,9 +1677,9 @@ describe("runConnector over Readability extraction", () => {
     expect(run!.status).toBe("succeeded");
     expect(run!.discovered).toBe(0);
     expect(countersSumToDiscovered(run!)).toBe(true);
-    // None of them was even marked as attempted: they are not candidates, as
-    // against candidates that failed.
-    expect(await AppDataSource.getRepository(Article).countBy({ extractionAttemptedAt: IsNull() })).toBe(3);
+    // Neither was even marked as attempted: they are not candidates, as against
+    // candidates that failed.
+    expect(await AppDataSource.getRepository(Article).countBy({ extractionAttemptedAt: IsNull() })).toBe(2);
   });
 
   it("declines a body no longer than the excerpt it would replace", async () => {

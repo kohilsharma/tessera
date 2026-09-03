@@ -302,8 +302,8 @@ describe("dashboard RBAC", () => {
       name: "Operator Press",
       domain: "operator-press.example",
       // Story 20: an operator can see which sources are cleared, and this one is
-      // at the fail-closed default (#40).
-      termsClass: "internal_only",
+      // at the default — `licensed` since ADR-0032.
+      termsClass: "licensed",
       articleCount: 0,
     });
   });

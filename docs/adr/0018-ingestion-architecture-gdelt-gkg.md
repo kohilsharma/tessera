@@ -1,7 +1,11 @@
 # 18. Ingestion architecture: GDELT GKG firehose + DOC API + RSS + Readability
 
 Date: 2026-07-26
-Status: Accepted
+Status: Accepted — except the **Licensing** bullet under "Constraints this bakes in", whose policy is
+**superseded by ADR-0032**: `terms_class` governs serving rather than storage, defaults to `licensed`,
+and clears `api_content` where the class allows it. The closing note on where synthesis evidence text
+goes is **superseded by ADR-0033**. The source mix, the constraints on GKG's shape, and item 4's
+internal-analysis *purpose* are unchanged.
 Refines: ADR-0006 (full live ingestion first), ADR-0007 (timebox + fixtures)
 
 ## Context

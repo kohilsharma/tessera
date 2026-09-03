@@ -11,7 +11,13 @@ import { PendingState, RetryableError } from "../components/uiStates";
 const ANALYSIS_TEXT_MODES: Record<AnalysisTextMode, { label: string; held: string }> = {
   metadata_only: { label: "Metadata only", held: "the title and source metadata, with no analysable article text" },
   feed_excerpt: { label: "Feed excerpt", held: "the headline and excerpt from this Publisher's feed" },
-  api_content: { label: "API content", held: "the article text served by the GDELT DOC API" },
+  // Not "API content", whatever the rung is called in the ladder: since #47 this
+  // text comes from Extraction reading the Publisher's own page, and no API ever
+  // served it. The rung keeps its name in CONTEXT.md; the reader gets the truth.
+  api_content: {
+    label: "Extracted text",
+    held: "the article body read from this Publisher's own page, where the feed carried only an excerpt",
+  },
   licensed_full_text: { label: "Licensed full text", held: "the full article text, under a partner licence" },
   manual_fixture: { label: "Manual fixture", held: "seeded demonstration text, not live coverage" },
 };
@@ -79,9 +85,10 @@ export default function ArticleDetail() {
         )}
       </RecordSection>
 
-      {/* ADR-0018, as a part of the record rather than a footnote under it:
-          Publisher metadata is open, the body is not, and the reader is told
-          which of the two they are looking at. */}
+      {/* ADR-0032, as a part of the record rather than a footnote under it: what
+          Tessera holds, whether this Publisher's terms let the reader read it,
+          and where the original is. The body being shown or withheld is the one
+          fact a reader cannot work out for themselves, so it is stated. */}
       <RecordSection heading="Rights and provenance">
         <dl className="record-note">
           <div>
@@ -91,11 +98,19 @@ export default function ArticleDetail() {
             </dd>
           </div>
           <div>
-            <dt>Redistribution</dt>
+            <dt>Terms Class</dt>
             <dd>
+              {/* The same three cases the section above reads, said as the rule
+                  behind them: `analysisText` is absent exactly where this
+                  Publisher's Terms Class refuses to serve it (ADR-0032).
+                  Attributed to Tessera, not to the Publisher — the class is our
+                  classification over a default, and putting a licence claim in a
+                  publisher's mouth is a verdict this product cannot support. */}
               {article.analysisTextMode === "metadata_only"
                 ? "No article body is held; Publisher, title, date, and link are open metadata."
-                : "Body text is held inside Tessera for analysis and is never redistributed or republished. Publisher, title, date, and link are open metadata."}
+                : article.analysisText
+                  ? "Tessera classifies this Publisher's text as cleared to show, so the body above is the reporting as Tessera holds it. Publisher, title, date, and link are open metadata."
+                  : "Tessera does not classify this Publisher's text as cleared to show, so the body stays inside Tessera for analysis and appears on no page. Publisher, title, date, and link are open metadata."}
             </dd>
           </div>
           <div>

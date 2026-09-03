@@ -98,10 +98,13 @@ A ticket is not done when the code works. Before it closes:
   Membership still runs there, but only to *label* a citation, never to filter one: it is what
   decides whether a graph citation can offer a Story or an Article record at all. A reader path
   outside that seam which skips the join is a bug.
-- GDELT/API **metadata** is storable; article **bodies** are internal, served only where a
-  Publisher's Terms Class clears them by hand — never for `api_content`, which Tessera extracted
-  itself. Two documented exceptions: the hosted embedding provider (ADR-0023), and synthesis
-  evidence text, which goes only to the paid, contractually no-training provider (ADR-0003).
+- GDELT/API **metadata** is storable, and so is any body Tessera holds — storage for internal
+  analysis is cleared globally (ADR-0032). What a **Publisher's Terms Class** governs is *serving*:
+  `licensed`, the default since ADR-0032, clears every rung including the `api_content` Tessera
+  extracted itself; `syndicated_excerpt` clears the feed excerpt alone; `internal_only` and
+  `open_metadata` clear nothing. Narrowing one is a reclassification, never a code change. Evidence
+  text and bodies do leave the system for the hosted embedding and synthesis providers, and
+  ADR-0033 records that both are free tiers chosen on access and cost — not a no-training contract.
 
 ## Verification
 

@@ -257,10 +257,11 @@ Terms are canonical: use these words in code, docs, and conversation.
   per publisher domain: a firehose row's page is deliberately out of reach, because following
   63k unknown domains a day would make Tessera a general-purpose crawler. An Article whose feed
   already supplied a body is left alone, as is one whose Publisher has cleared its excerpt for
-  serving — no Terms Class clears an extracted body, so raising it would take text out of the
-  API. Failure — a paywall, a consent wall, a bot block, a body no longer than the excerpt it
-  would replace — is an expected outcome that leaves the Article on the rung it already held
-  and is counted as failed on the run. (ADR-0018, ADR-0024, #47)
+  serving but not the rung extraction would produce — since ADR-0032 that is `syndicated_excerpt`
+  alone, the one class where raising the Article would take text *out* of the API instead of
+  putting it in. Failure — a paywall, a consent wall, a bot block, a body no longer than the
+  excerpt it would replace — is an expected outcome that leaves the Article on the rung it already
+  held and is counted as failed on the run. (ADR-0018, ADR-0024, ADR-0032, #47)
 - **IngestionRun** — One invocation of one connector, and the only record of what that
   invocation did: how much it discovered, inserted, enriched, rejected as duplicate, rejected
   on rights, and failed. Persisted in Postgres, never read back from the queue — the Admin
@@ -276,14 +277,16 @@ Terms are canonical: use these words in code, docs, and conversation.
   claim on its own. (ADR-0024)
 - **Terms Class** — The per-Publisher rights vocabulary governing whether Tessera may
   *serve* that publisher's text: `open_metadata`, `syndicated_excerpt`, `internal_only`,
-  `licensed`. `api_content` — a body Tessera extracted from the page itself — is never served
-  whatever the class, because no publisher's terms grant text they never handed us (ADR-0018).
-  Storing bodies for internal analysis is governed globally instead (ADR-0018), with one
-  exception: `open_metadata` has cleared its metadata and nothing else, so text-bearing
-  reporting from such a publisher is not stored and is counted on the IngestionRun as rejected
-  on rights grounds. Reclassifying a publisher governs what is served and what arrives next; it
-  does not purge text already stored. Assigned by hand; publishers auto-created by a connector
-  default to `internal_only` — the gate fails closed. (ADR-0018, ADR-0024)
+  `licensed`. That is all it governs (ADR-0032): `licensed` clears every rung of the ladder
+  including `api_content`, `syndicated_excerpt` clears `feed_excerpt` alone, and the other two
+  clear no text at all. Storing a body for internal analysis — enrichment, embeddings, evidence
+  selection — is cleared globally, so no sighting is ever discarded on rights grounds and the
+  IngestionRun's rejected-on-rights count reads 0 until a re-tightening repopulates it.
+  Reclassifying a publisher governs what is served and what arrives next; it does not purge text
+  already stored. Assigned by hand; publishers auto-created by a connector default to `licensed`,
+  because this is a non-commercial course build and a fail-closed default meant every publisher
+  outside the seed withheld its text from the reader who asked "says who?". Narrowing one is a
+  reclassification, not a code change. (ADR-0032, ADR-0018, ADR-0024)
 - **Enrichment** — A second connector finding an Article Tessera already holds (same
   canonical URL) and contributing what it carries: GKG Annotations, or text further up the
   ladder. A same-canonical-URL sighting that contributes *nothing* — re-running an unchanged

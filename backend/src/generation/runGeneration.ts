@@ -56,7 +56,8 @@ export type EvidenceView = {
   sourceRank: number;
   selectionReason: SelectionReason;
   // The frozen snapshot, or null where the Publisher's Terms Class does not clear
-  // that text for serving (#40). Held for analysis, not ours to redistribute.
+  // that text for serving (ADR-0032). Since `licensed` became the default that is the
+  // exception: a citation normally opens onto the words the claim was built from.
   excerpt: string | null;
 };
 
