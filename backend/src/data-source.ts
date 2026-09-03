@@ -27,6 +27,7 @@ import { RecordFlashcardReviewsAndCacheQuestions1755762000000 } from "./migratio
 import { CreateEntityResolution1755763000000 } from "./migrations/1755763000000-CreateEntityResolution";
 import { CreateEntityMergeReview1755764000000 } from "./migrations/1755764000000-CreateEntityMergeReview";
 import { RequeueFailedExtractionAttempts1755765000000 } from "./migrations/1755765000000-RequeueFailedExtractionAttempts";
+import { AddUserColorMode1755766000000 } from "./migrations/1755766000000-AddUserColorMode";
 import { User } from "./entities/User";
 import { Publisher } from "./entities/Publisher";
 import { Story } from "./entities/Story";
@@ -121,6 +122,7 @@ export const AppDataSource = new DataSource({
     CreateEntityResolution1755763000000,
     CreateEntityMergeReview1755764000000,
     RequeueFailedExtractionAttempts1755765000000,
+    AddUserColorMode1755766000000,
   ],
   synchronize: false,
   logging: false,

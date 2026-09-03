@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import { Router } from "express";
 import { AppDataSource } from "../data-source";
-import { REGISTRABLE_ROLES, RegistrableRole, User } from "../entities/User";
+import { COLOR_MODES, ColorMode, REGISTRABLE_ROLES, RegistrableRole, User } from "../entities/User";
 import { signToken } from "../auth/jwt";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
@@ -24,7 +24,7 @@ function normalizeEmail(email: string): string {
 }
 
 function toPublicUser(user: User) {
-  return { id: user.id, email: user.email, role: user.role };
+  return { id: user.id, email: user.email, role: user.role, colorMode: user.colorMode };
 }
 
 authRouter.post(
@@ -100,3 +100,31 @@ authRouter.post(
 authRouter.get("/auth/me", requireAuth, (req, res) => {
   res.json(toPublicUser(req.user!));
 });
+
+// The one thing a reader may change about their own account: which of the two
+// modes of their Role Theme they see (#75). The Role Theme itself follows the
+// role, so a body naming either is refused rather than ignored: `role` is the
+// only privileged field on this row, and a silent drop would leave a caller
+// believing it took.
+authRouter.patch(
+  "/auth/me",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { colorMode, role, theme } = req.body ?? {};
+
+    if (role !== undefined || theme !== undefined) {
+      res.status(422).json({ error: "Your role sets your Role Theme; neither can be changed here" });
+      return;
+    }
+    if (!COLOR_MODES.includes(colorMode)) {
+      res.status(422).json({ error: `Colour mode must be one of: ${COLOR_MODES.join(", ")}` });
+      return;
+    }
+
+    const user = req.user!;
+    user.colorMode = colorMode as ColorMode;
+    await userRepo().save(user);
+
+    res.json(toPublicUser(user));
+  }),
+);

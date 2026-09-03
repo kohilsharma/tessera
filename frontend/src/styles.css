@@ -1,33 +1,53 @@
 :root {
   font-family: var(--font-ui);
-  color: #171715;
-  background: #f2f0e9;
+  color: var(--ink);
+  background: var(--paper);
   font-synthesis: none;
 }
 
 /* The colours every live page still consumes, named from the withdrawn Bureau
-   system (#73). The token contract and the six role palettes now exist beside
-   them in tokens.css (#74); migrating these thirteen names onto it is #76's
-   primitives pass, which rewrites the surfaces that read them. Until then the
-   only contract token wired here is --focus, whose value #74 corrected against
-   DESIGN.md §3's basis, --paper: 3.03:1 there, where Bureau's #f0a800 was 1.79.
-   On the ground actually painted below — Bureau's #f2f0e9 — it measures 2.82, so
-   the ring clears WCAG 2.2's 3:1 only once #76 paints --paper. Better, not yet
-   passing, and the two move together. */
+   system (#73) — now aliases onto the token contract in tokens.css rather than
+   the hexes they used to be (#75). Renaming the ~150 call sites is still #76's
+   primitives pass; this block is the two-line-per-name layer that lets the six
+   palettes actually paint before then, and #76 deletes it.
+
+   Aliased by hue and by grade, not by meaning: Bureau's names carry no semantics
+   the contract shares, so --proof-blue takes the contract's blue mark and
+   --proof-magenta its refusal ink because that is what those uses turned out to
+   be. The meaning arrives with the call-site rename, not here.
+
+   This is what makes .dark real. Left as hexes, `color-scheme: dark` would flip
+   the form controls and the scrollbars while the page kept painting Bureau's
+   cream — worse for a dark-mode reader than doing nothing at all.
+
+   Two kinds of call site could not wait for #76, because an alias cannot fix
+   them: eighteen `1px solid var(--bureau-ink)` hairlines, which in dark are
+   near-white text ink drawn around every card, panel, field and button — a
+   wireframe, not a frame; and the two places --bench-stock was a faint fill
+   rather than a surface (a bar track, an offset block), which the raised surface
+   it now aliases is too light to carry in light mode.
+
+   The hairlines split, because a border is doing one of two jobs. Structural
+   frames and dividers take --registration-rule (the contract's --rule2), which
+   measures 1.5–1.8:1 against its ground in all six — a frame you see and do not
+   read. The boundary of a *control* is the one thing WCAG 1.4.11 puts a floor
+   under, so buttons and the three field types take --quiet-ink instead, which
+   clears 3:1 everywhere. Measured, both of them, in all six. */
 :root {
-  --proof-blue: #1458a6;
-  --proof-magenta: #c51d62;
-  --registered-overlap: #492e84;
-  --student-context: #315f35;
-  --bureau-ink: #171715;
-  --stock-paper: #f2f0e9;
-  --bench-stock: #dedbd2;
-  --quiet-ink: #55534e;
-  --registration-rule: #b8b5ac;
-  --proof-blue-stock: #e1e9f2;
-  --proof-magenta-stock: #f3e2e9;
-  --registered-overlap-stock: #e7e2ef;
-  --student-context-stock: #e3ebe1;
+  --proof-blue: var(--left);
+  --proof-magenta: var(--diverge);
+  --registered-overlap: var(--imply);
+  --student-context: var(--agree);
+  --bureau-ink: var(--ink);
+  --stock-paper: var(--paper);
+  /* The contract's raised surface, which is what every use of this turned out to
+     be: a panel, an inset field, a filled bench. Bureau mixed its own 7% tint of
+     ink, which sat *under* paper in light — but that is Bureau's aesthetic
+     (withdrawn, ADR-0031), and an invented value is a value no palette measures. */
+  --bench-stock: var(--paper2);
+  --quiet-ink: var(--quiet);
+  --registration-rule: var(--rule2);
+  --proof-magenta-stock: var(--wash-diverge);
 }
 
 * { box-sizing: border-box; }
@@ -54,7 +74,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    APPLICATION SHELL — chrome shared by every live page, applied at
    the route table (App.tsx) rather than declared per page.
    ============================================================ */
-.site-header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 62px; padding: 0 3.5vw; border-bottom: 1px solid var(--bureau-ink); background: rgba(242, 240, 233, .96); position: sticky; top: 0; z-index: 20; }
+.site-header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 62px; padding: 0 3.5vw; border-bottom: 1px solid var(--registration-rule); background: color-mix(in srgb, var(--paper) 96%, transparent); position: sticky; top: 0; z-index: 20; }
 .site-header--masthead { grid-template-columns: 1fr; }
 
 .site-wordmark { color: var(--bureau-ink); text-decoration: none; font-weight: 800; font-size: 1rem; display: inline-flex; gap: 10px; align-items: center; width: max-content; }
@@ -75,7 +95,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .identity-menu summary::-webkit-details-marker { display: none; }
 .identity-menu summary:hover, .identity-menu[open] summary { border-color: var(--bureau-ink); }
 .identity-menu .role-tag { border-left: 1px solid var(--registration-rule); margin-left: 8px; padding-left: 8px; color: var(--quiet-ink); }
-.identity-menu .identity-panel { position: absolute; right: 0; top: calc(100% + 6px); display: flex; flex-direction: column; min-width: 160px; border: 1px solid var(--bureau-ink); background: var(--stock-paper); padding: 6px; gap: 2px; }
+.identity-menu .identity-panel { position: absolute; right: 0; top: calc(100% + 6px); display: flex; flex-direction: column; min-width: 160px; border: 1px solid var(--registration-rule); background: var(--stock-paper); padding: 6px; gap: 2px; }
 .identity-menu .identity-panel a, .identity-menu .identity-panel button { text-align: left; border: 0; background: none; padding: 8px 10px; font-size: .8rem; cursor: pointer; color: var(--bureau-ink); text-decoration: none; }
 .identity-menu .identity-panel a:hover, .identity-menu .identity-panel button:hover { background: var(--bench-stock); }
 .identity-placeholder { justify-self: end; color: var(--quiet-ink); font-size: .78rem; }
@@ -138,7 +158,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 
 /* Populated: the shared frame — a ruled register of entries. What an entry
    contains belongs to the index archetype, not here. */
-.entry-list { list-style: none; margin: 22px 0; padding: 0; border-top: 1px solid var(--bureau-ink); }
+.entry-list { list-style: none; margin: 22px 0; padding: 0; border-top: 1px solid var(--registration-rule); }
 .entry-list > li { padding: 17px 2px; border-bottom: 1px solid var(--registration-rule); line-height: 1.5; }
 .entry-list a { color: var(--bureau-ink); font-weight: 700; text-underline-offset: 3px; }
 
@@ -179,7 +199,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    that is not the page's one command (.index-action / .record-command): ruled
    paper field, ink fill on hover, neutral stock and no implied interactivity when
    disabled. Listed in one :is() so a new consumer is one word, not four rules. */
-:is(.state-empty, .state-error, .pagination, .record-actions, .entry-action, .record-attach) button { border: 1px solid var(--bureau-ink); background: var(--stock-paper); color: var(--bureau-ink); padding: 9px 15px; font-size: .78rem; font-weight: 650; cursor: pointer; transition: color 140ms ease, background-color 140ms ease; }
+:is(.state-empty, .state-error, .pagination, .record-actions, .entry-action, .record-attach) button { border: 1px solid var(--quiet-ink); background: var(--stock-paper); color: var(--bureau-ink); padding: 9px 15px; font-size: .78rem; font-weight: 650; cursor: pointer; transition: color 140ms ease, background-color 140ms ease; }
 :is(.state-empty, .state-error, .pagination, .record-actions, .entry-action, .record-attach) button:hover:not(:disabled) { background: var(--bureau-ink); color: var(--stock-paper); }
 :is(.state-empty, .state-error, .pagination, .record-actions, .entry-action, .record-attach) button:disabled { border-color: var(--registration-rule); background: var(--bench-stock); color: var(--quiet-ink); cursor: default; }
 
@@ -215,8 +235,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    command button in three vocabularies, not three buttons that drift apart. The
    submit is the one of the three that can be refused mid-action, so it alone has
    a disabled state (DESIGN.md: neutral stock, Quiet Ink, no shadow). */
-.index-action, .record-command, .form-submit { border: 1px solid var(--bureau-ink); background: var(--stock-paper); color: var(--bureau-ink); padding: 11px 18px; margin-right: 5px; font-size: .78rem; font-weight: 700; text-decoration: none; box-shadow: 5px 5px 0 var(--proof-magenta); transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease, transform 140ms ease; }
-.index-action:hover, .record-command:hover, .form-submit:hover:enabled { background: var(--proof-blue); color: var(--stock-paper); }
+.index-action, .record-command, .form-submit { border: 1px solid var(--quiet-ink); background: var(--stock-paper); color: var(--bureau-ink); padding: 11px 18px; margin-right: 5px; font-size: .78rem; font-weight: 700; text-decoration: none; box-shadow: 5px 5px 0 var(--proof-magenta); transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease, transform 140ms ease; }
+/* --on-accent, not --stock-paper: the fill is an accent in both modes, and in dark
+   --paper is near-black, which on a blue fill is unreadable (DESIGN.md §2 rule 2). */
+.index-action:hover, .record-command:hover, .form-submit:hover:enabled { background: var(--proof-blue); color: var(--on-accent); }
 .index-action:active, .record-command:active, .form-submit:active:enabled { transform: translate(3px, 3px); box-shadow: 2px 2px 0 var(--proof-magenta); }
 /* #65's switch between two readings of one search — the ranked list and the timeline.
    It sits where the index's command sits but is not one: it creates nothing and goes
@@ -231,7 +253,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    sit adjacent when a filter matches nothing). The pills keep their paper stock,
    so applied (ink-filled) still reads against it. Bottom padding is short by the
    pills' own 9px margin. */
-.filter-register { display: flex; flex-wrap: wrap; align-items: center; margin: 0; padding: 15px 16px 6px; border: 1px solid var(--bureau-ink); background: var(--bench-stock); }
+.filter-register { display: flex; flex-wrap: wrap; align-items: center; margin: 0; padding: 15px 16px 6px; border: 1px solid var(--registration-rule); background: var(--bench-stock); }
 
 /* An entry: the record's name against its ledger of scannable facts. Both
    columns keep their gutters at every width, so nothing shifts as values
@@ -367,7 +389,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 /* The section scale, shared with a dashboard register's heading (#36) — a part
    of a record and a register on a surface are the same rank. */
 .record-section h2, .dash-register h2, .timeline-lane h2 { font-size: clamp(1.2rem, 2vw, 1.6rem); font-weight: 700; line-height: 1.1; letter-spacing: -.02em; }
-.record-section h2 { margin: 0 0 4px; padding-bottom: 13px; border-bottom: 1px solid var(--bureau-ink); }
+.record-section h2 { margin: 0 0 4px; padding-bottom: 13px; border-bottom: 1px solid var(--registration-rule); }
 /* The reading measure DESIGN.md sets for prose — the register above is compact,
    the record's own text is not. */
 .record-prose { max-width: 68ch; margin: 22px 0 0; font-size: 1rem; line-height: 1.65; }
@@ -377,14 +399,14 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    prose (#34's Brief attachments) or the timeline's axis (#64) — in which case the
    register has to open its own edge. One rule for both, because it is one reason. */
 .record-section .entry-list { margin-top: 0; border-top: 0; }
-.record-section :is(.record-prose, .timeline-axis) + .entry-list { margin-top: 22px; border-top: 1px solid var(--bureau-ink); }
+.record-section :is(.record-prose, .timeline-axis) + .entry-list { margin-top: 22px; border-top: 1px solid var(--registration-rule); }
 
 /* #64's volume overlay: reporting per period as a row of bars on one baseline —
    the dashboard measure's reasoning (DESIGN.md's Redundant Signal Rule) at the
    register's scale, restating the register below it and claiming nothing more. A
    period with no reporting draws no bar, because nothing is what happened there;
    the baseline rule is what keeps that period on the axis rather than out of it. */
-.timeline-volume { display: flex; align-items: end; gap: 2px; height: 62px; margin: 22px 0 0; border-bottom: 1px solid var(--bureau-ink); }
+.timeline-volume { display: flex; align-items: end; gap: 2px; height: 62px; margin: 22px 0 0; border-bottom: 1px solid var(--registration-rule); }
 .timeline-volume > i { flex: 1 1 0; min-width: 2px; height: calc(var(--share) * 100%); background: var(--proof-blue); }
 /* The axis' two ends, in the measurement face: a row of bars states a shape, and a
    shape with no span stated under it is a picture of nothing. */
@@ -473,7 +495,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .record-cover { min-width: 0; }
 /* The form's plate is the same sheet at the same ratio (#35), so the owner
    confirms a cover in the shape it registers in — one plate, two archetypes. */
-.record-plate, .form-plate { border: 1px solid var(--bureau-ink); background: var(--stock-paper); aspect-ratio: 3 / 2; overflow: hidden; }
+.record-plate, .form-plate { border: 1px solid var(--registration-rule); background: var(--stock-paper); aspect-ratio: 3 / 2; overflow: hidden; }
 .record-plate img, .form-plate img { display: block; width: 100%; height: 100%; object-fit: cover; }
 /* The control names itself in the measurement face, like a ledger term, and the
    native file input stays native (#28: no custom widgets). */
@@ -532,7 +554,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    sheet interior. No ink on its edge — a source colour here would be decoration
    (the Registered Color Rule); the only colour the panel spends is the magenta a
    refusal earns and the command's own offset. */
-.form-panel { margin-top: 24px; border: 1px solid var(--bureau-ink); background: var(--stock-paper); padding: 28px; }
+.form-panel { margin-top: 24px; border: 1px solid var(--registration-rule); background: var(--stock-paper); padding: 28px; }
 
 /* A field: its term in the measurement face, as in every ledger in the app, over
    its control. Rows are separated by space rather than rules — ten ruled rows
@@ -544,7 +566,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 /* One field treatment, shared with the record page's attach control (#34) so the
    app has a single input: paper stock inside an ink rule, reading face, native
    control. */
-.form-field :is(input, select, textarea), .record-attach input { border: 1px solid var(--bureau-ink); background: var(--stock-paper); padding: 10px 12px; color: var(--bureau-ink); font: 400 .92rem var(--font-ui); }
+.form-field :is(input, select, textarea), .record-attach input { border: 1px solid var(--quiet-ink); background: var(--stock-paper); padding: 10px 12px; color: var(--bureau-ink); font: 400 .92rem var(--font-ui); }
 .form-field :is(input, select, textarea):disabled, .record-attach input:disabled { border-color: var(--registration-rule); background: var(--bench-stock); color: var(--quiet-ink); }
 /* Fields take the sheet's measure rather than each guessing its own: a form of
    four boxes at four widths reads as an accident, and the panel is already
@@ -591,7 +613,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 
 /* The command closes the panel on a rule: everything above is what is being
    registered, and this is the act of registering it. */
-.form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--bureau-ink); }
+.form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--registration-rule); }
 .form-submit { cursor: pointer; }
 .form-submit:disabled { border-color: var(--registration-rule); background: var(--bench-stock); color: var(--quiet-ink); box-shadow: none; cursor: default; }
 
@@ -642,7 +664,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    sections open on. The folio states how much the register holds, which is what
    tells three registers apart before a single row is read. */
 .dash-register { margin-top: 42px; }
-.dash-register-head, .timeline-lane-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 20px; padding-bottom: 13px; border-bottom: 1px solid var(--bureau-ink); }
+.dash-register-head, .timeline-lane-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 20px; padding-bottom: 13px; border-bottom: 1px solid var(--registration-rule); }
 .dash-register h2, .timeline-lane h2 { margin: 0; }
 .dash-register-folio, .timeline-lane-folio { margin: 0; color: var(--quiet-ink); font: 500 .66rem var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
 /* Rows open on the heading's rule rather than ruling again 22px under it — the
@@ -664,7 +686,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    the surface's ink. It restates the count and says nothing the count does not —
    DESIGN.md's Redundant Signal Rule, and no claim of certainty the data can't
    support. */
-.dash-measure { max-width: 260px; height: 6px; margin-top: 11px; background: var(--bench-stock); }
+.dash-measure { max-width: 260px; height: 6px; margin-top: 11px; background: var(--registration-rule); }
 .dash-measure i { display: block; height: 100%; width: calc(var(--share) * 100%); background: var(--role-ink, var(--bureau-ink)); }
 
 /* Standing totals as plates rather than rows: the ledger's term over its number
@@ -677,7 +699,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 
 /* The way off the surface: ruled destinations under everything the dashboard
    registers, not a line of links separated by interpuncts. */
-.dash-onward { display: flex; flex-wrap: wrap; margin-top: 46px; border-top: 1px solid var(--bureau-ink); }
+.dash-onward { display: flex; flex-wrap: wrap; margin-top: 46px; border-top: 1px solid var(--registration-rule); }
 .dash-onward a { padding: 16px 22px; border-left: 1px solid var(--registration-rule); color: var(--bureau-ink); font-size: .84rem; font-weight: 700; text-decoration: none; text-underline-offset: 3px; transition: background-color 140ms ease; }
 .dash-onward a:first-child { border-left: 0; padding-left: 2px; }
 .dash-onward a:hover, .dash-onward a:focus-visible, .index-switch:hover, .index-switch:focus-visible { background: var(--bench-stock); text-decoration: underline; }
@@ -711,7 +733,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    the bench, not a third record archetype: it has one question,
    the cited answer it reveals, and the four SM-2 outcomes.
    ============================================================ */
-.study-card { margin-top: 30px; border: 1px solid var(--bureau-ink); background: var(--stock-paper); padding: clamp(24px, 5vw, 44px); box-shadow: 7px 7px 0 var(--bench-stock); }
+.study-card { margin-top: 30px; border: 1px solid var(--registration-rule); background: var(--stock-paper); padding: clamp(24px, 5vw, 44px); box-shadow: 7px 7px 0 var(--registration-rule); }
 .study-folio { display: flex; justify-content: space-between; gap: 12px 24px; margin: 0 0 28px; padding-bottom: 12px; border-bottom: 1px solid var(--registration-rule); color: var(--quiet-ink); font: 500 .66rem/1.4 var(--font-mono); text-transform: uppercase; letter-spacing: .06em; }
 .study-question { margin: 0; max-width: 28ch; font-size: clamp(1.5rem, 4vw, 2.5rem); font-weight: 750; line-height: 1.12; letter-spacing: -.025em; text-wrap: balance; }
 .study-answer { margin: 30px 0 0; padding: 22px 0 0; border-top: 3px solid var(--proof-blue); font-size: 1.05rem; line-height: 1.65; }
@@ -725,7 +747,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 
 @media (max-width: 560px) {
   .study-folio { display: grid; }
-  .study-card { box-shadow: 4px 4px 0 var(--bench-stock); }
+  .study-card { box-shadow: 4px 4px 0 var(--registration-rule); }
 }
 
 /* ============================================================
@@ -749,7 +771,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    (components/graphRegister.tsx), so the key and the picture cannot disagree. */
 .graph-key { display: flex; flex-wrap: wrap; gap: 9px 22px; margin: 22px 0 0; padding: 0; list-style: none; color: var(--quiet-ink); font: 500 .68rem/1.4 var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
 .graph-key li { display: flex; align-items: center; gap: 9px; }
-.graph-key-mark { flex: none; width: 12px; height: 12px; border: 1px solid var(--bureau-ink); }
+.graph-key-mark { flex: none; width: 12px; height: 12px; border: 1px solid var(--registration-rule); }
 .graph-key-mark--person { border-radius: 50%; background: var(--proof-blue); }
 .graph-key-mark--organization { background: var(--proof-magenta); }
 .graph-key-mark--location { background: var(--registered-overlap); transform: rotate(45deg) scale(.86); }
@@ -758,7 +780,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    60-node force layout to settle inside and short enough that the register naming those
    60 names is visible from it. No shadow — DESIGN.md keeps the offset shadow for
    registration, and nothing is being registered here. */
-.graph-plot { height: clamp(340px, 60vh, 600px); margin-top: 18px; border: 1px solid var(--bureau-ink); background: var(--stock-paper); }
+.graph-plot { height: clamp(340px, 60vh, 600px); margin-top: 18px; border: 1px solid var(--registration-rule); background: var(--stock-paper); }
 
 /* The reporting behind one link (#69), opened inside the register row of the name on its
    other end. Indented under a rule on the mark side, so an opened drawer reads as evidence

@@ -3,12 +3,13 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Login from "./Login";
 import Register from "./Register";
+import { logout } from "../api/client";
 import { getToken } from "../auth/token";
 import { jsonResponse, renderWithProviders } from "../test/renderWithProviders";
 
 const authResponse = {
   token: "a.jwt.token",
-  user: { id: "u1", email: "student@tessera.local", role: "student" as const },
+  user: { id: "u1", email: "student@tessera.local", role: "student" as const, colorMode: "system" as const },
 };
 
 describe("Register — inline validation", () => {
@@ -114,5 +115,33 @@ describe("Login", () => {
     await userEvent.click(screen.getByRole("button", { name: "Log in" }));
 
     await waitFor(() => expect(getToken()).toBe("a.jwt.token"));
+  });
+
+  // #75's "switching accounts visibly switches products", at the seam where a
+  // session begins: the login page is painted signed-out Newsroom, and the answer
+  // that carries the role is what repaints it — not a later refetch.
+  it("repaints the page as the signed-in role's product", async () => {
+    document.documentElement.dataset.theme = "newsroom";
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({ ...authResponse, user: { ...authResponse.user, role: "investor", colorMode: "dark" } }),
+    );
+
+    renderWithProviders(<Login />);
+    await userEvent.type(screen.getByLabelText("Email"), "investor@tessera.local");
+    await userEvent.type(screen.getByLabelText("Password"), "tessera-demo");
+    await userEvent.click(screen.getByRole("button", { name: "Log in" }));
+
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe("terminal"));
+    expect(document.documentElement).toHaveClass("dark");
+  });
+
+  it("puts the signed-out product back on sign-out", async () => {
+    document.documentElement.dataset.theme = "terminal";
+    document.documentElement.classList.add("dark");
+
+    logout();
+
+    expect(document.documentElement.dataset.theme).toBe("newsroom");
+    expect(document.documentElement).not.toHaveClass("dark");
   });
 });

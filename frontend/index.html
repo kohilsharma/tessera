@@ -3,14 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- Newsroom's two grounds: signed-out surfaces wear it, and it is the
-         authored default the role swaps at sign-in (DESIGN.md §3). One value, not
-         two: the chrome has to match the ground actually painted, and until #76
-         migrates it that is still Bureau's #f2f0e9 rather than --paper. #75 adds
-         the dark half, since it is the ticket that makes .dark apply at all —
-         advertising a dark chrome over a page that only renders light is worse
-         than saying nothing. -->
-    <meta name="theme-color" content="#f2f0e9" />
+    <!-- Newsroom's light ground, and only for the frames before main.tsx runs:
+         applyTheme() rewrites this from whatever --paper resolved to, because a
+         per-account override cannot be expressed as media-scoped metas (#75). The
+         authored value is the signed-out theme's, which is also the theme every
+         reader whose token has not been read yet is already painting. -->
+    <meta name="theme-color" content="#faf8f4" />
     <title>Tessera | Story analysis</title>
     <!-- The three faces per theme DESIGN.md §4 assigns — eight families, not
          nine: Terminal spends one on both display and UI, separated by weight.

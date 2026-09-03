@@ -248,4 +248,75 @@ rendering in Archivo + IBM Plex Mono under Newsroom and DM Sans + DM Mono under 
 intact at 1440 and 390. The token layer costs 3.26 kB of CSS, 1.27 kB gzipped (26.50 → 29.76 kB;
 5.40 → 6.67 kB).
 
+**#75 — theme by role, with a light/dark override.** Two axes, and the ticket's whole shape is that
+only one of them belongs to the reader. `frontend/src/theme.ts` holds the mapping — Admin →
+Newsroom, Investor → Terminal, Student → Studio — typed `Record<UserRole, ThemeName>`, so a fourth
+role added to the backend fails to compile here rather than quietly theming itself as the signed-out
+product. `themeForRole()` is nevertheless **total over `string | null | undefined`** with a Newsroom
+fallback, which is #74's handoff demand discharged: its argument is whatever a JWT happened to
+carry, not something already known to be a role, and an unset `data-theme` is not a plain page but a
+broken one. The other axis is a `colorMode` column on `User` — `system | light | dark`, migration
+`1755766000000`, a named CHECK constraint over the three values — applied as `.dark` on the same
+`<html>` element the attribute sits on.
+
+Nothing is duplicated per theme, which is the done-when that constrains everything else: the six
+palettes already key off one attribute, so the entire client-side surface of this ticket is one
+`applyTheme(role, mode)` that sets an attribute and toggles a class. Where it runs is the judgment.
+It runs **synchronously in `main.tsx` before `createRoot`**, off the stored JWT's role claim and a
+`tessera_color_mode` hint, because `index.html` ships `data-theme="newsroom"` and no `.dark`: applied
+in an effect, a signed-in Investor would see one frame of the wrong product and a dark-mode reader
+one frame of cream. Both inputs are local, so this costs no round trip. `components/ThemeSync.tsx`
+then renders `null` beside `<App />` and is the reactive authority once mounted — it watches the
+`["me"]` query, so the server's `colorMode` outranks the hint, and it owns the `matchMedia`
+subscription that makes `system` actually track the OS mid-session. Its `enabled: !!getToken()` is
+load-bearing rather than an optimisation: `authFetch` answers a 401 by navigating to `/login`, so an
+unguarded `/auth/me` from a root-level component is a redirect loop on the login page itself.
+`postForToken` and `logout` repaint directly, at the one seam where a session begins or ends, since
+that answer already carries both halves and waiting for a refetch is what "visibly switches
+products" cannot afford. The hint survives sign-out on purpose: it is a fact about this device, and
+clearing it would make every signed-out surface flash against the reader's own preference.
+
+Not user-overridable, per spec §12, is enforced at the API and not merely omitted from the UI:
+`PATCH /auth/me` refuses a body naming `role` or `theme` with 422 rather than dropping it silently,
+because a silent drop leaves a caller believing it took. Account states the Role Theme in its
+register beside the role that decides it — a fact the reader can read, rather than a control they
+cannot have — and offers only Appearance. It is named **Role Theme** in full there and in the
+refusal, because `CONTEXT.md` gives a bare *Theme* to GDELT's subject codes, and that register sits
+two rows from the reader's role.
+
+The part that was not in the ticket. `.dark` cannot be made real by adding a class: `styles.css`
+still consumed thirteen Bureau hexes, so `color-scheme: dark` would have flipped the native controls
+and the scrollbars while the page went on painting Bureau's cream — worse for a dark-mode reader than
+doing nothing. #76's ~150-call-site rename stays #76's; what moved forward is the *values*, as a
+ten-name alias block onto the contract, by hue and by grade rather than by meaning, with three dead
+names deleted. Three literal sites and one alias could not be fixed that way. `.site-header`'s
+`rgba(242, 240, 233, .96)` became `color-mix(in srgb, var(--paper) 96%, transparent)`; the primary
+button's hover text took `--on-accent`; and the eighteen `1px solid var(--bureau-ink)` hairlines
+split, because a border does one of two jobs. Structural frames and dividers take `--rule2`, which
+measures **1.49–1.81:1** against its own ground in all six — a frame you see and do not read, where
+full-strength text ink drew a near-white wireframe around every card in dark at 15.20–17.35:1. The
+boundary of a *control* is the one border WCAG 1.4.11 puts a floor under, so buttons and the three
+field types take `--quiet` instead: **4.86–6.87:1**, everywhere. `--bench-stock` stopped mixing its
+own 7% tint of ink — an invented value is a value no palette measures, against §2 rule 1 — and
+aliases `--paper2`, the contract's raised surface, which is what every use of it turned out to be;
+the two places it was a faint *fill* rather than a surface (a bar track, an offset block) moved to
+`--rule2`, since a raised surface is lighter than paper in light and would have vanished. Quiet text
+on that surface — the disabled `<select>` this ticket adds, while the save is in flight — measures
+5.15–6.30:1. `styles.css` now contains **zero literal colours**. `index.html`'s single `theme-color`
+moved to `#faf8f4`, which supersedes #74's reasoning above: it is now overwritten from whatever
+`--paper` actually resolved to, because the moment an account can override the media query a
+media-scoped `<meta>` stops being able to tell the truth.
+
+Verified: 248 frontend tests across 17 files (22 of them new, in `theme.test.tsx`), `tsc --noEmit`
+clean, build green; backend 507 passed / 11 skipped, `tsc --noEmit` clean. Two headless Chromium
+probes against `vite preview`, since jsdom resolves no custom properties and so can observe none of
+this: the first confirmed all six theme×mode combinations paint — paper, ground/ink at 15.20–17.35:1,
+`color-scheme` flipping, the right UI face per theme — and the second exercised the **real** first
+paint rather than a simulated one, seeding a token and a hint into `localStorage` and reading what
+`main.tsx` left on `<html>` before React rendered: `investor`+`dark` → `terminal`/`.dark`/chrome
+`#0b0e11`, `student`+`light` → `studio`/`#faf6f0`, no token → `newsroom` light, and an `auditor`
+token nobody has heard of → `newsroom` rather than nothing. The third re-measured the border split
+above. The ticket names no ADR; ADR-0031 already carries theme-by-role.
+
+
 

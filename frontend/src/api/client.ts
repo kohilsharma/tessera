@@ -1,5 +1,6 @@
 import { clearToken, getToken, setToken } from "../auth/token";
 import { queryClient } from "../queryClient";
+import { applyTheme, readModeHint, writeModeHint, type ColorMode } from "../theme";
 
 export type HealthResponse = {
   status: "ok" | "error";
@@ -30,7 +31,10 @@ export const REGISTRABLE_ROLES = ["student", "investor"] as const;
 export const USER_ROLES = [...REGISTRABLE_ROLES, "admin"] as const;
 export type RegistrableRole = (typeof REGISTRABLE_ROLES)[number];
 export type UserRole = (typeof USER_ROLES)[number];
-export type User = { id: string; email: string; role: UserRole };
+// The half of DESIGN.md §3 a reader controls: the role fixes the theme, the
+// account carries which of its two modes to wear (#75). The vocabulary itself
+// lives in ../theme, beside the code that acts on it.
+export type User = { id: string; email: string; role: UserRole; colorMode: ColorMode };
 export type AuthResponse = { token: string; user: User };
 
 async function postForToken(path: string, body: unknown, errorMessage: string): Promise<AuthResponse> {
@@ -46,6 +50,11 @@ async function postForToken(path: string, body: unknown, errorMessage: string): 
   // would otherwise survive into the next identity: logging in as a second user
   // without reloading would read the first user's role and route by it.
   queryClient.clear();
+  // Repainted here, at the one seam a session begins, rather than waiting for
+  // ThemeSync's refetch: this is the whole "switching accounts visibly switches
+  // products" of #75, and the answer already carries both halves of the theme.
+  writeModeHint(data.user.colorMode);
+  applyTheme(data.user.role, data.user.colorMode);
   return data;
 }
 
@@ -64,6 +73,10 @@ export function login(input: { email: string; password: string }): Promise<AuthR
 export function logout(): void {
   clearToken();
   queryClient.clear();
+  // Back to the signed-out theme immediately. The mode hint is kept: it is a
+  // fact about this device, and flipping the login page to light behind a reader
+  // who chose dark reads as a bug rather than as a sign-out.
+  applyTheme(null, readModeHint());
 }
 
 // Attaches the bearer token and, on a 401 (missing, expired, or pointing at a
@@ -91,6 +104,12 @@ export async function getMe(): Promise<User> {
   const res = await authFetch("/api/v1/auth/me");
   if (!res.ok) throw new Error(await parseErrorMessage(res, "Could not load current user"));
   return res.json();
+}
+
+// The only field of their own account a reader may set (#75). Returns the whole
+// user, so the ["me"] cache the theme reads from can be written from the answer.
+export function updateColorMode(colorMode: ColorMode): Promise<User> {
+  return sendJson("PATCH", "/api/v1/auth/me", { colorMode }, "Could not save your appearance");
 }
 
 // ADR-0004: distinct shapes per role, not one endpoint with a lens flag — mirrors

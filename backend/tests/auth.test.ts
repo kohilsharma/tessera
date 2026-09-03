@@ -184,4 +184,95 @@ describe("GET /api/v1/auth/me", () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ email: "me@example.com", role: "student" });
   });
+
+  it("reports a new account as following the reader's own colour scheme", async () => {
+    const registerRes = await request(app())
+      .post("/api/v1/auth/register")
+      .send({ email: "fresh-mode@example.com", password: "correct-horse" });
+
+    expect(registerRes.body.user.colorMode).toBe("system");
+
+    const res = await request(app())
+      .get("/api/v1/auth/me")
+      .set("Authorization", `Bearer ${registerRes.body.token}`);
+
+    expect(res.body.colorMode).toBe("system");
+  });
+});
+
+describe("PATCH /api/v1/auth/me", () => {
+  async function accountFor(email: string, role = "student") {
+    const res = await request(app())
+      .post("/api/v1/auth/register")
+      .send({ email, password: "correct-horse", role });
+    return res.body.token as string;
+  }
+
+  it("rejects a request with no token with 401", async () => {
+    const res = await request(app()).patch("/api/v1/auth/me").send({ colorMode: "dark" });
+    expect(res.status).toBe(401);
+  });
+
+  it("stores the light/dark override and hands it back", async () => {
+    const token = await accountFor("mode-set@example.com");
+
+    const patched = await request(app())
+      .patch("/api/v1/auth/me")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ colorMode: "dark" });
+
+    expect(patched.status).toBe(200);
+    expect(patched.body).toMatchObject({ email: "mode-set@example.com", colorMode: "dark" });
+
+    // Read back through the other route: the override is on the row, not in a
+    // response the client happened to keep.
+    const me = await request(app()).get("/api/v1/auth/me").set("Authorization", `Bearer ${token}`);
+    expect(me.body.colorMode).toBe("dark");
+  });
+
+  it("takes 'system' back, so an override can be released", async () => {
+    const token = await accountFor("mode-release@example.com");
+
+    await request(app())
+      .patch("/api/v1/auth/me")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ colorMode: "light" });
+    const released = await request(app())
+      .patch("/api/v1/auth/me")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ colorMode: "system" });
+
+    expect(released.status).toBe(200);
+    expect(released.body.colorMode).toBe("system");
+  });
+
+  it("rejects a mode outside the three with 422, leaving the stored one alone", async () => {
+    const token = await accountFor("mode-bad@example.com");
+
+    const res = await request(app())
+      .patch("/api/v1/auth/me")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ colorMode: "sepia" });
+
+    expect(res.status).toBe(422);
+    const me = await request(app()).get("/api/v1/auth/me").set("Authorization", `Bearer ${token}`);
+    expect(me.body.colorMode).toBe("system");
+  });
+
+  // The theme is a property of who you are (DESIGN.md §3, #75). Enforced here
+  // rather than only hidden in the UI, and refused out loud rather than dropped
+  // in silence — a PATCH that ignores a field it was sent is the defect spec §6
+  // files against PATCH /briefs.
+  it("refuses to change the role, so a reader cannot pick their own theme", async () => {
+    const token = await accountFor("theme-grab@example.com");
+
+    const res = await request(app())
+      .patch("/api/v1/auth/me")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ colorMode: "dark", role: "admin" });
+
+    expect(res.status).toBe(422);
+    const me = await request(app()).get("/api/v1/auth/me").set("Authorization", `Bearer ${token}`);
+    expect(me.body).toMatchObject({ role: "student", colorMode: "system" });
+  });
 });
