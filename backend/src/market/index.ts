@@ -1,9 +1,9 @@
 import { cacheGet, cacheSet, ttlFromEnv } from "../lib/cache";
-import { FinnhubMarketProvider } from "./FinnhubMarketProvider";
+import { TiingoMarketProvider } from "./TiingoMarketProvider";
 import { MarketProvider, Quote, normalizeTicker } from "./MarketProvider";
 import { MockMarketProvider } from "./MockMarketProvider";
 
-type MarketProviderChoice = "mock" | "finnhub";
+type MarketProviderChoice = "mock" | "tiingo";
 
 const DEFAULT_TTL_SECONDS = 60;
 
@@ -16,13 +16,13 @@ function required(key: string): string {
 function explicitChoice(): MarketProviderChoice | undefined {
   const value = process.env.MARKET_PROVIDER?.trim().toLowerCase();
   if (!value) return undefined;
-  if (value === "mock" || value === "finnhub") return value;
-  throw new Error(`MARKET_PROVIDER must be mock or finnhub; got "${value}"`);
+  if (value === "mock" || value === "tiingo") return value;
+  throw new Error(`MARKET_PROVIDER must be mock or tiingo; got "${value}"`);
 }
 
 export function createMarketProvider(): MarketProvider {
   const apiKey = process.env.MARKET_API_KEY?.trim();
-  const choice = explicitChoice() ?? (apiKey ? "finnhub" : "mock");
+  const choice = explicitChoice() ?? (apiKey ? "tiingo" : "mock");
   if (choice === "mock") {
     // The embedding seam warns on the same fallback, and a Mock *price* earns it more
     // than a Mock vector does: it is a plausible-looking number, and only the `source`
@@ -32,13 +32,13 @@ export function createMarketProvider(): MarketProvider {
     }
     return new MockMarketProvider();
   }
-  if (!apiKey) throw new Error("MARKET_PROVIDER=finnhub needs MARKET_API_KEY");
-  return new FinnhubMarketProvider(apiKey, required("MARKET_API_BASE"));
+  if (!apiKey) throw new Error("MARKET_PROVIDER=tiingo needs MARKET_API_KEY");
+  return new TiingoMarketProvider(apiKey, required("MARKET_API_BASE"));
 }
 
 // Cached against #81's Redis seam, which fails open: with no `REDIS_URL`, or with Redis
 // down, every call goes to the provider and the feature still works. The TTL is what
-// keeps a Story panel inside Finnhub's 60-calls-a-minute free tier — one Ticker on one
+// keeps a Story panel inside Tiingo's 50-requests-an-hour free tier — one Ticker on one
 // busy page is one call a minute however many readers open it — which is why this is the
 // door every market surface reads through, rather than `createMarketProvider` (ADR-0036).
 //

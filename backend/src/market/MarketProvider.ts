@@ -20,7 +20,7 @@ export interface Quote {
   // publisher leaning: a surface cannot arrange the parts into a number with nobody's
   // name on it. A Mock price is a plausible-looking number, which is exactly the kind
   // that must never be displayed as if a market produced it.
-  source: "finnhub" | "mock";
+  source: "tiingo" | "mock";
 }
 
 export interface MarketProvider {
@@ -30,9 +30,9 @@ export interface MarketProvider {
   quote(ticker: string): Promise<Quote | null>;
 }
 
-// Finnhub answers an unknown Ticker with a 200 and zeroes rather than a 404, so a
-// Ticker is checked before it becomes a URL query or a cache key. US tickers are
-// letters with an optional class or exchange suffix; anything else is not a Ticker.
+// A Ticker is checked before it becomes a URL query or a cache key, since it arrives
+// from an `Entity` row an Admin edits. US tickers are letters with an optional class or
+// exchange suffix; anything else is not a Ticker.
 const TICKER = /^[A-Z][A-Z0-9]{0,6}(?:[.\-][A-Z]{1,3})?$/;
 
 export function normalizeTicker(ticker: string): string | null {

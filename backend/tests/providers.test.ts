@@ -181,68 +181,76 @@ describe("provider selection", () => {
 // #87 / ADR-0036: the third instance of the same selection rule, so the market panel
 // runs offline on the code path a key switches to a live provider.
 describe("market provider", () => {
-  const FINNHUB_QUOTE = { c: 261.74, d: 0.06, dp: 0.0229, h: 263.31, l: 260.68, o: 261.07, pc: 261.68, t: 1_582_641_000 };
+  // One real Tiingo IEX row, kept as the endpoint actually answers it.
+  const TIINGO_ROW = {
+    ticker: "AAPL",
+    timestamp: "2026-09-03T20:00:00+00:00",
+    last: null,
+    tngoLast: 328.21,
+    prevClose: 324.96,
+  };
 
-  function stubFinnhub(response: unknown, ok = true) {
+  function stubTiingo(response: unknown, ok = true) {
     const fetchMock = vi.fn().mockResolvedValue({ ok, status: ok ? 200 : 429, json: async () => response });
     vi.stubGlobal("fetch", fetchMock);
     return fetchMock;
   }
 
-  function configureFinnhub() {
-    process.env.MARKET_API_KEY = "finnhub-key";
-    process.env.MARKET_API_BASE = "https://finnhub.io/api/v1";
+  function configureTiingo() {
+    process.env.MARKET_API_KEY = "tiingo-token";
+    process.env.MARKET_API_BASE = "https://api.tiingo.com";
   }
 
-  it("infers Finnhub from the key and lets an explicit choice override it", () => {
-    configureFinnhub();
-    expect(createMarketProvider().constructor.name).toBe("FinnhubMarketProvider");
+  it("infers Tiingo from the key and lets an explicit choice override it", () => {
+    configureTiingo();
+    expect(createMarketProvider().constructor.name).toBe("TiingoMarketProvider");
     process.env.MARKET_PROVIDER = "mock";
     expect(createMarketProvider().constructor.name).toBe("MockMarketProvider");
   });
 
   it("refuses a provider it has no key for, and an unknown name", () => {
-    process.env.MARKET_PROVIDER = "finnhub";
+    process.env.MARKET_PROVIDER = "tiingo";
     expect(() => createMarketProvider()).toThrow(/MARKET_API_KEY/);
     process.env.MARKET_PROVIDER = "typo";
     expect(() => createMarketProvider()).toThrow(/MARKET_PROVIDER/);
   });
 
   it("requires an https endpoint from configuration rather than hardcoding one", () => {
-    process.env.MARKET_API_KEY = "finnhub-key";
+    process.env.MARKET_API_KEY = "tiingo-token";
     expect(() => createMarketProvider()).toThrow(/MARKET_API_BASE/);
-    process.env.MARKET_API_BASE = "http://finnhub.io/api/v1";
+    process.env.MARKET_API_BASE = "http://api.tiingo.com";
     expect(() => createMarketProvider()).toThrow(/https/);
   });
 
-  it("maps a Finnhub quote and sends the token as a header, not a query parameter", async () => {
-    configureFinnhub();
-    const fetchMock = stubFinnhub(FINNHUB_QUOTE);
+  it("maps a Tiingo quote and sends the token as a header, not a query parameter", async () => {
+    configureTiingo();
+    const fetchMock = stubTiingo([TIINGO_ROW]);
 
-    expect(await createMarketProvider().quote("AAPL")).toEqual({
+    const quoted = await createMarketProvider().quote("AAPL");
+    expect(quoted).toEqual({
       ticker: "AAPL",
-      price: 261.74,
-      change: 0.06,
-      changePercent: 0.0229,
-      previousClose: 261.68,
-      asOf: "2020-02-25T14:30:00.000Z",
-      source: "finnhub",
+      price: 328.21,
+      change: expect.closeTo(3.25, 2),
+      changePercent: expect.closeTo(1.0001, 3),
+      previousClose: 324.96,
+      asOf: "2026-09-03T20:00:00.000Z",
+      source: "tiingo",
     });
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://finnhub.io/api/v1/quote?symbol=AAPL");
-    expect(url).not.toContain("finnhub-key");
-    expect((init.headers as Record<string, string>)["X-Finnhub-Token"]).toBe("finnhub-key");
+    expect(url).toBe("https://api.tiingo.com/iex/?tickers=AAPL");
+    expect(url).not.toContain("tiingo-token");
+    expect((init.headers as Record<string, string>).Authorization).toBe("Token tiingo-token");
     expect(init.redirect).toBe("error");
   });
 
-  // Finnhub answers an unknown Ticker with a 200 and zeroes, so the zero is the 404.
-  it("reads a zeroed Finnhub response as no quote, and a failure as a throw", async () => {
-    configureFinnhub();
-    stubFinnhub({ c: 0, d: null, dp: null, h: 0, l: 0, o: 0, pc: 0, t: 0 });
+  // Tiingo answers an unknown Ticker with an empty array rather than a zeroed row.
+  it("reads an empty Tiingo response as no quote, and a failure as a throw", async () => {
+    configureTiingo();
+    stubTiingo([]);
     expect(await createMarketProvider().quote("NOTATICKER")).toBeNull();
 
-    stubFinnhub({}, false);
+    stubTiingo({}, false);
     await expect(createMarketProvider().quote("AAPL")).rejects.toThrow(/429/);
   });
 
@@ -258,13 +266,13 @@ describe("market provider", () => {
   });
 
   it("serves a cached quote instead of calling the provider again", async () => {
-    configureFinnhub();
+    configureTiingo();
     const redis = fakeRedis();
     setCacheClientForTests(redis);
-    const fetchMock = stubFinnhub(FINNHUB_QUOTE);
+    const fetchMock = stubTiingo([TIINGO_ROW]);
 
-    expect((await quote("aapl"))?.price).toBe(261.74);
-    expect((await quote("AAPL"))?.price).toBe(261.74);
+    expect((await quote("aapl"))?.price).toBe(328.21);
+    expect((await quote("AAPL"))?.price).toBe(328.21);
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(redis.values.has("tessera:quote:v1:AAPL")).toBe(true);
     expect(redis.ttl).toBe(60);
@@ -277,29 +285,29 @@ describe("market provider", () => {
   // A Ticker nothing trades under is an answer, and re-asking it on every page read
   // would spend the free tier's whole budget on a row that will never resolve.
   it("caches a confirmed-unknown Ticker but never an outage", async () => {
-    configureFinnhub();
+    configureTiingo();
     setCacheClientForTests(fakeRedis());
-    const unknown = stubFinnhub({ c: 0, d: null, dp: null, h: 0, l: 0, o: 0, pc: 0, t: 0 });
+    const unknown = stubTiingo([]);
     expect(await quote("ZZZZ")).toBeNull();
     expect(await quote("ZZZZ")).toBeNull();
     expect(unknown).toHaveBeenCalledOnce();
 
-    const failing = stubFinnhub({}, false);
+    const failing = stubTiingo({}, false);
     expect(await quote("AAPL")).toBeNull();
     expect(await quote("AAPL")).toBeNull();
     expect(failing).toHaveBeenCalledTimes(2);
   });
 
   it("lets a misconfiguration throw rather than degrade into an empty panel", async () => {
-    process.env.MARKET_PROVIDER = "finnhub";
-    process.env.MARKET_API_KEY = "finnhub-key";
-    process.env.MARKET_API_BASE = "http://finnhub.io/api/v1";
+    process.env.MARKET_PROVIDER = "tiingo";
+    process.env.MARKET_API_KEY = "tiingo-token";
+    process.env.MARKET_API_BASE = "http://api.tiingo.com";
     await expect(quote("AAPL")).rejects.toThrow(/https/);
   });
 
   it("refuses a string that is not a Ticker before it reaches a provider or a key", async () => {
-    configureFinnhub();
-    const fetchMock = stubFinnhub(FINNHUB_QUOTE);
+    configureTiingo();
+    const fetchMock = stubTiingo([TIINGO_ROW]);
     for (const bad of ["", "  ", "AAPL; DROP", "TOOLONGSYMBOL", "../../etc", "9AAPL"]) {
       expect(await quote(bad)).toBeNull();
     }

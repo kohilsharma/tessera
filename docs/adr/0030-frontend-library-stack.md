@@ -91,7 +91,8 @@ pagination handle almost all of them. Virtualise only a list measured to be slow
 ### Backend — almost nothing new
 
 - **Redis cache**: `ioredis` is already installed (BullMQ uses it). No new dependency.
-- **Finnhub**: `undici` is already installed. No vendor SDK.
+- **Market data**: `undici` is already installed. No vendor SDK. (Named Finnhub here; the provider
+  is Tiingo — ADR-0036. The point stands either way: no SDK, just `fetch`.)
 - **Structured logging**: add `pino` + `pino-http`.
 - **Rate limiting**: add `express-rate-limit`, with `rate-limit-redis` so the limit is shared across
   processes rather than per-instance.

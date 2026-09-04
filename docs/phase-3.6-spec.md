@@ -145,7 +145,9 @@ model writes cards **cited to it**. A card owns its own question, answer and cit
   `createEmbeddingProvider` / `createSynthesisProvider` pattern (ADR-0003). The demo runs offline
   with no key; the same code path runs live.
 - **Finnhub** as the real provider (60 calls/min free, real-time US quotes), model and endpoint from
-  env.
+  env. **Superseded by ADR-0036 — the provider is Tiingo.** Finnhub's free tier answers
+  `/stock/candle` with a 403, so it cannot supply the price series the next bullet requires; Tiingo
+  serves both the quote and an adjusted daily series on one key. An ADR overrides the spec.
 - **Join**: `Entity` gains a `ticker`. `runEntityResolution` already resolves organisations out of
   the firehose, so a Story's market panel appears when its resolved organisations carry tickers and
   degrades honestly to nothing when they do not.

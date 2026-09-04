@@ -660,88 +660,105 @@ focused backend spectrum suite pass.
 
 **#87 — A market data provider seam, with a Mock beside it.** `backend/src/market/` is the third
 instance of ADR-0003's pattern and needed no new abstraction to be the third: `createMarketProvider()`
-resolves `FinnhubMarketProvider` or `MockMarketProvider` from env by the same rule
+resolves `TiingoMarketProvider` or `MockMarketProvider` from env by the same rule
 `createEmbeddingProvider` and `createSynthesisProvider` use — an explicit `MARKET_PROVIDER` wins,
-otherwise a present `MARKET_API_KEY` infers Finnhub and no key means the Mock. ADR-0036 records the
-choice and, per ADR-0033, the criterion behind it: access and cost, because this is a project and not
-a business.
+otherwise a present `MARKET_API_KEY` infers the real provider and no key means the Mock. ADR-0036
+records the choice and, per ADR-0033, the criterion behind it: access and cost, because this is a
+project and not a business.
 
-Four decisions inside it are worth more than the selection function.
+**The provider is Tiingo, not the Finnhub the spec names, and the correction is the most useful thing
+in this ticket.** It shipped on Finnhub first. Checked against a real free-tier key the same day,
+`GET /quote` answers 200 with live data and `GET /stock/candle` answers **403 `You don't have access
+to this resource`** — so Finnhub free is real-time quotes only, and §4's in-house indicators (#88) had
+no price series to compute over. A survey against three constraints (an official published tier, a few
+dozen tickers, email-only signup) found Tiingo, and two facts decided it. **Alpha Vantage's free tier
+is unadjusted prices only** — adjusted close is premium — and an SMA-50 over unadjusted prices reads a
+stock split as a 50% crash that never happened, which is a silent wrong answer in exactly the surface
+#88 builds. And **Tiingo answers a comma-separated list of tickers in one request**, so a fifty-ticker
+watchlist refresh is one call against a fifty-an-hour limit rather than fifty; the tightest-looking
+number in the comparison is not a constraint at all.
 
-**A quote carries the name of who produced it.** `source: "finnhub" | "mock"` lives *inside* the
+Then the useful part: Tiingo's `/iex/` serves the *quote* too, returning the same numbers Finnhub did
+for the same Ticker in the same minute — `tngoLast` 328.21 against `c` 328.21, `prevClose` 324.96
+against `pc` 324.96. So the question stopped being "which vendor supplies the series Finnhub cannot"
+and became "is there a reason to keep two vendors", and there was not. **Finnhub was dropped
+entirely** — one key, one rate limit, one set of terms. The swap touched the provider class and
+nothing else: the seam, the cache, the value shape, the selection rule and every test around them
+survived, which is ADR-0003's interface earning its keep for the third time. It also *deleted* code:
+the `price <= 0` guard existed only to read Finnhub's zeroed-200 as the 404 it was, and Tiingo's empty
+array means what it looks like.
+
+Four decisions inside the seam are worth more than the selection function.
+
+**A quote carries the name of who produced it.** `source: "tiingo" | "mock"` lives *inside* the
 `Quote` rather than beside it, the same shape ADR-0035 gave a publisher leaning. It matters more here:
 a Mock price is a plausible-looking number, and a plausible-looking number is exactly the kind that
 must never reach a screen as though a market set it. The Mock's prices are derived from a hash of the
-symbol rather than read from a checked-in table — a table of prices is a claim about what real
+Ticker rather than read from a checked-in table — a table of prices is a claim about what real
 companies are worth and is stale within a day — and its `asOf` is fixed rather than `now()`, so two
 calls cannot disagree about when a demo's price was struck.
 
-**An unknown symbol is an answer; an outage is not, and only the first is cached.** The provider
-returns `null` for a symbol nothing trades under and *throws* when it cannot be reached. Without that
-split the seam is wrong in both directions: an Entity carrying a ticker that will never resolve gets
-re-asked on every page read, spending the minute's whole budget on a settled row, and a thirty-second
-outage gets pinned on screen for the full TTL after the provider came back. Finnhub forces the
-distinction into our code rather than onto a status line — it answers an unknown symbol with a **200
-and every field zeroed**, so the zero *is* the 404 and `price <= 0` is what reads it as one.
+**An unknown Ticker is an answer; an outage is not, and only the first is cached.** The provider
+returns `null` for a Ticker nothing trades under and *throws* when it cannot be reached. Without that
+split the seam is wrong in both directions: an Entity carrying a Ticker that will never resolve gets
+re-asked on every page read, spending the hour's whole budget on a settled row, and a thirty-second
+outage gets pinned on screen for the full TTL after the provider came back.
 
 **The cache is the rate control, not a freshness bound.** `quote()` reads and writes #81's Redis seam
-at `tessera:quote:v1:<SYMBOL>` with a 60-second TTL (`MARKET_QUOTE_CACHE_TTL_SECONDS`), which is what
-holds a demo inside Finnhub's 60-calls-a-minute free tier: one symbol on one busy Story costs one call
-a minute however many readers open it. The seam fails open as it did for #81, so with `REDIS_URL`
-unset or Redis down every call reaches the provider and the feature still works — slower and closer to
-the limit, never broken. That is worth stating precisely: "60/min is safe" is a Redis-up claim.
+at `tessera:quote:v1:<TICKER>` with a 60-second TTL (`MARKET_QUOTE_CACHE_TTL_SECONDS`). The seam fails
+open as it did for #81, so with `REDIS_URL` unset or Redis down every call reaches the provider and the
+feature still works — slower and closer to the limit, never broken. That is worth stating precisely:
+"50/hour is safe" is a Redis-up claim.
 
 **What "never called from a render" actually rests on, since the review pushed on it.** The browser
 half is true by construction — this is backend-only code no component can import. The half that is
 *not* enforced is a route calling `createMarketProvider()` and going round the cache: the factory is
 exported because ADR-0003's pattern and #87's own Done-when both name it, and there is no lint script
-in this repo to stop the wrong door being used. ADR-0036 §5 now records that as a convention rather
-than asserting it as decided, the way ADR-0035 recorded its licence-line residual. #89 is the first
-ticket in a position to get it wrong.
+in this repo to stop the wrong door being used. ADR-0036 §5 records that as a convention rather than
+asserting it as decided, the way ADR-0035 recorded its licence-line residual. #89 is the first ticket
+in a position to get it wrong.
 
-**The token goes in a header, and symbols are validated before they are interpolated.**
-`X-Finnhub-Token` rather than `?token=` keeps the key out of request logs and out of any redirect
-target (`redirect: "error"`, as the synthesis transport already does), and `normalizeTicker` gates a
-string before it becomes a URL query or a cache key — a Ticker arrives from an `Entity` row an Admin
-edits (#89). The seam says **Ticker** throughout, CONTEXT.md's own term, and leaves `symbol` where it
-belongs: Finnhub's name for the field on the wire. There is no retry loop: retrying into a rate limit spends the budget the cache exists to
-protect, and a 5-second `AbortSignal.timeout` bounds the call.
+**The token goes in a header, and Tickers are validated before they are interpolated.**
+`Authorization: Token …` rather than a query parameter keeps the key out of request logs and out of any
+redirect target (`redirect: "error"`, as the synthesis transport already does), and `normalizeTicker`
+gates a string before it becomes a URL query or a cache key — a Ticker arrives from an `Entity` row an
+Admin edits (#89). The seam says **Ticker** throughout, CONTEXT.md's own term, and leaves `symbol`
+where it belongs: a vendor's name for the field on the wire. There is no retry loop: retrying into a
+rate limit spends the budget the cache exists to protect, and a 5-second `AbortSignal.timeout` bounds
+the call.
 
-**The open question was checked against a real key the same day, and the answer is the awkward one.**
-`GET /stock/candle?symbol=AAPL&resolution=D` returns **403 `You don't have access to this resource`**
-on the free tier; `GET /quote` returns 200 with live data on the same key. Finnhub free is real-time
-quotes *only*, so #88's indicators have no series to run on and **#89 needs a second provider** —
-another free one behind this same interface, never a paid account (ADR-0033). Two consequences worth
-carrying: `MarketProvider` grows a daily-series method rather than staying at one call, and a Ticker's
-quote and its series may come from different providers, which is exactly what the `source` field on a
-value already anticipates.
+**The rights position is stated rather than dodged.** Tiingo's free tier is *personal, non-display*
+use — and no free market-data tier permits display, because that is how market data licensing works;
+Twelve Data just puts a $29/mo price on the same clause. ADR-0036 accepts it on exactly the argument
+ADR-0033 made about free-tier LLM providers — public data, no user PII, one demo machine, no
+commercial exposure — and declines to claim a licence the project does not have. Two ADRs now share
+one criterion and one honest sentence.
 
-The same check verified the two things this seam asserts about Finnhub rather than leaving them
-inferred: a real Ticker returns `{"c":328.21,"d":3.25,"dp":1.0001,...}`, and a nonexistent one returns
-`{"c":0,"d":null,"dp":null,...}` with **HTTP 200** — so the zero really is the 404, and `d`/`dp`
-really do arrive `null`, which is why they are defaulted rather than trusted.
+**What #88 and #89 inherit.** `MarketProvider` gains `dailySeries()` when the ticket that needs it
+lands, not before. #88 must compute over `adjClose` rather than `close`, or a split silently becomes a
+crash. #92's watchlist should use the batch form rather than a loop over `quote()`, which is the whole
+reason the rate limit is comfortable.
 
 `vitest.config.ts` pins `MARKET_PROVIDER`, `MARKET_API_KEY`, `MARKET_API_BASE` and
 `MARKET_QUOTE_CACHE_TTL_SECONDS` empty beside the embedding and synthesis keys, so no test run reaches
 a live provider — or a developer's own TTL — from their `.env`. `fakeRedis()` moved out of
 `tests/cache.test.ts` into `tests/fakeCache.ts` so the market tests could reuse it rather than copy it,
 and typing its parameters cleared three pre-existing `tsc` errors. Reading a TTL from env moved into
-`cache.ts` as `ttlFromEnv`, which the comparable-Stories key now shares, rather than being copied
-beside the second caller.
+`cache.ts` as `ttlFromEnv`, which the comparable-Stories key now shares.
 
-**Four things the `/code-review` pass changed.** The seam was renamed off `symbol` onto **Ticker**
-(CONTEXT.md's term, and the glossary entry written for this ticket had imported the wrong word three
-lines below the right one). `createMarketProvider()` was hoisted out of `quote()`'s `try`, where a bad
-`MARKET_API_BASE` had been degrading into the same empty panel an unknown Ticker gives instead of
-failing loudly — a test now holds that line. `MARKET_QUOTE_CACHE_TTL_SECONDS` got its pin. And `open`,
-`high` and `low` came off `Quote`: #88's indicators need a price *series*, not one day's OHLC, so
-nothing was going to read them.
+**Four things the `/code-review` pass changed**, before the provider swap: the seam was renamed off
+`symbol` onto **Ticker** (CONTEXT.md's term, and the glossary entry written for this ticket had
+imported the wrong word three lines below the right one); `createMarketProvider()` was hoisted out of
+`quote()`'s `try`, where a bad `MARKET_API_BASE` had been degrading into the same empty panel an
+unknown Ticker gives instead of failing loudly; `MARKET_QUOTE_CACHE_TTL_SECONDS` got its pin; and
+`open`, `high` and `low` came off `Quote`, since #88's indicators need a price *series* rather than one
+day's OHLC and nothing was going to read them.
 
 Verification: 11 assertions in `tests/providers.test.ts` covering selection, inference, refusals, the
-https requirement, the Finnhub mapping, the zeroed-response reading, Mock determinism, the cache hit
-and its tunable TTL, the cached-unknown/uncached-outage split, the loud misconfiguration and Ticker
-validation — `tests/providers.test.ts` and `tests/cache.test.ts` green at 28 tests, and `tsc --noEmit`
-down to the one pre-existing `hardening.test.ts` error. The full backend suite is 548 passing with one
-failure in `clustering.test.ts` that passes in isolation — the concurrency flake #85 already recorded
-on this machine, unrelated to this seam, which touches no clustering path. No frontend in this ticket,
-so no `impeccable` pass; the market panel is #89.
+https requirement, the Tiingo mapping, the empty-response reading, Mock determinism, the cache hit and
+its tunable TTL, the cached-unknown/uncached-outage split, the loud misconfiguration and Ticker
+validation — `tests/providers.test.ts` and `tests/cache.test.ts` green, and `tsc --noEmit` down to the
+one pre-existing `hardening.test.ts` error. The full backend suite is 549 passing with one failure in
+`clustering.test.ts` that passes in isolation — the concurrency flake #85 already recorded on this
+machine, unrelated to this seam, which touches no clustering path. No frontend in this ticket, so no
+`impeccable` pass; the market panel is #89.
