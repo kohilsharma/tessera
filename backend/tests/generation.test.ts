@@ -1855,6 +1855,65 @@ describe("saving an analysis into a Brief", () => {
     expect(refused.body.error).toMatch(/cannot be below the 2 Article/);
   });
 
+  it("attaches, replaces, and removes an analysis on an owned Brief", async () => {
+    const firstStory = await twoPublisherStory();
+    const secondStory = await twoPublisherStory();
+    const token = await tokenFor("student");
+    const firstRun = await requestAnalysis(firstStory.story.id, token);
+    const secondRun = await requestAnalysis(secondStory.story.id, token);
+    const brief = await saveAnalysis(token, { title: "My desk", category: "technology" });
+
+    const attached = await request(app())
+      .patch(`/api/v1/briefs/${brief.body.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ generationRunId: firstRun.body.id });
+    expect(attached.status).toBe(200);
+    expect(attached.body.generationRunId).toBe(firstRun.body.id);
+    expect(attached.body.articleCount).toBe(2);
+
+    const replaced = await request(app())
+      .patch(`/api/v1/briefs/${brief.body.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ generationRunId: secondRun.body.id });
+    expect(replaced.status).toBe(200);
+    expect(replaced.body.generationRunId).toBe(secondRun.body.id);
+    expect(replaced.body.articleCount).toBe(4);
+
+    const removed = await request(app())
+      .patch(`/api/v1/briefs/${brief.body.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ generationRunId: null });
+    expect(removed.status).toBe(200);
+    expect(removed.body.generationRunId).toBeNull();
+    expect(removed.body.articleCount).toBe(4);
+  });
+
+  it("applies the existing Brief capacity and Lens rules when attaching", async () => {
+    const { story } = await twoPublisherStory();
+    const investorRun = await requestAnalysis(story.id, await tokenFor("investor"));
+    const studentToken = await tokenFor("student");
+    const brief = await saveAnalysis(studentToken, {
+      title: "Small desk",
+      category: "technology",
+      articleCapacityLimit: 1,
+    });
+
+    const tooSmall = await request(app())
+      .patch(`/api/v1/briefs/${brief.body.id}`)
+      .set("Authorization", `Bearer ${studentToken}`)
+      .send({ generationRunId: investorRun.body.id });
+    expect(tooSmall.status).toBe(422);
+    expect(tooSmall.body.error).toMatch(/different Lens/);
+
+    const studentRun = await requestAnalysis(story.id, studentToken);
+    const refused = await request(app())
+      .patch(`/api/v1/briefs/${brief.body.id}`)
+      .set("Authorization", `Bearer ${studentToken}`)
+      .send({ generationRunId: studentRun.body.id });
+    expect(refused.status).toBe(422);
+    expect(refused.body.error).toMatch(/cannot attach analysis|capacity|below the 2 Article/);
+  });
+
   it("refuses a failed analysis and an analysis that does not exist", async () => {
     const { story } = await twoPublisherStory();
     const token = await tokenFor("student");

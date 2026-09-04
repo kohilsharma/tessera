@@ -885,3 +885,15 @@ render-time reads and reused messaging. Frontend typecheck/build and full suite 
 Backend focused generation tests pass; full suite reaches 578 passing with three pre-existing timing
 flakes in clustering and Readability, plus the repository's unrelated strict `hardening.test.ts`
 typecheck error.
+
+**#94 — attach an analysis to an existing Brief.** `PATCH /briefs/:id` now accepts
+`generationRunId` (including `null` to remove the frozen run) for an owned Student or Investor
+Brief. It reuses `loadReaderRun` for completed-run, role/Lens and id validation, and locks the Brief
+while checking its existing Article attachments plus the run's frozen evidence against capacity.
+Missing evidence Articles are pinned in the same transaction, while existing manual attachments are
+preserved; replacing a run therefore never silently discards the owner's other Articles.
+
+Story detail's save control now loads the reader's own Briefs and offers either a new Brief or an
+existing one. The selected existing target uses the new PATCH path; the API still enforces ownership
+and the Student/Investor-only route guard. Focused backend and frontend regressions cover attach,
+replace, remove, Lens and capacity behavior. Frontend build and backend typecheck pass.

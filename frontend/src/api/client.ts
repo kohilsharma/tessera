@@ -648,6 +648,7 @@ export type BriefInput = {
   note?: string | null;
   category: StoryCategory;
   articleCapacityLimit?: number;
+  generationRunId?: string | null;
 };
 
 async function sendJson<T>(

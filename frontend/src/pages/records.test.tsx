@@ -489,6 +489,30 @@ describe("Story detail — the analysis", () => {
     await waitFor(() => expect(screen.queryByText(analysis.claims[0].text)).not.toBeInTheDocument());
   });
 
+  it("offers an owned Brief as an alternative save target", async () => {
+    const posted: { url: string; body?: string }[] = [];
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (init?.method === "PATCH") {
+        posted.push({ url, body: String(init.body) });
+        return jsonResponse({ ...brief, id: "b2", generationRunId: analysis.id });
+      }
+      if (init?.method === "POST") return jsonResponse(analysis);
+      if (url.includes("/briefs")) return jsonResponse({ items: [{ ...brief, id: "b2" }], total: 1 });
+      return url.includes("/auth/me")
+        ? jsonResponse({ id: "u2", email: "s@b.c", role: "student" })
+        : storyGet(input);
+    });
+    renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Request analysis" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Save analysis to" }));
+    await userEvent.click(await screen.findByText(/Supply chain watch/));
+    await userEvent.click(screen.getByRole("button", { name: "Save to Brief" }));
+
+    await waitFor(() => expect(posted).toEqual([{ url: "/api/v1/briefs/b2", body: JSON.stringify({ generationRunId: analysis.id }) }]));
+  });
+
   it("offers an Admin no way to own the analysis they asked for", async () => {
     vi.mocked(fetch).mockImplementation(async (input, init) => {
       if (init?.method === "POST") return jsonResponse(analysis);

@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   GENERATION_LENSES,
   getMe,
+  getBriefs,
   getStories,
   getStory,
   getStoryAnalysis,
@@ -16,6 +17,8 @@ import {
   mergeStories,
   unmergeStory,
   saveAnalysisToBrief,
+  updateBrief,
+  type BriefSummary,
   type GenerationFailureCode,
   type GenerationLens,
   type StoryAnalysis,
@@ -26,8 +29,7 @@ import { ArticleEntry } from "../components/indexArchetype";
 import { RecordMasthead, RecordSection } from "../components/recordArchetype";
 import { TimelineRegister } from "../components/timelineRegister";
 import { EmptyState, EntryList, ErrorState, PendingState, RetryableError } from "../components/uiStates";
-import { CoverageSpectrum } from "../components/primitives";
-import { RolePanel } from "../components/primitives";
+import { CoverageSpectrum, RolePanel, SelectField } from "../components/primitives";
 import { InvestorMarketPanel } from "../components/marketPanel";
 import { Cards, GitMerge, Plus } from "@phosphor-icons/react";
 import styles from "./StoryDetail.module.css";
@@ -35,13 +37,9 @@ import styles from "./StoryDetail.module.css";
 function StudentStoryPanel({
   story,
   analysis,
-  onSave,
-  saving,
 }: {
   story: StoryDetailData;
   analysis: StoryAnalysis | undefined;
-  onSave: () => void;
-  saving: boolean;
 }) {
   const cards = useMutation({ mutationFn: () => makeFlashcards(analysis!.id) });
   return (
@@ -50,12 +48,76 @@ function StudentStoryPanel({
       {analysis?.status === "completed" ? (
         <div className="record-actions">
           <button type="button" className="record-command" onClick={() => cards.mutate()} disabled={cards.isPending}><Cards aria-hidden size={18} /> {cards.isPending ? "Making cards…" : "Make flashcards"}</button>
-          <button type="button" className="record-command" onClick={onSave} disabled={saving}><Plus aria-hidden size={18} /> {saving ? "Adding…" : "Add to a new collection"}</button>
         </div>
       ) : <p className="record-prose">Request an analysis below to make cited flashcards or add this Story to a collection.</p>}
       {cards.isError && <ErrorState>Could not make flashcards: {(cards.error as Error).message}</ErrorState>}
       {cards.isSuccess && <p role="status">Cards added to your deck.</p>}
     </RolePanel>
+  );
+}
+
+function AnalysisSaveControl({
+  generationRunId,
+  label,
+  emptyLabel,
+}: {
+  generationRunId: string;
+  label: string;
+  emptyLabel: string;
+}) {
+  const navigate = useNavigate();
+  const [targetBriefId, setTargetBriefId] = useState("");
+  const briefs = useQuery({
+    queryKey: ["briefs", "analysis-save-picker"],
+    queryFn: async () => {
+      const first = await getBriefs({ page: 1, pageSize: 50, sort: "updatedAt:desc" });
+      if (!Array.isArray(first.items)) return [];
+      if (!Number.isInteger(first.totalPages) || first.totalPages <= 1) return first.items;
+      const rest = await Promise.all(
+        Array.from({ length: first.totalPages - 1 }, (_, index) =>
+          getBriefs({ page: index + 2, pageSize: 50, sort: "updatedAt:desc" }),
+        ),
+      );
+      return [first, ...rest].flatMap((page) => page.items);
+    },
+  });
+  const save = useMutation({
+    mutationFn: () =>
+      targetBriefId
+        ? updateBrief(targetBriefId, { generationRunId })
+        : saveAnalysisToBrief(generationRunId),
+    onSuccess: (brief) => navigate(`/briefs/${brief.id}`),
+  });
+  const options: BriefSummary[] = Array.isArray(briefs.data) ? briefs.data : [];
+
+  return (
+    <>
+      {briefs.isPending && <PendingState>Loading your Briefs…</PendingState>}
+      {briefs.isError && (
+        <RetryableError
+          message={`Could not load your Briefs: ${(briefs.error as Error).message}`}
+          onRetry={() => briefs.refetch()}
+          retrying={briefs.isFetching}
+        />
+      )}
+      <SelectField
+        label={label}
+        value={targetBriefId}
+        onChange={(event) => setTargetBriefId(event.target.value)}
+        disabled={briefs.isPending || briefs.isError || save.isPending}
+      >
+          <option value="">{emptyLabel}</option>
+          {options.map((brief) => (
+            <option key={brief.id} value={brief.id}>
+              {brief.title} ({brief.articleCount}/{brief.articleCapacityLimit})
+            </option>
+          ))}
+      </SelectField>
+      <button type="button" className="record-command" onClick={() => save.mutate()} disabled={save.isPending}>
+        <Plus aria-hidden size={18} /> {save.isPending ? "Saving…" : targetBriefId ? "Save to Brief" : emptyLabel}
+      </button>
+      {save.isError && <ErrorState>Could not save this analysis: {(save.error as Error).message}</ErrorState>}
+    </>
   );
 }
 
@@ -140,13 +202,8 @@ export default function StoryDetail() {
     ? analysis.data
     : existingAnalysis.data ?? undefined;
   const navigate = useNavigate();
-  // #55: the ownership loop. Saving is creating a Brief, so it lands the reader on the
-  // Brief they now own — the analysis is theirs from here, and stays as it is while
-  // this Story goes on being reported.
-  const save = useMutation({
-    mutationFn: () => saveAnalysisToBrief(analysis.data?.id ?? existingAnalysis.data!.id),
-    onSuccess: (brief) => navigate(`/briefs/${brief.id}`),
-  });
+  // #55: the ownership loop. Saving lands the reader on the Brief they chose or created;
+  // the analysis is theirs from here, and stays as it is while this Story is reported.
   const marketRead = useMutation({ mutationFn: () => requestStoryMarketRead(id!) });
   const watchlist = useMutation({ mutationFn: (ticker: string) => addToWatchlist({ kind: "ticker", value: ticker }) });
 
@@ -199,7 +256,7 @@ export default function StoryDetail() {
         <CoverageSpectrum spectrum={story.coverageSpectrum} />
       </RecordSection>
 
-      {me.data?.role === "student" && <RecordSection heading="Your study desk"><StudentStoryPanel story={story} analysis={produced} onSave={() => completed && save.mutate()} saving={save.isPending} /></RecordSection>}
+      {me.data?.role === "student" && <RecordSection heading="Your study desk"><StudentStoryPanel story={story} analysis={produced} /></RecordSection>}
       {me.data?.role === "admin" && story.adminPanel && <RecordSection heading="Operator panel"><AdminStoryPanel story={story.adminPanel} storyId={story.id} onRefresh={() => query.refetch()} /></RecordSection>}
 
       {me.data?.role === "investor" && (
@@ -284,20 +341,10 @@ export default function StoryDetail() {
                   exactly as it refuses them a Brief. Waits for the identity to
                   resolve rather than assuming a reader — an Admin should never see a
                   command that would 403. */}
-              {me.data && !isAdmin && (
+              {me.data && ["student", "investor"].includes(me.data.role) && (
                 <div className="record-actions">
-                  <button
-                    type="button"
-                    className="record-command"
-                    onClick={() => save.mutate()}
-                    disabled={save.isPending}
-                  >
-                    {save.isPending ? "Saving…" : "Save to a new Brief"}
-                  </button>
+                  <AnalysisSaveControl generationRunId={produced.id} label="Save analysis to" emptyLabel="Save to a new Brief" />
                 </div>
-              )}
-              {save.isError && (
-                <ErrorState>Could not save this analysis: {(save.error as Error).message}</ErrorState>
               )}
             </>
           ))}

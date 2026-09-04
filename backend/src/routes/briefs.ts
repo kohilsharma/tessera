@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { extname } from "node:path";
 import { Response, Router } from "express";
 import multer from "multer";
+import { In } from "typeorm";
 import { AppDataSource } from "../data-source";
 import { BriefArticle } from "../entities/BriefArticle";
 import { Article } from "../entities/Article";
@@ -119,7 +120,12 @@ function toPublicBrief(brief: IntelligenceBrief, articleCount: number) {
   };
 }
 
-type BriefInput = { title: string; note: string | null; category: StoryCategory; articleCapacityLimit: number };
+type BriefInput = {
+  title: string;
+  note: string | null;
+  category: StoryCategory;
+  articleCapacityLimit: number;
+};
 
 // `isCreate` widens which fields are required: create needs title+category (note
 // and articleCapacityLimit fall back to defaults), update accepts any subset.
@@ -373,6 +379,18 @@ briefsRouter.patch(
       return;
     }
 
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const hasGenerationRunId = Object.prototype.hasOwnProperty.call(body, "generationRunId");
+    const requestedGenerationRunId = body.generationRunId;
+    const saved = hasGenerationRunId && requestedGenerationRunId !== null
+      ? await loadSavedAnalysis(requestedGenerationRunId, req.user!.role)
+      : null;
+    if (saved && !saved.ok) {
+      res.status(422).json({ error: saved.error });
+      return;
+    }
+    const analysis = saved?.ok ? saved.value : null;
+
     try {
       const failure = await AppDataSource.transaction<BriefWriteFailure | null>(async (manager) => {
         const lockedBrief = await manager.getRepository(IntelligenceBrief).findOne({
@@ -381,8 +399,10 @@ briefsRouter.patch(
         });
         if (!lockedBrief) return BRIEF_NOT_FOUND;
 
+        const joins = manager.getRepository(BriefArticle);
+        const attachedCount = await joins.count({ where: { briefId: brief.id } });
+        const capacity = parsed.value.articleCapacityLimit ?? lockedBrief.articleCapacityLimit;
         if (parsed.value.articleCapacityLimit !== undefined) {
-          const attachedCount = await manager.getRepository(BriefArticle).count({ where: { briefId: brief.id } });
           if (parsed.value.articleCapacityLimit < attachedCount) {
             return unprocessable(
               `articleCapacityLimit cannot be below the ${attachedCount} Article(s) already attached`,
@@ -390,9 +410,31 @@ briefsRouter.patch(
           }
         }
 
+        let missingArticleIds: string[] = [];
+        if (analysis) {
+          const attached = await joins.find({
+            where: { briefId: brief.id, articleId: In(analysis.articleIds) },
+            select: { articleId: true },
+          });
+          const attachedIds = new Set(attached.map(({ articleId }) => articleId));
+          missingArticleIds = analysis.articleIds.filter((articleId) => !attachedIds.has(articleId));
+          if (attachedCount + missingArticleIds.length > capacity) {
+            return unprocessable(
+              `articleCapacityLimit cannot be below the ${attachedCount + missingArticleIds.length} Article(s) this analysis requires`,
+            );
+          }
+        }
+
         // TypeORM's update() throws on an empty value object.
-        if (Object.keys(parsed.value).length > 0) {
-          await manager.getRepository(IntelligenceBrief).update({ id: brief.id }, parsed.value);
+        const update = {
+          ...parsed.value,
+          ...(hasGenerationRunId ? { generationRunId: analysis?.run.id ?? null } : {}),
+        };
+        if (Object.keys(update).length > 0) {
+          await manager.getRepository(IntelligenceBrief).update({ id: brief.id }, update);
+        }
+        if (missingArticleIds.length > 0) {
+          await joins.insert(missingArticleIds.map((articleId) => ({ briefId: brief.id, articleId })));
         }
         return null;
       });
