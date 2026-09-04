@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { Button, CitationChip, EmptyState, ErrorState, LoadingState, RefusedState, TextField } from "./primitives";
+import { Button, CitationChip, CoverageSpectrum, EmptyState, ErrorState, LoadingState, RefusedState, TextField } from "./primitives";
 
 describe("shared primitives", () => {
   it("renders accessible states and token-backed controls", () => {
@@ -38,5 +38,13 @@ describe("shared primitives", () => {
 
     expect(screen.getByText("Showing 5 of 31")).toBeInTheDocument();
     expect(screen.getByRole("list")).toBeInTheDocument();
+  });
+
+  it("labels spectrum bands and an overwhelming rated side", () => {
+    render(<CoverageSpectrum spectrum={{ left: 4, centre: 0, right: 0, unrated: 1, total: 5, blindspot: "left" }} />);
+
+    expect(screen.getByRole("img", { name: /4 left, 0 centre, 0 right; 1 unrated/i })).toBeInTheDocument();
+    expect(screen.getByText(/Blindspot: overwhelmingly left-leaning coverage/)).toBeInTheDocument();
+    expect(screen.getByText(/AllSides Media Bias Ratings/)).toBeInTheDocument();
   });
 });

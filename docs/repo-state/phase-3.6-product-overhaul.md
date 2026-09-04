@@ -642,3 +642,18 @@ seed coverage including all three CHECK constraints. The full backend suite is f
 machine under concurrency and was so before this ticket: the clean tree at `305630e` fails three
 tests across two files under the same command, this branch one, and every one of them passes in
 isolation.
+
+**#86 — Coverage spectrum and blindspots.** Story reads now carry a `coverageSpectrum` computed from
+accepted Story membership, counting Articles (not Publishers) across the three bands and retaining
+unrated coverage as its own count. The calculator collapses AllSides' five ratings through the same
+band vocabulary as the Publisher leaning mark, and flags a blindspot when one rated side reaches
+80% of rated coverage; unrated-only coverage never becomes a blindspot. Story lists compute the
+field in one bounded Article query for the page, while Story detail reuses its already-loaded
+members.
+
+The shared `CoverageSpectrum` primitive renders a labelled segmented bar, counts every band,
+states unrated Articles, and names a blindspot in words so colour is not the only signal. It is
+present on the Stories index and Story detail, with the token contract's `--left`, `--centre` and
+`--right` accents. Added three focused calculator tests covering collapse, blindspot threshold and
+the unrated case. Verification: frontend **265 tests**, `npm run build`, backend build, and the
+focused backend spectrum suite pass.

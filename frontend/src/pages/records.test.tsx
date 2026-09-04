@@ -40,6 +40,7 @@ const story = {
   firstSeenAt: "2026-01-02T00:00:00Z",
   lastSeenAt: "2026-01-09T00:00:00Z",
   articleCount: 2,
+  coverageSpectrum: { left: 1, centre: 1, right: 0, unrated: 0, total: 2, blindspot: null },
   articles: [article, { ...article, id: "a2", title: "Subsidy timing still unresolved" }],
 };
 

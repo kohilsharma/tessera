@@ -383,6 +383,16 @@ export type StorySummary = {
   firstSeenAt: string;
   lastSeenAt: string;
   articleCount: number;
+  coverageSpectrum: CoverageSpectrum;
+};
+
+export type CoverageSpectrum = {
+  left: number;
+  centre: number;
+  right: number;
+  unrated: number;
+  total: number;
+  blindspot: "left" | "centre" | "right" | null;
 };
 
 export type ArticleSummary = {

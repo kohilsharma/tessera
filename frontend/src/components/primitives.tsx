@@ -1,7 +1,8 @@
 import React, { type ComponentPropsWithoutRef, type ReactNode } from "react";
 import { ArrowClockwise, LockKey, WarningCircle } from "@phosphor-icons/react";
 import { Button as BaseButton, Input as BaseInput, Select } from "@base-ui-components/react";
-import { PUBLISHER_LEANINGS, type LeaningRating, type LeaningSource } from "../api/client";
+import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis } from "recharts";
+import { PUBLISHER_LEANINGS, type CoverageSpectrum, type LeaningRating, type LeaningSource } from "../api/client";
 import styles from "./primitives.module.css";
 
 type Archetype = "index" | "record" | "form" | "dashboard";
@@ -114,6 +115,49 @@ export function LeaningAttribution({ sources }: { sources: LeaningSource[] }) {
         </span>
       ))}
     </p>
+  );
+}
+
+export function CoverageSpectrum({ spectrum }: { spectrum: CoverageSpectrum }) {
+  const ratedTotal = spectrum.left + spectrum.centre + spectrum.right;
+  if (spectrum.total === 0 || ratedTotal === 0) {
+    return <span className={styles.coverageUnrated}>No rated coverage yet ({spectrum.total} Articles)</span>;
+  }
+  const bands = [
+    ["left", "Left", spectrum.left],
+    ["centre", "Centre", spectrum.centre],
+    ["right", "Right", spectrum.right],
+  ] as const;
+  return (
+    <div className={styles.coverage}>
+      <div className={styles.coverageBar} role="img" aria-label={`Coverage spectrum: ${bands.map(([, label, count]) => `${count} ${label.toLowerCase()}`).join(", ")}; ${spectrum.unrated} unrated`}>
+        <ResponsiveContainer width="100%" height={28}>
+          <BarChart data={[{ name: "Coverage", left: spectrum.left, centre: spectrum.centre, right: spectrum.right }]} layout="vertical" margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+            <XAxis type="number" domain={[0, spectrum.total]} hide />
+            <YAxis type="category" dataKey="name" hide />
+            <Bar dataKey="left" stackId="coverage" fill="var(--left)" isAnimationActive={false} />
+            <Bar dataKey="centre" stackId="coverage" fill="var(--centre)" isAnimationActive={false} />
+            <Bar dataKey="right" stackId="coverage" fill="var(--right)" isAnimationActive={false} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      <div className={styles.coverageLabels}>
+        {bands.map(([, label, count]) => <span key={label}>{label} <strong>{count}</strong></span>)}
+        {spectrum.unrated > 0 && <span>Unrated <strong>{spectrum.unrated}</strong></span>}
+      </div>
+      {spectrum.blindspot && <p className={styles.blindspot} role="alert">Blindspot: overwhelmingly {spectrum.blindspot}-leaning coverage among rated Articles.</p>}
+      {spectrum.unrated > 0 && <p className={styles.coverageNote}>{spectrum.unrated} Article{spectrum.unrated === 1 ? "" : "s"} have no published leaning.</p>}
+      <p className={styles.coverageAttribution}>
+        Leanings reproduced from{" "}
+        <a href="https://www.allsides.com/media-bias/media-bias-ratings" target="_blank" rel="noreferrer">
+          AllSides Media Bias Ratings™
+        </a>{" "}
+        under{" "}
+        <a href="https://creativecommons.org/licenses/by-nc/4.0/" target="_blank" rel="noreferrer">
+          CC BY-NC 4.0
+        </a>.
+      </p>
+    </div>
   );
 }
 

@@ -11,6 +11,7 @@ import { paginate, parseListQuery, toEnvelope } from "../lib/listQuery";
 import { ACCEPTED_ASSIGNMENT, acceptedMembership } from "../lib/storyMembership";
 import { isUuid } from "../lib/uuid";
 import { buildTimeline, toTimelineEvents } from "../timeline/buildTimeline";
+import { buildCoverageSpectrum, type CoverageSpectrum } from "../lib/coverageSpectrum";
 
 export const storiesRouter = Router();
 
@@ -18,7 +19,7 @@ function storyRepo() {
   return AppDataSource.getRepository(Story);
 }
 
-function toPublicStory(story: Story, articleCount: number) {
+function toPublicStory(story: Story, articleCount: number, coverageSpectrum: CoverageSpectrum) {
   return {
     id: story.id,
     slug: story.slug,
@@ -28,6 +29,7 @@ function toPublicStory(story: Story, articleCount: number) {
     firstSeenAt: story.firstSeenAt,
     lastSeenAt: story.lastSeenAt,
     articleCount,
+    coverageSpectrum,
   };
 }
 
@@ -63,9 +65,19 @@ storiesRouter.get(
 
     const { items, total } = await paginate(qb, page, pageSize);
     const withCount = items as (Story & { articleCount?: number })[];
+    const articleRows = withCount.length
+      ? await AppDataSource.getRepository(Article).find({
+          where: withCount.map((story) => ({ storyId: story.id, storyAssignmentStatus: ACCEPTED_ASSIGNMENT })),
+          relations: { publisher: true },
+        })
+      : [];
+    const spectrumByStory = new Map<string, CoverageSpectrum>();
+    for (const story of withCount) {
+      spectrumByStory.set(story.id, buildCoverageSpectrum(articleRows.filter((article) => article.storyId === story.id)));
+    }
     res.json(
       toEnvelope(
-        withCount.map((story) => toPublicStory(story, story.articleCount ?? 0)),
+        withCount.map((story) => toPublicStory(story, story.articleCount ?? 0, spectrumByStory.get(story.id)!)),
         page,
         pageSize,
         total,
@@ -97,7 +109,7 @@ storiesRouter.get(
     // out of both the list and the count a reader sees.
     const members = story.articles.filter((article) => article.storyAssignmentStatus === ACCEPTED_ASSIGNMENT);
     res.json({
-      ...toPublicStory(story, members.length),
+      ...toPublicStory(story, members.length, buildCoverageSpectrum(members)),
       articles: members
         .sort((a, b) => a.publishedAt.getTime() - b.publishedAt.getTime())
         .map(toPublicArticle),

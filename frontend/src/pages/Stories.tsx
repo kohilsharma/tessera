@@ -9,6 +9,7 @@ import {
   useListQueryParams,
 } from "../components/listControls";
 import { EmptyState, PendingState, RetryableError } from "../components/uiStates";
+import { CoverageSpectrum } from "../components/primitives";
 
 // The first page on the Index archetype (#31): filter register, ruled entries,
 // pagination. Everything shaped here is shared — see components/indexArchetype.
@@ -99,6 +100,7 @@ export default function Stories() {
                     <time dateTime={story.firstSeenAt}>{new Date(story.firstSeenAt).toLocaleDateString()}</time>
                   ),
                 },
+                { term: "Spectrum", value: <CoverageSpectrum spectrum={story.coverageSpectrum} /> },
               ]}
             />
           ))}

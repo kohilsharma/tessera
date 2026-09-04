@@ -13,6 +13,7 @@ const story = {
   firstSeenAt: "2026-01-02T00:00:00Z",
   lastSeenAt: "2026-01-09T00:00:00Z",
   articleCount: 4,
+  coverageSpectrum: { left: 1, centre: 2, right: 1, unrated: 0, total: 4, blindspot: null },
 };
 
 // The Index archetype is presentation, and jsdom cannot judge presentation. What

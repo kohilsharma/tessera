@@ -83,6 +83,10 @@ const LEANING_BANDS: Record<PublisherLeaning, LeaningBand> = {
   right: "right",
 };
 
+export function leaningBandFor(leaning: PublisherLeaning): LeaningBand {
+  return LEANING_BANDS[leaning];
+}
+
 export type SourcedLeaning = { leaning: PublisherLeaning; leaningSource: LeaningSourceKey };
 
 // The only writer of a leaning. A Publisher's domain is `publisherDomain()`'s
