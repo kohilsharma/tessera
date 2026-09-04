@@ -1,5 +1,6 @@
-import { Column, CreateDateColumn, Entity, OneToMany, PrimaryGeneratedColumn } from "typeorm";
+import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn } from "typeorm";
 import { Article } from "./Article";
+import { ClusteringRun } from "./ClusteringRun";
 
 // Constrained vocabulary (Initial Report Table 2, "Category | enum"). Mirrors the
 // stories.category CHECK constraint; IntelligenceBrief's category (#20) reuses it.
@@ -42,6 +43,13 @@ export class Story {
 
   @OneToMany(() => Article, (article) => article.story)
   articles!: Article[];
+
+  @ManyToOne(() => ClusteringRun, { nullable: true })
+  @JoinColumn({ name: "clusteringRunId" })
+  clusteringRun!: ClusteringRun | null;
+
+  @Column({ type: "uuid", nullable: true })
+  clusteringRunId!: string | null;
 
   // Deliberately not mapped, for the same reason Article.embedding is not: the
   // `vector` type is not one TypeORM's postgres driver recognises. The column and

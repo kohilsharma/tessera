@@ -57,6 +57,8 @@ import { EntityResolutionRun } from "./entities/EntityResolutionRun";
 import { EntityAlias } from "./entities/EntityAlias";
 import { EntityMergeRefusal } from "./entities/EntityMergeRefusal";
 import { EntityMergeProposal } from "./entities/EntityMergeProposal";
+import { StoryMergeRecord } from "./entities/StoryMergeRecord";
+import { AddStoryRolePanels1755771000000 } from "./migrations/1755771000000-AddStoryRolePanels";
 
 const url = process.env.DATABASE_URL;
 
@@ -100,6 +102,7 @@ export const AppDataSource = new DataSource({
     EntityAlias,
     EntityMergeRefusal,
     EntityMergeProposal,
+    StoryMergeRecord,
   ],
   migrations: [
     InitPgvector1755740000000,
@@ -133,6 +136,7 @@ export const AppDataSource = new DataSource({
     RegroundFlashcards1755768000000,
     AddPublisherLeaning1755769000000,
     AddEntityTicker1755770000000,
+    AddStoryRolePanels1755771000000,
   ],
   synchronize: false,
   logging: false,

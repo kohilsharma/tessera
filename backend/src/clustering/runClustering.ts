@@ -246,7 +246,7 @@ class GroupNotCorroborated extends Error {}
 // headlines that are the only thing the model is shown.
 type SeededStory = { id: string; medoidId: string; headlines: string[]; members: number };
 
-async function seedStory(group: Candidate[]): Promise<SeededStory | null> {
+async function seedStory(group: Candidate[], clusteringRunId: string): Promise<SeededStory | null> {
   try {
     return await AppDataSource.transaction(async (manager) => {
       // Lock and revalidate the would-be members before deriving the medoid.
@@ -278,6 +278,7 @@ async function seedStory(group: Candidate[]): Promise<SeededStory | null> {
         category: DEFAULT_STORY_CATEGORY,
         firstSeenAt: medoid.publishedAt,
         lastSeenAt: medoid.publishedAt,
+        clusteringRunId,
       });
 
       const attached: Candidate[] = [];
@@ -320,6 +321,7 @@ async function seedStories(
   candidates: Candidate[],
   namer: SynthesisProvider,
   tally: { seeded: number; storiesCreated: number },
+  clusteringRunId: string,
 ): Promise<void> {
   const placed = new Set<string>();
 
@@ -345,7 +347,7 @@ async function seedStories(
       }
     }
 
-    const seeded = await seedStory(group);
+    const seeded = await seedStory(group, clusteringRunId);
     if (!seeded) continue;
     tally.seeded += seeded.members;
     tally.storiesCreated += 1;
@@ -414,7 +416,7 @@ export async function runClustering(deps: ClusteringDeps): Promise<ClusteringRun
       }
     }
 
-    await seedStories(unassigned, deps.namer, tally);
+    await seedStories(unassigned, deps.namer, tally, run.id);
     if (assigned + tally.seeded > 0) await recomputeStoryCentroids();
 
     await runs.update(

@@ -4,14 +4,20 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   GENERATION_LENSES,
   getMe,
+  getStories,
   getStory,
   getStoryTimeline,
   LENS_LABELS,
   requestStoryAnalysis,
   requestStoryMarketRead,
+  makeFlashcards,
+  mergeStories,
+  unmergeStory,
   saveAnalysisToBrief,
   type GenerationFailureCode,
   type GenerationLens,
+  type StoryAnalysis,
+  type StoryDetail as StoryDetailData,
 } from "../api/client";
 import { AnalysisRegister } from "../components/analysisRegister";
 import { ArticleEntry } from "../components/indexArchetype";
@@ -19,7 +25,61 @@ import { RecordMasthead, RecordSection } from "../components/recordArchetype";
 import { TimelineRegister } from "../components/timelineRegister";
 import { EmptyState, EntryList, ErrorState, PendingState, RetryableError } from "../components/uiStates";
 import { CoverageSpectrum } from "../components/primitives";
+import { RolePanel } from "../components/primitives";
 import { InvestorMarketPanel } from "../components/marketPanel";
+import { Cards, GitMerge, Plus } from "@phosphor-icons/react";
+import styles from "./StoryDetail.module.css";
+
+function StudentStoryPanel({
+  story,
+  analysis,
+  onSave,
+  saving,
+}: {
+  story: StoryDetailData;
+  analysis: StoryAnalysis | undefined;
+  onSave: () => void;
+  saving: boolean;
+}) {
+  const cards = useMutation({ mutationFn: () => makeFlashcards(analysis!.id) });
+  return (
+    <RolePanel role="Student">
+      <div className={styles.roleHeading}><div><h3>Study this Story</h3><p>{story.studentPanel?.collectionCount ?? 0} collection{story.studentPanel?.collectionCount === 1 ? "" : "s"} owned</p></div><Cards aria-hidden size={24} weight="duotone" /></div>
+      {analysis?.status === "completed" ? (
+        <div className="record-actions">
+          <button type="button" className="record-command" onClick={() => cards.mutate()} disabled={cards.isPending}><Cards aria-hidden size={18} /> {cards.isPending ? "Making cards…" : "Make flashcards"}</button>
+          <button type="button" className="record-command" onClick={onSave} disabled={saving}><Plus aria-hidden size={18} /> {saving ? "Adding…" : "Add to a new collection"}</button>
+        </div>
+      ) : <p className="record-prose">Request an analysis below to make cited flashcards or add this Story to a collection.</p>}
+      {cards.isError && <ErrorState>Could not make flashcards: {(cards.error as Error).message}</ErrorState>}
+      {cards.isSuccess && <p role="status">Cards added to your deck.</p>}
+    </RolePanel>
+  );
+}
+
+function AdminStoryPanel({ story, storyId, onRefresh }: { story: NonNullable<StoryDetailData["adminPanel"]>; storyId: string; onRefresh: () => void }) {
+  const candidates = useQuery({ queryKey: ["story-merge-picker", storyId], queryFn: () => getStories({ pageSize: 50, sort: "firstSeenAt:desc" }) });
+  const [mergedStoryId, setMergedStoryId] = useState("");
+  const merge = useMutation({ mutationFn: () => mergeStories(storyId, mergedStoryId), onSuccess: onRefresh });
+  const unmerge = useMutation({ mutationFn: (mergeId: string) => unmergeStory(mergeId), onSuccess: onRefresh });
+  return (
+    <RolePanel role="Admin">
+      <div className={styles.roleHeading}><div><h3>Record controls</h3><p>Pipeline provenance and Story corrections.</p></div><GitMerge aria-hidden size={24} weight="duotone" /></div>
+      <dl className={styles.adminLedger}>
+        <div><dt>Clustering run</dt><dd>{story.clusteringRun ? `${story.clusteringRun.status} · ${new Date(story.clusteringRun.startedAt).toLocaleString()}` : "Not assembled by a recorded run"}</dd></div>
+        <div><dt>Analysis prompt</dt><dd>{story.latestAnalysis ? `${story.latestAnalysis.promptVersion} · ${story.latestAnalysis.lens}` : "No analysis run yet"}</dd></div>
+      </dl>
+      <div className="record-actions">
+        <label className="filter-field">Merge another Story <select value={mergedStoryId} onChange={(event) => setMergedStoryId(event.target.value)}><option value="">Choose a Story</option>{candidates.data?.items.filter((candidate) => candidate.id !== storyId).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.title}</option>)}</select></label>
+        <button type="button" className="record-command" onClick={() => merge.mutate()} disabled={!mergedStoryId || merge.isPending}><GitMerge aria-hidden size={18} /> {merge.isPending ? "Merging…" : "Merge"}</button>
+      </div>
+      {candidates.data && <p className="record-prose">Showing {candidates.data.items.length} of {candidates.data.total} Stories available to merge.</p>}
+      {merge.isError && <ErrorState>Could not merge this Story: {(merge.error as Error).message}</ErrorState>}
+      {story.mergeHistory.length > 0 && <><p className="record-prose">Showing {story.mergeHistory.length} of {story.mergeHistoryTotal} previous merges.</p><ul className={styles.mergeHistory}>{story.mergeHistory.map((item) => <li key={item.id}><span>{item.mergedStory.title}</span><button type="button" onClick={() => unmerge.mutate(item.id)} disabled={unmerge.isPending}>Unmerge</button></li>)}</ul></>}
+      {unmerge.isError && <ErrorState>Could not unmerge this Story: {(unmerge.error as Error).message}</ErrorState>}
+    </RolePanel>
+  );
+}
 
 // A failed run says so plainly (ADR-0010: never silently serve invalid
 // intelligence). The wording is per failure code, because "the model cited
@@ -125,6 +185,9 @@ export default function StoryDetail() {
       <RecordSection heading="Coverage spectrum">
         <CoverageSpectrum spectrum={story.coverageSpectrum} />
       </RecordSection>
+
+      {me.data?.role === "student" && <RecordSection heading="Your study desk"><StudentStoryPanel story={story} analysis={produced} onSave={() => completed && save.mutate()} saving={save.isPending} /></RecordSection>}
+      {me.data?.role === "admin" && story.adminPanel && <RecordSection heading="Operator panel"><AdminStoryPanel story={story.adminPanel} storyId={story.id} onRefresh={() => query.refetch()} /></RecordSection>}
 
       {me.data?.role === "investor" && (
         <RecordSection heading="Market intelligence">

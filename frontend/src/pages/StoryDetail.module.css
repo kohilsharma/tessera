@@ -1,0 +1,11 @@
+.roleHeading { display: flex; align-items: start; justify-content: space-between; gap: 16px; color: var(--quiet); }
+.roleHeading h3 { margin: 0; color: var(--ink); font-size: 1.2rem; }
+.roleHeading p { margin: 6px 0 0; color: var(--quiet); }
+.adminLedger { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 22px 0 0; }
+.adminLedger div { border-top: 1px solid var(--rule); padding-top: 10px; }
+.adminLedger dt { color: var(--quiet); font: var(--t-micro)/1.2 var(--font-mono); text-transform: uppercase; }
+.adminLedger dd { margin: 6px 0 0; color: var(--ink); }
+.mergeHistory { display: grid; gap: 8px; margin: 18px 0 0; padding: 0; list-style: none; }
+.mergeHistory li { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--rule); padding-top: 10px; }
+.mergeHistory button { min-height: 44px; padding: 8px 12px; border: 1px solid var(--quiet); background: var(--paper2); color: var(--ink); cursor: pointer; }
+@media (max-width: 560px) { .adminLedger { grid-template-columns: 1fr; } }

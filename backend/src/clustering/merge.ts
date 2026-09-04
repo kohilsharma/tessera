@@ -1,6 +1,8 @@
 import { AppDataSource } from "../data-source";
 import { PENDING_ASSIGNMENT, acceptedCentroid, acceptedMembership } from "../lib/storyMembership";
 import { invalidateComparableStoriesCache } from "../generation/evidence";
+import type { MergedArticleSnapshot, MergedStorySnapshot, RejectedAssignmentSnapshot } from "../entities/StoryMergeRecord";
+import { RejectedStoryAssignment } from "../entities/RejectedStoryAssignment";
 
 // #52: the correction ADR-0026's deliberately tight threshold makes necessary. The
 // job errs towards two Stories rather than one wrong Story, so the operator surface
@@ -11,6 +13,10 @@ export type StoryMergeRefusal = "not_found" | "same_story" | "curated";
 export type StoryMergeResult =
   | { status: "merged"; survivorStoryId: string; mergedStoryId: string; movedArticles: number }
   | { status: "refused"; reason: StoryMergeRefusal };
+
+export type StoryUnmergeResult =
+  | { status: "unmerged"; survivorStoryId: string; restoredStoryId: string; restoredArticles: number }
+  | { status: "refused"; reason: "not_found" | "already_changed" };
 
 export async function mergeStories(survivorStoryId: string, mergedStoryId: string): Promise<StoryMergeResult> {
   // Guarded here rather than only in the route: "merge a Story into itself" would
@@ -48,6 +54,42 @@ export async function mergeStories(survivorStoryId: string, mergedStoryId: strin
       [[survivorStoryId, mergedStoryId]],
     );
     if (curated.length > 0) return { status: "refused", reason: "curated" };
+
+    const mergedRows: MergedStorySnapshot[] = await manager.query(
+      `SELECT "id", "slug", "title", "summary", "category", "firstSeenAt", "lastSeenAt", "clusteringRunId"
+       FROM "stories" WHERE "id" = $1`,
+      [mergedStoryId],
+    );
+    const articleSnapshots: MergedArticleSnapshot[] = await manager.query(
+      `SELECT "id", "storyAssignmentStatus", "storyAssignmentScore"
+       FROM "articles" WHERE "storyId" = $1`,
+      [mergedStoryId],
+    );
+    const rejectedSnapshots: RejectedAssignmentSnapshot[] = await manager.query(
+      `SELECT "articleId", "rejectedByUserId", "rejectedAt" FROM "rejected_story_assignments" WHERE "storyId" = $1`,
+      [mergedStoryId],
+    );
+    const evidenceRows: { id: string }[] = await manager.query(
+      `SELECT "id" FROM "evidence_sets" WHERE "storyId" = $1`,
+      [mergedStoryId],
+    );
+    const generationRows: { id: string }[] = await manager.query(
+      `SELECT "id" FROM "generation_runs" WHERE "storyId" = $1`,
+      [mergedStoryId],
+    );
+    await manager.query(
+      `INSERT INTO "story_merge_records" ("survivorStoryId", "mergedStoryId", "mergedStory", "articles", "rejectedAssignments", "evidenceSetIds", "generationRunIds")
+       VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6::uuid[], $7::uuid[])`,
+      [
+        survivorStoryId,
+        mergedStoryId,
+        JSON.stringify(mergedRows[0]),
+        JSON.stringify(articleSnapshots),
+        JSON.stringify(rejectedSnapshots),
+        evidenceRows.map(({ id }) => id),
+        generationRows.map(({ id }) => id),
+      ],
+    );
 
     // Every Article, decision and score intact: an accepted member becomes a member
     // of the survivor, and a proposal becomes a proposal *for* the survivor, still
@@ -141,5 +183,79 @@ export async function mergeStories(survivorStoryId: string, mergedStoryId: strin
     return { status: "merged", survivorStoryId, mergedStoryId, movedArticles };
   });
   if (result.status === "merged") await invalidateComparableStoriesCache();
+  return result;
+}
+
+export async function unmergeStory(mergeId: string): Promise<StoryUnmergeResult> {
+  const result = await AppDataSource.transaction(async (manager) => {
+    const records: {
+      id: string;
+      survivorStoryId: string;
+      mergedStoryId: string;
+      mergedStory: MergedStorySnapshot;
+      articles: MergedArticleSnapshot[];
+      rejectedAssignments: RejectedAssignmentSnapshot[];
+      evidenceSetIds: string[];
+      generationRunIds: string[];
+    }[] = await manager.query(
+      `SELECT "id", "survivorStoryId", "mergedStoryId", "mergedStory", "articles", "rejectedAssignments", "evidenceSetIds", "generationRunIds"
+       FROM "story_merge_records" WHERE "id" = $1 FOR UPDATE`,
+      [mergeId],
+    );
+    const record = records[0];
+    if (!record) return { status: "refused", reason: "not_found" } as const;
+
+    const currentArticles: { id: string }[] = record.articles.length
+      ? await manager.query(
+          `SELECT "id" FROM "articles" WHERE "id" = ANY($1::uuid[]) AND "storyId" = $2`,
+          [record.articles.map(({ id }) => id), record.survivorStoryId],
+        )
+      : [];
+    if (currentArticles.length !== record.articles.length) {
+      return { status: "refused", reason: "already_changed" } as const;
+    }
+    const survivor = await manager.query(`SELECT "id" FROM "stories" WHERE "id" = $1 FOR UPDATE`, [record.survivorStoryId]);
+    if (!survivor.length) return { status: "refused", reason: "not_found" } as const;
+
+    await manager.query(
+      `INSERT INTO "stories" ("id", "slug", "title", "summary", "category", "firstSeenAt", "lastSeenAt", "clusteringRunId")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        record.mergedStory.id,
+        record.mergedStory.slug,
+        record.mergedStory.title,
+        record.mergedStory.summary,
+        record.mergedStory.category,
+        record.mergedStory.firstSeenAt,
+        record.mergedStory.lastSeenAt,
+        record.mergedStory.clusteringRunId,
+      ],
+    );
+    for (const article of record.articles) {
+      await manager.query(
+        `UPDATE "articles" SET "storyId" = $1, "storyAssignmentStatus" = $2, "storyAssignmentScore" = $3 WHERE "id" = $4`,
+        [record.mergedStoryId, article.storyAssignmentStatus, article.storyAssignmentScore, article.id],
+      );
+    }
+    for (const rejection of record.rejectedAssignments) {
+      await manager.getRepository(RejectedStoryAssignment).save({
+        articleId: rejection.articleId,
+        storyId: record.mergedStoryId,
+        rejectedByUserId: rejection.rejectedByUserId,
+        rejectedAt: rejection.rejectedAt,
+      });
+    }
+    if (record.evidenceSetIds.length) {
+      await manager.query(`UPDATE "evidence_sets" SET "storyId" = $1 WHERE "id" = ANY($2::uuid[])`, [record.mergedStoryId, record.evidenceSetIds]);
+    }
+    if (record.generationRunIds.length) {
+      await manager.query(`UPDATE "generation_runs" SET "storyId" = $1 WHERE "id" = ANY($2::uuid[])`, [record.mergedStoryId, record.generationRunIds]);
+    }
+    await manager.query(`UPDATE "stories" SET "embedding" = ${acceptedCentroid("stories")}, "firstSeenAt" = COALESCE((SELECT min("publishedAt") FROM "articles" WHERE "storyId" = $1 AND ${acceptedMembership("articles")}), "firstSeenAt"), "lastSeenAt" = COALESCE((SELECT max("publishedAt") FROM "articles" WHERE "storyId" = $1 AND ${acceptedMembership("articles")}), "lastSeenAt") WHERE "id" = $1`, [record.mergedStoryId]);
+    await manager.query(`UPDATE "stories" SET "embedding" = ${acceptedCentroid("stories")} WHERE "id" = $1`, [record.survivorStoryId]);
+    await manager.query(`DELETE FROM "story_merge_records" WHERE "id" = $1`, [mergeId]);
+    return { status: "unmerged", survivorStoryId: record.survivorStoryId, restoredStoryId: record.mergedStoryId, restoredArticles: record.articles.length } as const;
+  });
+  if (result.status === "unmerged") await invalidateComparableStoriesCache();
   return result;
 }

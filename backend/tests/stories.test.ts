@@ -8,6 +8,8 @@ import { Story } from "../src/entities/Story";
 import { Article } from "../src/entities/Article";
 import { EvidenceSet } from "../src/entities/EvidenceSet";
 import { GenerationRun } from "../src/entities/GenerationRun";
+import { User } from "../src/entities/User";
+import { signToken } from "../src/auth/jwt";
 import { buildTimeline, type TimelineArticle } from "../src/timeline/buildTimeline";
 import { setupTestDb } from "./setupTestDb";
 
@@ -524,6 +526,29 @@ describe("GET /api/v1/stories/:id", () => {
   it("returns 404 rather than 500 for a malformed id", async () => {
     const res = await request(app()).get("/api/v1/stories/not-a-uuid").set("Authorization", `Bearer ${token}`);
     expect(res.status).toBe(404);
+  });
+
+  it("keeps each Story role panel behind the API role boundary", async () => {
+    const tokens: Record<string, string> = {};
+    for (const role of ["student", "investor"] as const) {
+      const response = await request(app()).post("/api/v1/auth/register").send({
+        email: `${role}-story-panel@example.com`, password: "correct-horse", role,
+      });
+      tokens[role] = response.body.token;
+    }
+    const admin = await AppDataSource.getRepository(User).save({ email: "story-panel-admin@example.com", passwordHash: "unused", role: "admin" });
+    tokens.admin = signToken({ sub: admin.id, role: "admin" });
+    const student = await request(app()).get(`/api/v1/stories/${storyAlphaId}`).set("Authorization", `Bearer ${tokens.student}`);
+    const investor = await request(app()).get(`/api/v1/stories/${storyAlphaId}`).set("Authorization", `Bearer ${tokens.investor}`);
+    const adminResponse = await request(app()).get(`/api/v1/stories/${storyAlphaId}`).set("Authorization", `Bearer ${tokens.admin}`);
+    expect(student.body.studentPanel).toEqual({ collectionCount: 0 });
+    expect(student.body).not.toHaveProperty("market");
+    expect(student.body).not.toHaveProperty("adminPanel");
+    expect(investor.body).not.toHaveProperty("studentPanel");
+    expect(investor.body).not.toHaveProperty("adminPanel");
+    expect(adminResponse.body.adminPanel).toEqual(expect.objectContaining({ clusteringRun: null, latestAnalysis: null, mergeHistory: [] }));
+    expect(adminResponse.body).not.toHaveProperty("market");
+    expect(adminResponse.body).not.toHaveProperty("studentPanel");
   });
 });
 

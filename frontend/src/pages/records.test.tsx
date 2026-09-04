@@ -173,6 +173,34 @@ describe("Story detail — the record masthead", () => {
     expect(panel).toHaveTextContent("+$1.25 (+2.50%)");
     expect(panel).toHaveTextContent("50-day average");
   });
+
+  it("renders only the panel belonging to the signed-in role", async () => {
+    const adminPanel = {
+      clusteringRun: null,
+      latestAnalysis: { id: "run", lens: "student_context", promptVersion: "v1", status: "completed", completedAt: "2026-01-01T00:00:00Z" },
+      mergeHistory: [],
+    } as const;
+    const responses = {
+      student: { ...story, studentPanel: { collectionCount: 2 } },
+      investor: { ...story, market, marketStatus: "ready", marketTotal: 1 },
+      admin: { ...story, adminPanel },
+    } as const;
+    for (const role of ["student", "investor", "admin"] as const) {
+      vi.mocked(fetch).mockImplementation(async (input) => {
+        const path = String(input);
+        if (path.includes("/auth/me")) return jsonResponse({ id: role, email: `${role}@example.com`, role, colorMode: "light" });
+        if (path.includes("/timeline")) return jsonResponse(timeline);
+        return jsonResponse(responses[role]);
+      });
+      const { unmount } = renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
+      const own = role === "student" ? "Student panel" : role === "investor" ? "Investor panel" : "Admin panel";
+      expect(await screen.findByRole("region", { name: own })).toBeInTheDocument();
+      for (const other of ["Student panel", "Investor panel", "Admin panel"].filter((name) => name !== own)) {
+        expect(screen.queryByRole("region", { name: other })).not.toBeInTheDocument();
+      }
+      unmount();
+    }
+  });
 });
 
 // #64. The timeline's content contract: the Story's accepted reporting ordered

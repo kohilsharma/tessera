@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { AppDataSource } from "../data-source";
 import { enqueueClusteringRun } from "../clustering/queue";
-import { mergeStories, type StoryMergeRefusal } from "../clustering/merge";
+import { mergeStories, unmergeStory, type StoryMergeRefusal } from "../clustering/merge";
 import { ASSIGNMENT_DECISIONS, decidePendingAssignment, type AssignmentDecision } from "../clustering/review";
 import { Article } from "../entities/Article";
 import { asyncHandler } from "../middleware/asyncHandler";
@@ -40,6 +40,25 @@ clusteringRouter.post(
   asyncHandler(async (_req, res) => {
     await enqueueClusteringRun();
     res.status(202).json({ status: "accepted" });
+  }),
+);
+
+clusteringRouter.post(
+  "/clustering/merges/:mergeId/unmerge",
+  ...adminOnly,
+  asyncHandler(async (req, res) => {
+    if (!isUuid(req.params.mergeId)) {
+      res.status(404).json({ error: "Story merge not found" });
+      return;
+    }
+    const result = await unmergeStory(req.params.mergeId);
+    if (result.status === "unmerged") {
+      res.json(result);
+      return;
+    }
+    res.status(result.reason === "not_found" ? 404 : 422).json({
+      error: result.reason === "not_found" ? "Story merge not found" : "This Story merge can no longer be reversed",
+    });
   }),
 );
 

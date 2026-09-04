@@ -847,3 +847,14 @@ call. Advice-shaped text is refused through the same matcher used by analysis; f
 that refusal and cache reuse. The Mock provider returns a clearly labelled deterministic read for the
 offline demo. Verification: backend and frontend builds pass; focused market-read and market-panel
 tests pass. Full suites retain their pre-existing timing flakes on this machine.
+
+**#91 — Role-conditional panels inside the Story view.** `GET /stories/:id` now keeps role-owned
+panel payloads behind the API role boundary: Students receive study/collection context, Investors
+receive the existing market payload, and Admins receive clustering-run provenance, latest analysis
+prompt provenance, and bounded merge history. The Story record renders only the matching panel,
+reusing the existing flashcard, Brief, market, and Story-merge seams. Clustering-created Stories
+retain their creating run. Admin merges record the deleted Story, memberships, evidence sets, and
+generation runs so inline unmerge can restore them while the survivor is unchanged. Verification:
+frontend Story-detail role isolation test and full frontend suite (267 tests), backend Story API
+suite (37 tests), and frontend typecheck; backend's existing strict test error in
+`tests/hardening.test.ts:63` remains unrelated.

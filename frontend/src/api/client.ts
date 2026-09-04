@@ -435,6 +435,32 @@ export type StoryDetail = StorySummary & {
   market?: MarketPanel[] | null;
   marketStatus?: "ready" | "empty" | "unavailable";
   marketTotal?: number;
+  studentPanel?: { collectionCount: number };
+  adminPanel?: {
+    clusteringRun: {
+      id: string;
+      status: string;
+      startedAt: string;
+      completedAt: string | null;
+      embedded: number;
+      considered: number;
+      assigned: number;
+      heldForReview: number;
+      seeded: number;
+      unclustered: number;
+      storiesCreated: number;
+      errorSummary: string | null;
+    } | null;
+    latestAnalysis: { id: string; lens: GenerationLens; promptVersion: string; status: string; completedAt: string } | null;
+    mergeHistory: {
+      id: string;
+      mergedStoryId: string;
+      mergedStory: { title: string };
+      createdAt: string;
+      articles: unknown[];
+    }[];
+    mergeHistoryTotal: number;
+  };
 };
 
 export type ArticleDetail = {
@@ -1035,6 +1061,12 @@ export function mergeStories(survivorStoryId: string, mergedStoryId: string): Pr
     { survivorStoryId, mergedStoryId },
     "Could not merge these Stories",
   );
+}
+
+export type StoryUnmerge = { survivorStoryId: string; restoredStoryId: string; restoredArticles: number };
+
+export function unmergeStory(mergeId: string): Promise<StoryUnmerge> {
+  return sendJson("POST", `/api/v1/clustering/merges/${mergeId}/unmerge`, {}, "Could not unmerge this Story");
 }
 
 

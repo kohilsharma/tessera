@@ -3,6 +3,9 @@ import { AppDataSource } from "../data-source";
 import { Article } from "../entities/Article";
 import { EvidenceSet } from "../entities/EvidenceSet";
 import { GenerationRun } from "../entities/GenerationRun";
+import { ClusteringRun } from "../entities/ClusteringRun";
+import { IntelligenceBrief } from "../entities/IntelligenceBrief";
+import { StoryMergeRecord } from "../entities/StoryMergeRecord";
 import { Story, STORY_CATEGORIES } from "../entities/Story";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
@@ -177,12 +180,35 @@ storiesRouter.get(
     // out of both the list and the count a reader sees.
     const members = story.articles.filter((article) => article.storyAssignmentStatus === ACCEPTED_ASSIGNMENT);
     const market = req.user?.role === "investor" ? await loadStoryMarket(story.id) : undefined;
+    const rolePanel = req.user?.role === "admin"
+      ? {
+          adminPanel: {
+            clusteringRun: story.clusteringRunId
+              ? await AppDataSource.getRepository(ClusteringRun).findOneBy({ id: story.clusteringRunId })
+              : null,
+            latestAnalysis: await AppDataSource.getRepository(GenerationRun).findOne({
+              where: { storyId: story.id, status: "completed" }, order: { completedAt: "DESC" },
+            }),
+            mergeHistory: await AppDataSource.getRepository(StoryMergeRecord).find({
+              where: { survivorStoryId: story.id }, order: { createdAt: "DESC" }, take: 10,
+            }),
+            mergeHistoryTotal: await AppDataSource.getRepository(StoryMergeRecord).count({ where: { survivorStoryId: story.id } }),
+          },
+        }
+      : req.user?.role === "student"
+        ? {
+            studentPanel: {
+              collectionCount: await AppDataSource.getRepository(IntelligenceBrief).count({ where: { ownerId: req.user.id } }),
+            },
+          }
+        : {};
     res.json({
       ...toPublicStory(story, members.length, buildCoverageSpectrum(members)),
       articles: members
         .sort((a, b) => a.publishedAt.getTime() - b.publishedAt.getTime())
         .map(toPublicArticle),
       ...(market ? { market: market.market, marketStatus: market.status, marketTotal: market.total } : {}),
+      ...rolePanel,
     });
   }),
 );
