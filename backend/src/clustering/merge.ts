@@ -1,5 +1,6 @@
 import { AppDataSource } from "../data-source";
 import { PENDING_ASSIGNMENT, acceptedCentroid, acceptedMembership } from "../lib/storyMembership";
+import { invalidateComparableStoriesCache } from "../generation/evidence";
 
 // #52: the correction ADR-0026's deliberately tight threshold makes necessary. The
 // job errs towards two Stories rather than one wrong Story, so the operator surface
@@ -17,7 +18,7 @@ export async function mergeStories(survivorStoryId: string, mergedStoryId: strin
   // cascades — a self-merge is a request to delete a Story's reporting.
   if (survivorStoryId === mergedStoryId) return { status: "refused", reason: "same_story" };
 
-  return AppDataSource.transaction(async (manager) => {
+  const result: StoryMergeResult = await AppDataSource.transaction(async (manager) => {
     // Every membership writer locks Articles before its Story, with overlapping
     // Article sets ordered by id. Review and clustering use the same order, so a
     // merge waits behind an in-flight decision instead of each holding the row the
@@ -139,4 +140,6 @@ export async function mergeStories(survivorStoryId: string, mergedStoryId: strin
     // across only if that second refusal turns out to be a real cost.
     return { status: "merged", survivorStoryId, mergedStoryId, movedArticles };
   });
+  if (result.status === "merged") await invalidateComparableStoriesCache();
+  return result;
 }

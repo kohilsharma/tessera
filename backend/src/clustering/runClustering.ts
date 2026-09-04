@@ -5,6 +5,7 @@ import { Story } from "../entities/Story";
 import type { StoryAssignmentStatus } from "../entities/Article";
 import type { EmbeddingProvider } from "../embeddings/EmbeddingProvider";
 import { toVectorLiteral } from "../embeddings/pgvector";
+import { invalidateComparableStoriesCache } from "../generation/evidence";
 import { ACCEPTED_ASSIGNMENT, PENDING_ASSIGNMENT, acceptedCentroid } from "../lib/storyMembership";
 import type { SynthesisProvider } from "../synthesis";
 import {
@@ -432,5 +433,7 @@ export async function runClustering(deps: ClusteringDeps): Promise<ClusteringRun
     );
   }
 
-  return runs.findOneByOrFail({ id: run.id });
+  const result = await runs.findOneByOrFail({ id: run.id });
+  await invalidateComparableStoriesCache();
+  return result;
 }

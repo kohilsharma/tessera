@@ -42,6 +42,7 @@ export default defineConfig({
       SYNTHESIS_API_KEY: "",
       SYNTHESIS_MODEL: "",
       SYNTHESIS_API_BASE: "",
+      REDIS_URL: "",
     },
   },
 });

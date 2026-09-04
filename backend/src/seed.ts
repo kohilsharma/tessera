@@ -18,6 +18,7 @@ import { seedAnnotationsFor } from "./seedData/annotations";
 import { SEED_CONNECTORS, SEED_PUBLISHERS, SEED_STORIES } from "./seedData/corpus";
 import { seedCoverImagePng } from "./seedData/coverImage";
 import { LocalDiskFileStorageProvider } from "./storage/LocalDiskFileStorageProvider";
+import { invalidateComparableStoriesCache } from "./generation/evidence";
 
 // ADR-0015: `npm run seed` so the demo is never empty. Admin is deliberately not
 // registrable through /auth/register (it is assigned, not self-served), so this
@@ -276,6 +277,7 @@ export async function seedAll(): Promise<void> {
   await seedAnnotations();
   await seedConnectors();
   await seedBrief();
+  await invalidateComparableStoriesCache();
 }
 
 async function main(): Promise<void> {

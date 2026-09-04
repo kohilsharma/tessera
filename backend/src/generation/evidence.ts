@@ -5,8 +5,9 @@ import { weakestAnalysisTextMode, type AnalysisTextMode } from "../entities/Arti
 import { EvidenceSet } from "../entities/EvidenceSet";
 import { EvidenceSetArticle, type SelectionReason } from "../entities/EvidenceSetArticle";
 import type { TermsClass } from "../entities/Publisher";
-import type { StoryCategory } from "../entities/Story";
+import { STORY_CATEGORIES, type StoryCategory } from "../entities/Story";
 import { acceptedCentroid, acceptedMembership } from "../lib/storyMembership";
+import { cacheDelete, cacheGet, cacheSet } from "../lib/cache";
 import {
   EXCERPT_CHARS,
   MAX_ARTICLES_PER_PUBLISHER,
@@ -236,6 +237,7 @@ export function distinctPublisherCount(selected: SelectedEvidence[]): number {
 // #56: how many Stories the Investor surface offers a comparative reading of. A
 // landing page, not an index — /stories is where a reader goes for all of them.
 const COMPARABLE_STORY_LIMIT = 10;
+const COMPARABLE_STORIES_CACHE_KEY = "tessera:comparable-stories:v1";
 
 export type ComparableStory = {
   id: string;
@@ -244,6 +246,33 @@ export type ComparableStory = {
   publisherCount: number;
   lastSeenAt: Date;
 };
+
+type CachedComparableStory = Omit<ComparableStory, "lastSeenAt"> & { lastSeenAt: string };
+
+function decodeComparableStories(value: unknown): ComparableStory[] | null {
+  if (!Array.isArray(value)) return null;
+  const decoded: ComparableStory[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") return null;
+    const row = item as Partial<CachedComparableStory>;
+    const lastSeenAt = typeof row.lastSeenAt === "string" ? new Date(row.lastSeenAt) : null;
+    if (
+      typeof row.id !== "string" ||
+      typeof row.title !== "string" ||
+      typeof row.category !== "string" ||
+      !STORY_CATEGORIES.includes(row.category as StoryCategory) ||
+      typeof row.publisherCount !== "number" ||
+      !Number.isInteger(row.publisherCount) ||
+      row.publisherCount < 0 ||
+      !lastSeenAt ||
+      Number.isNaN(lastSeenAt.getTime())
+    ) {
+      return null;
+    }
+    decoded.push({ id: row.id, title: row.title, category: row.category as StoryCategory, publisherCount: row.publisherCount, lastSeenAt });
+  }
+  return decoded;
+}
 
 // The Stories an analysis can actually be written about, newest movement first: what
 // the Investor dashboard routes into (#56), and a question about evidence rather than
@@ -259,6 +288,9 @@ export type ComparableStory = {
 // at ten and a Story holds tens of members; batch or materialize the result if corpus
 // size makes this measurable.
 export async function comparableStories(): Promise<ComparableStory[]> {
+  const cached = decodeComparableStories(await cacheGet<CachedComparableStory[]>(COMPARABLE_STORIES_CACHE_KEY));
+  if (cached) return cached;
+
   const candidates: Omit<ComparableStory, "publisherCount">[] = await AppDataSource.query(
     `SELECT s."id", s."title", s."category", s."lastSeenAt"
        FROM "stories" s
@@ -277,7 +309,15 @@ export async function comparableStories(): Promise<ComparableStory[]> {
     comparable.push({ ...story, publisherCount });
     if (comparable.length === COMPARABLE_STORY_LIMIT) break;
   }
+  await cacheSet(
+    COMPARABLE_STORIES_CACHE_KEY,
+    comparable.map(({ lastSeenAt, ...story }) => ({ ...story, lastSeenAt: lastSeenAt.toISOString() })),
+  );
   return comparable;
+}
+
+export function invalidateComparableStoriesCache(): Promise<void> {
+  return cacheDelete(COMPARABLE_STORIES_CACHE_KEY);
 }
 
 // ADR-0027: the set's rung is the weakest among its members, and it is what decides

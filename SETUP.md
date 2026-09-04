@@ -119,6 +119,11 @@ A tick works the enabled fleet one connector at a time, and the GKG firehose alo
 rows per 15-minute window, so expect roughly a minute of work per tick and a corpus that grows
 steadily while the worker is up.
 
+The Investor dashboard also uses Redis as a read cache for its comparable-Story register. It is
+optional: with Redis unavailable or `REDIS_URL` unset, the API reads Postgres directly. The cached
+value expires after 30 seconds by default; tune that with
+`COMPARABLE_STORIES_CACHE_TTL_SECONDS` in `.env`.
+
 What arrives is all **Unclustered Articles**, invisible to browse and search, and it stays that way
 until the clustering pass places it. Most firehose rows never leave that state, on purpose: only
 articles carrying text are eligible (`feed_excerpt` or above, which means RSS and Readability but

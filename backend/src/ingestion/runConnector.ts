@@ -27,6 +27,7 @@ import {
 } from "./gkg";
 import { parseRssFeed } from "./rss";
 import { extractArticleText } from "./readability";
+import { invalidateComparableStoriesCache } from "../generation/evidence";
 
 // The one new seam in Phase 2 (#38): a plain async function taking the connector
 // and its dependencies, returning the IngestionRun it persisted. Everything below
@@ -1176,5 +1177,7 @@ export async function runConnector(
     );
   }
 
-  return runs.findOneByOrFail({ id: run.id });
+  const result = await runs.findOneByOrFail({ id: run.id });
+  await invalidateComparableStoriesCache();
+  return result;
 }

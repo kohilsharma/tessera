@@ -536,3 +536,18 @@ remaining for tests and a local process without Redis. The shared generation lim
 Story analysis and Flashcard deck generation while leaving Flashcard reads and reviews alone.
 `hardening.test.ts` covers the 429 contract, route mounts, request-id propagation and JSON completion
 event. Backend build and the affected auth/generation tests pass.
+
+**#81 — the Investor dashboard hot path is cached in Redis.** `comparableStories()` now reads and
+writes one versioned JSON value through `src/lib/cache.ts`, with a 30-second TTL by default
+(`COMPARABLE_STORIES_CACHE_TTL_SECONDS` can tune it). Redis failures, malformed payloads and a
+missing `REDIS_URL` all fall through to the existing Postgres/evidence path, so the dashboard stays
+available with Redis down. Successful ingestion, clustering, review decisions, Story merges and
+seeding explicitly delete the key after their writes; expiry is a freshness bound, not the
+correctness mechanism. The cached representation stores `lastSeenAt` as an ISO string and is
+validated before it reaches the route.
+
+Measured on the live seeded corpus (10 comparable Stories, six reads): uncached direct reads had a
+**101.22 ms median**; warm Redis reads had a **2.28 ms median** (97.7% lower). The first Redis read
+still pays the normal computation and populates the key. `backend/tests/cache.test.ts` covers JSON
+round-tripping/TTL, explicit deletion, failing cache clients, malformed payloads, and the comparable-Story miss/hit
+path; backend build and the affected dashboard tests pass.

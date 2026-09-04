@@ -1,5 +1,6 @@
 import { AppDataSource } from "../data-source";
 import { ACCEPTED_ASSIGNMENT, PENDING_ASSIGNMENT, acceptedCentroid } from "../lib/storyMembership";
+import { invalidateComparableStoriesCache } from "../generation/evidence";
 
 export const ASSIGNMENT_DECISIONS = ["accept", "reject"] as const;
 export type AssignmentDecision = (typeof ASSIGNMENT_DECISIONS)[number];
@@ -20,7 +21,7 @@ export async function decidePendingAssignment(
   decision: AssignmentDecision,
   decidedByUserId: string,
 ): Promise<DecidedAssignment | null> {
-  return AppDataSource.transaction(async (manager) => {
+  const result = await AppDataSource.transaction(async (manager) => {
     const proposed: { storyId: string }[] = await manager.query(
       `SELECT "storyId" FROM "articles" WHERE "id" = $1 AND "storyAssignmentStatus" = $2`,
       [articleId, PENDING_ASSIGNMENT],
@@ -80,4 +81,6 @@ export async function decidePendingAssignment(
     );
     return { articleId, storyId, decision };
   });
+  if (result) await invalidateComparableStoriesCache();
+  return result;
 }
