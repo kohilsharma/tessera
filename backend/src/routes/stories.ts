@@ -12,6 +12,7 @@ import { ACCEPTED_ASSIGNMENT, acceptedMembership } from "../lib/storyMembership"
 import { isUuid } from "../lib/uuid";
 import { buildTimeline, toTimelineEvents } from "../timeline/buildTimeline";
 import { buildCoverageSpectrum, type CoverageSpectrum } from "../lib/coverageSpectrum";
+import { loadStoryMarket } from "../market/storyMarket";
 
 export const storiesRouter = Router();
 
@@ -108,11 +109,13 @@ storiesRouter.get(
     // Story's id but is not part of it until an Admin says so, so it is filtered
     // out of both the list and the count a reader sees.
     const members = story.articles.filter((article) => article.storyAssignmentStatus === ACCEPTED_ASSIGNMENT);
+    const market = req.user?.role === "investor" ? await loadStoryMarket(story.id) : undefined;
     res.json({
       ...toPublicStory(story, members.length, buildCoverageSpectrum(members)),
       articles: members
         .sort((a, b) => a.publishedAt.getTime() - b.publishedAt.getTime())
         .map(toPublicArticle),
+      ...(market ? { market: market.market, marketStatus: market.status, marketTotal: market.total } : {}),
     });
   }),
 );

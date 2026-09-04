@@ -46,6 +46,7 @@ export default defineConfig({
       MARKET_API_KEY: "",
       MARKET_API_BASE: "",
       MARKET_QUOTE_CACHE_TTL_SECONDS: "",
+      MARKET_SERIES_CACHE_TTL_SECONDS: "",
       REDIS_URL: "",
     },
   },

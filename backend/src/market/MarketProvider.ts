@@ -23,11 +23,18 @@ export interface Quote {
   source: "tiingo" | "mock";
 }
 
+export interface DailyBar {
+  date: string;
+  close: number;
+  adjClose: number;
+}
+
 export interface MarketProvider {
   // `null` is an answer: this provider has no quote for that Ticker. Being unreachable
   // is not an answer and throws instead. Both leave a market panel showing nothing
   // (spec §4), but only the first is worth caching — see `quote()` in ./index.ts.
   quote(ticker: string): Promise<Quote | null>;
+  dailySeries(ticker: string): Promise<DailyBar[]>;
 }
 
 // A Ticker is checked before it becomes a URL query or a cache key, since it arrives

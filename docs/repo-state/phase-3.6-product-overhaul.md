@@ -813,3 +813,27 @@ volatility in swing size, and every refusal — short series, bad period, holed 
 **568 passing**; the one failure is `clustering.test.ts`'s medoid test, now filed as **#107** (a
 Story's name is decided by a random UUID tie-break) rather than left as folklore about concurrency —
 it is unrelated to this ticket, which touches no clustering path.
+
+**#89 — Tickers on Entities and the Investor Story market panel.** Entities now carry a nullable
+Ticker constrained to organizations, with a migration-level format check. A small curated mapping
+converges well-known organization names to tickers during entity resolution and seed catch-up; the
+fictional Curated Corpus remains unrated and unmarketed until live GKG organizations resolve.
+
+The market provider seam now supplies adjusted daily bars alongside quotes. The Story read joins
+accepted organization annotations through terminal aliases, limits the panel to Investors, and
+returns `null` when no resolved organization has usable market data. Quote, adjusted-close chart,
+SMA-50, RSI-14 and annualized volatility are served from the existing Mock/Tiingo seam, so render
+code never reaches a provider directly. The Investor panel uses the existing RolePanel primitive,
+Recharts and Phosphor icons, and states the provider plus quote timestamp beside the data.
+
+The read keeps its empty and unavailable states separate: a missing Ticker (or a provider's
+confirmed no-data answer) is `marketStatus: "empty"`, while a failed quote or history request is
+`"unavailable"` and the Investor panel offers the shared retry treatment. Historical bars use the
+same Redis seam as quotes, with a one-hour `MARKET_SERIES_CACHE_TTL_SECONDS` default, so opening a
+Story cannot spend Tiingo's free-tier budget on repeated 370-day requests. The bounded eight-row
+join carries `marketTotal`; the panel says `Showing n of m`, shows both dollar and percentage day
+change, and colours the chart by direction.
+
+Verification: focused backend market-panel/provider tests (29 assertions), frontend Story-detail
+market rendering coverage, backend and frontend builds pass. The full frontend suite remains green;
+the full backend suite retains the unrelated clustering medoid flake tracked as #107.

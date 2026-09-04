@@ -1,4 +1,4 @@
-import { MarketProvider, Quote } from "./MarketProvider";
+import { DailyBar, MarketProvider, Quote } from "./MarketProvider";
 
 // Tiingo's IEX quote row. Their names, not ours.
 type TiingoQuote = {
@@ -7,6 +7,12 @@ type TiingoQuote = {
   last?: number | null; // IEX last sale; null outside market hours
   prevClose?: number | null;
   timestamp?: string | null;
+};
+
+type TiingoDaily = {
+  date?: string;
+  close?: number | null;
+  adjClose?: number | null;
 };
 
 const REQUEST_TIMEOUT_MS = 5_000;
@@ -64,5 +70,29 @@ export class TiingoMarketProvider implements MarketProvider {
       asOf: row.timestamp ? new Date(row.timestamp).toISOString() : new Date().toISOString(),
       source: "tiingo",
     };
+  }
+
+  async dailySeries(ticker: string): Promise<DailyBar[]> {
+    const startDate = new Date(Date.now() - 370 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const url = `${this.apiBase}/tiingo/daily/${encodeURIComponent(ticker)}/prices?startDate=${startDate}`;
+    const res = await fetch(url, {
+      redirect: "error",
+      headers: { Authorization: `Token ${this.apiKey}` },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`tiingo daily series for ${ticker} failed: ${res.status}`);
+    const rows = (await res.json()) as TiingoDaily[];
+    return Array.isArray(rows)
+      ? rows.flatMap((row) => {
+          if (
+            typeof row.date !== "string" ||
+            typeof row.close !== "number" ||
+            typeof row.adjClose !== "number" ||
+            !Number.isFinite(row.close) ||
+            !Number.isFinite(row.adjClose)
+          ) return [];
+          return [{ date: new Date(row.date).toISOString(), close: row.close, adjClose: row.adjClose }];
+        })
+      : [];
   }
 }

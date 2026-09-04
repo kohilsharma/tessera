@@ -1,11 +1,16 @@
 import { cacheGet, cacheSet, ttlFromEnv } from "../lib/cache";
 import { TiingoMarketProvider } from "./TiingoMarketProvider";
-import { MarketProvider, Quote, normalizeTicker } from "./MarketProvider";
+import { DailyBar, MarketProvider, Quote, normalizeTicker } from "./MarketProvider";
 import { MockMarketProvider } from "./MockMarketProvider";
 
 type MarketProviderChoice = "mock" | "tiingo";
 
 const DEFAULT_TTL_SECONDS = 60;
+const DEFAULT_SERIES_TTL_SECONDS = 3_600;
+
+export type MarketRead<T> =
+  | { status: "ready"; value: T }
+  | { status: "empty" | "unavailable"; value: null };
 
 function required(key: string): string {
   const value = process.env[key]?.trim();
@@ -52,13 +57,17 @@ function isCachedQuote(value: CachedQuote | null): value is CachedQuote {
   return value !== null && (value.quote === null || typeof value.quote?.price === "number");
 }
 
-export async function quote(ticker: string): Promise<Quote | null> {
+export async function quoteResult(ticker: string): Promise<MarketRead<Quote>> {
   const normalized = normalizeTicker(ticker);
-  if (!normalized) return null;
+  if (!normalized) return { status: "empty", value: null };
 
   const key = `tessera:quote:v1:${normalized}`;
   const cached = await cacheGet<CachedQuote>(key);
-  if (isCachedQuote(cached)) return cached.quote;
+  if (isCachedQuote(cached)) {
+    return cached.quote
+      ? { status: "ready", value: cached.quote }
+      : { status: "empty", value: null };
+  }
 
   // Built outside the try: a bad `MARKET_API_BASE` or a missing key is a misconfiguration
   // that must fail loudly, not degrade into the same empty panel an unknown Ticker gives.
@@ -70,10 +79,56 @@ export async function quote(ticker: string): Promise<Quote | null> {
     // An outage is not an answer, so nothing is stored: caching it would hold an empty
     // panel on screen for the whole TTL after the provider came back.
     console.warn(`[market] no quote for ${normalized}: ${(error as Error).message}`);
-    return null;
+    return { status: "unavailable", value: null };
   }
   await cacheSet<CachedQuote>(key, { quote: fresh }, ttlFromEnv("MARKET_QUOTE_CACHE_TTL_SECONDS", DEFAULT_TTL_SECONDS));
-  return fresh;
+  return fresh
+    ? { status: "ready", value: fresh }
+    : { status: "empty", value: null };
 }
 
-export type { MarketProvider, Quote } from "./MarketProvider";
+export async function quote(ticker: string): Promise<Quote | null> {
+  return (await quoteResult(ticker)).value;
+}
+
+type CachedSeries = { series: DailyBar[] };
+
+function isCachedSeries(value: CachedSeries | null): value is CachedSeries {
+  return value !== null && Array.isArray(value.series);
+}
+
+export async function dailySeriesResult(ticker: string): Promise<MarketRead<DailyBar[]>> {
+  const normalized = normalizeTicker(ticker);
+  if (!normalized) return { status: "empty", value: null };
+
+  const key = `tessera:market-series:v1:${normalized}`;
+  const cached = await cacheGet<CachedSeries>(key);
+  if (isCachedSeries(cached)) {
+    return cached.series.length > 0
+      ? { status: "ready", value: cached.series }
+      : { status: "empty", value: null };
+  }
+
+  const provider = createMarketProvider();
+  let fresh: DailyBar[];
+  try {
+    fresh = await provider.dailySeries(normalized);
+  } catch (error) {
+    console.warn(`[market] no daily series for ${normalized}: ${(error as Error).message}`);
+    return { status: "unavailable", value: null };
+  }
+  await cacheSet<CachedSeries>(
+    key,
+    { series: fresh },
+    ttlFromEnv("MARKET_SERIES_CACHE_TTL_SECONDS", DEFAULT_SERIES_TTL_SECONDS),
+  );
+  return fresh.length > 0
+    ? { status: "ready", value: fresh }
+    : { status: "empty", value: null };
+}
+
+export async function dailySeries(ticker: string): Promise<DailyBar[]> {
+  return (await dailySeriesResult(ticker)).value ?? [];
+}
+
+export type { DailyBar, MarketProvider, Quote } from "./MarketProvider";

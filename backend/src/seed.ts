@@ -20,6 +20,7 @@ import { seedCoverImagePng } from "./seedData/coverImage";
 import { LocalDiskFileStorageProvider } from "./storage/LocalDiskFileStorageProvider";
 import { invalidateComparableStoriesCache } from "./generation/evidence";
 import { leaningFor } from "./lib/publisherLeaning";
+import { applyCuratedTickers } from "./market/tickers";
 
 // ADR-0015: `npm run seed` so the demo is never empty. Admin is deliberately not
 // registrable through /auth/register (it is assigned, not self-served), so this
@@ -292,6 +293,10 @@ async function seedAnnotations(): Promise<void> {
   console.log(staged === 0 ? "= GKG annotations already seeded" : `+ ${staged} GKG annotations`);
 }
 
+async function seedEntityTickers(): Promise<void> {
+  await applyCuratedTickers(AppDataSource.manager);
+}
+
 // Exported without the connection lifecycle around it so a test can run the
 // real seed against an already-initialized DataSource (see tests/seed.test.ts)
 // — the exit criterion in #23 is "a fresh clone reaches a populated demo", and
@@ -301,6 +306,7 @@ export async function seedAll(): Promise<void> {
   await seedCorpus();
   await seedPublisherLeanings();
   await seedAnnotations();
+  await seedEntityTickers();
   await seedConnectors();
   await seedBrief();
   await invalidateComparableStoriesCache();

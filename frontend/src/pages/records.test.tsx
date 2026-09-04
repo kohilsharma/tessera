@@ -8,6 +8,7 @@ import { jsonResponse, renderWithProviders } from "../test/renderWithProviders";
 import type {
   ArticleDetail as ArticleRecord,
   BriefDetail as BriefRecord,
+  MarketPanel,
   StoryAnalysis,
   Timeline,
 } from "../api/client";
@@ -67,6 +68,26 @@ const timeline: Timeline = {
     { periodStart: "2026-01-08T00:00:00Z", count: 0 },
   ],
 };
+
+const market: MarketPanel[] = [
+  {
+    entity: { id: "entity-1", canonicalName: "NVIDIA Corporation", ticker: "NVDA" },
+    quote: {
+      ticker: "NVDA",
+      price: 101.25,
+      change: 1.25,
+      changePercent: 2.5,
+      previousClose: 100,
+      asOf: "2026-09-03T20:00:00Z",
+      source: "mock",
+    },
+    indicators: { sma50: 98.5, rsi14: 61.2, volatility: 24.4 },
+    series: [
+      { date: "2026-09-01T00:00:00Z", close: 99, adjClose: 99 },
+      { date: "2026-09-02T00:00:00Z", close: 100, adjClose: 100 },
+    ],
+  },
+];
 
 function storyGet(input: unknown, overrides: Partial<Timeline> = {}) {
   return jsonResponse(String(input).includes("/timeline") ? { ...timeline, ...overrides } : story);
@@ -134,6 +155,23 @@ describe("Story detail — the record masthead", () => {
       "href",
       "/stories",
     );
+  });
+
+  it("shows the Investor market panel with an absolute and percentage day change", async () => {
+    const investor = { id: "investor-1", email: "investor@example.com", role: "investor", colorMode: "light" };
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const path = String(input);
+      if (path.includes("/auth/me")) return jsonResponse(investor);
+      if (path.includes("/timeline")) return jsonResponse(timeline);
+      return jsonResponse({ ...story, market, marketStatus: "ready", marketTotal: 2 });
+    });
+
+    renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
+
+    const panel = await screen.findByRole("region", { name: "Investor panel" });
+    expect(panel).toHaveTextContent("Showing 1 of 2");
+    expect(panel).toHaveTextContent("+$1.25 (+2.50%)");
+    expect(panel).toHaveTextContent("50-day average");
   });
 });
 

@@ -386,6 +386,21 @@ export type StorySummary = {
   coverageSpectrum: CoverageSpectrum;
 };
 
+export type MarketPanel = {
+  entity: { id: string; canonicalName: string; ticker: string };
+  quote: {
+    ticker: string;
+    price: number;
+    change: number;
+    changePercent: number;
+    previousClose: number;
+    asOf: string;
+    source: "tiingo" | "mock";
+  };
+  indicators: { sma50: number | null; rsi14: number | null; volatility: number | null };
+  series: { date: string; close: number; adjClose: number }[];
+};
+
 export type CoverageSpectrum = {
   left: number;
   centre: number;
@@ -404,7 +419,12 @@ export type ArticleSummary = {
   publisher: { id: string; name: string; domain: string };
 };
 
-export type StoryDetail = StorySummary & { articles: ArticleSummary[] };
+export type StoryDetail = StorySummary & {
+  articles: ArticleSummary[];
+  market?: MarketPanel[] | null;
+  marketStatus?: "ready" | "empty" | "unavailable";
+  marketTotal?: number;
+};
 
 export type ArticleDetail = {
   id: string;

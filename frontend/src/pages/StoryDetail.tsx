@@ -18,6 +18,7 @@ import { RecordMasthead, RecordSection } from "../components/recordArchetype";
 import { TimelineRegister } from "../components/timelineRegister";
 import { EmptyState, EntryList, ErrorState, PendingState, RetryableError } from "../components/uiStates";
 import { CoverageSpectrum } from "../components/primitives";
+import { InvestorMarketPanel } from "../components/marketPanel";
 
 // A failed run says so plainly (ADR-0010: never silently serve invalid
 // intelligence). The wording is per failure code, because "the model cited
@@ -122,6 +123,18 @@ export default function StoryDetail() {
       <RecordSection heading="Coverage spectrum">
         <CoverageSpectrum spectrum={story.coverageSpectrum} />
       </RecordSection>
+
+      {me.data?.role === "investor" && (
+        <RecordSection heading="Market intelligence">
+          <InvestorMarketPanel
+            markets={story.market}
+            status={story.marketStatus}
+            total={story.marketTotal}
+            onRetry={() => query.refetch()}
+            retrying={query.isFetching}
+          />
+        </RecordSection>
+      )}
 
       {/* The flagship, on the record it analyses (#53). Above the Articles, because
           the analysis is what a reader came for and the Articles are what it cites. */}

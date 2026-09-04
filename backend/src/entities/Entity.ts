@@ -39,4 +39,9 @@ export class Entity {
   // still carry them; copy them up when a map view needs to place a node.
   @Column({ type: "varchar", nullable: true })
   featureId!: string | null;
+
+  // Market identity for organizations only. The database CHECK keeps a person
+  // or location from carrying a Ticker even if a write bypasses the graph pass.
+  @Column({ type: "varchar", nullable: true })
+  ticker!: string | null;
 }

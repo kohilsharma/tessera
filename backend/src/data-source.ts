@@ -31,6 +31,7 @@ import { AddUserColorMode1755766000000 } from "./migrations/1755766000000-AddUse
 import { RelaxPublisherTermsPolicy1755767000000 } from "./migrations/1755767000000-RelaxPublisherTermsPolicy";
 import { RegroundFlashcards1755768000000 } from "./migrations/1755768000000-RegroundFlashcards";
 import { AddPublisherLeaning1755769000000 } from "./migrations/1755769000000-AddPublisherLeaning";
+import { AddEntityTicker1755770000000 } from "./migrations/1755770000000-AddEntityTicker";
 import { User } from "./entities/User";
 import { Publisher } from "./entities/Publisher";
 import { Story } from "./entities/Story";
@@ -131,6 +132,7 @@ export const AppDataSource = new DataSource({
     RelaxPublisherTermsPolicy1755767000000,
     RegroundFlashcards1755768000000,
     AddPublisherLeaning1755769000000,
+    AddEntityTicker1755770000000,
   ],
   synchronize: false,
   logging: false,

@@ -11,6 +11,7 @@ import {
 } from "./config";
 import { bothEndsBoundSql } from "./edgeBound";
 import { applyEntityMerge, refusalKeySql } from "./merge";
+import { applyCuratedTickers } from "../market/tickers";
 
 // The fold identity is decided on: case, punctuation and whitespace. One SQL
 // expression rather than a TypeScript function, because the retained window holds
@@ -419,6 +420,7 @@ export async function runEntityResolution(): Promise<EntityResolutionRun> {
       tally.considered = counts.considered;
 
       await promote(manager);
+      await applyCuratedTickers(manager);
       const demoted = await demote(manager);
       // Between promotion and the edges, and in that order for two reasons: candidate
       // generation compares names that are Entities, which is only true after promote,

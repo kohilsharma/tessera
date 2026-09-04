@@ -1,4 +1,4 @@
-import { MarketProvider, Quote } from "./MarketProvider";
+import { DailyBar, MarketProvider, Quote } from "./MarketProvider";
 
 // ADR-0003 requires a deterministic Mock so the whole suite, and a no-key demo, runs
 // with no provider reachable. Its only input is the Ticker it was asked for, so the
@@ -27,6 +27,20 @@ export class MockMarketProvider implements MarketProvider {
       asOf: "2026-01-01T00:00:00.000Z",
       source: "mock",
     };
+  }
+
+  async dailySeries(ticker: string): Promise<DailyBar[]> {
+    const seed = hash(ticker);
+    let price = 20 + (seed % 48_000) / 100;
+    return Array.from({ length: 260 }, (_, index) => {
+      const swing = ((seed + index * 17) % 101 - 50) / 1000;
+      price = Math.max(1, price * (1 + swing));
+      return {
+        date: new Date(Date.UTC(2025, 0, 1 + index)).toISOString(),
+        close: round(price),
+        adjClose: round(price),
+      };
+    });
   }
 }
 

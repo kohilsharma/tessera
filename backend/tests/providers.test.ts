@@ -3,7 +3,7 @@ import { EMBEDDING_DIMENSIONS } from "../src/embeddings/EmbeddingProvider";
 import { GeminiEmbeddingProvider } from "../src/embeddings/GeminiEmbeddingProvider";
 import { createEmbeddingProvider } from "../src/embeddings";
 import { createSynthesisProvider } from "../src/synthesis";
-import { createMarketProvider, quote } from "../src/market";
+import { createMarketProvider, dailySeries, quote } from "../src/market";
 import { setCacheClientForTests } from "../src/lib/cache";
 import { fakeRedis } from "./fakeCache";
 import { STORY_CATEGORIES } from "../src/entities/Story";
@@ -14,7 +14,7 @@ import { STORY_CATEGORIES } from "../src/entities/Story";
 const KEYS = [
   "EMBEDDING_PROVIDER", "EMBEDDING_API_KEY", "EMBEDDING_API_BASE", "EMBEDDING_MODEL", "GEMINI_API_KEY",
   "SYNTHESIS_PROVIDER", "SYNTHESIS_API_KEY", "SYNTHESIS_API_BASE", "SYNTHESIS_MODEL", "SYNTHESIS_ALLOWED_ORIGIN",
-  "MARKET_PROVIDER", "MARKET_API_KEY", "MARKET_API_BASE", "MARKET_QUOTE_CACHE_TTL_SECONDS",
+  "MARKET_PROVIDER", "MARKET_API_KEY", "MARKET_API_BASE", "MARKET_QUOTE_CACHE_TTL_SECONDS", "MARKET_SERIES_CACHE_TTL_SECONDS",
 ] as const;
 
 afterEach(() => {
@@ -244,6 +244,15 @@ describe("market provider", () => {
     expect(init.redirect).toBe("error");
   });
 
+  it("maps Tiingo adjusted daily bars", async () => {
+    configureTiingo();
+    const fetchMock = stubTiingo([{ date: "2026-09-03T00:00:00Z", close: 100, adjClose: 99.5 }]);
+    await expect(createMarketProvider().dailySeries("AAPL")).resolves.toEqual([
+      { date: "2026-09-03T00:00:00.000Z", close: 100, adjClose: 99.5 },
+    ]);
+    expect(fetchMock.mock.calls[0][0]).toContain("/tiingo/daily/AAPL/prices?startDate=");
+  });
+
   // Tiingo answers an unknown Ticker with an empty array rather than a zeroed row.
   it("reads an empty Tiingo response as no quote, and a failure as a throw", async () => {
     configureTiingo();
@@ -280,6 +289,19 @@ describe("market provider", () => {
     process.env.MARKET_QUOTE_CACHE_TTL_SECONDS = "5";
     await quote("MSFT");
     expect(redis.ttl).toBe(5);
+  });
+
+  it("caches the daily series longer than a quote", async () => {
+    configureTiingo();
+    const redis = fakeRedis();
+    setCacheClientForTests(redis);
+    const fetchMock = stubTiingo([{ date: "2026-09-03T00:00:00Z", close: 100, adjClose: 99.5 }]);
+
+    await dailySeries("AAPL");
+    await dailySeries("AAPL");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(redis.values.has("tessera:market-series:v1:AAPL")).toBe(true);
+    expect(redis.ttl).toBe(3_600);
   });
 
   // A Ticker nothing trades under is an answer, and re-asking it on every page read
