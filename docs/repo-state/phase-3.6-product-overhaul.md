@@ -580,3 +580,4 @@ deck, and nothing-due states remain distinct. The new Studio treatment is token-
 the existing 720/560px breakpoints, and keeps long registers bounded. Added a focused full-deck
 interaction test. Frontend verification: **262 tests across 18 files**, `npm run build`, and the
 Impeccable detector all pass.
+The non-Student route now renders the shared Refused state before any card query, keeping all four route states distinct.

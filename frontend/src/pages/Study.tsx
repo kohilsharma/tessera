@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, Navigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import {
   getMe,
   getStudyDeck,
@@ -14,7 +14,7 @@ import {
   type Flashcard,
   type ReviewGrade,
 } from "../api/client";
-import { EmptyState, ErrorState, PendingState, RetryableError } from "../components/uiStates";
+import { EmptyState, ErrorState, PendingState, RefusedState, RetryableError } from "../components/uiStates";
 import { CitationRow } from "../components/analysisRegister";
 import { EntryRegister, FilterRegister } from "../components/indexArchetype";
 import { ArrowClockwise, Cards, ClockCounterClockwise, Eye, MagnifyingGlass, PencilSimple, Trash } from "@phosphor-icons/react";
@@ -168,7 +168,7 @@ export default function Study() {
         retrying={me.isFetching}
       />
     );
-  if (me.data.role !== "student") return <Navigate to="/dashboard" replace />;
+  if (me.data.role !== "student") return <RefusedState role="Students">Flashcards are available only on the Student study desk.</RefusedState>;
 
   if (query.isPending) return <PendingState>Loading your flashcards…</PendingState>;
   if (query.isError)

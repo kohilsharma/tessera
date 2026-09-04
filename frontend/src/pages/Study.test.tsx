@@ -48,7 +48,7 @@ describe("Study flashcards", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Loading your flashcards");
   });
 
-  it("redirects a non-Student before loading any cards", async () => {
+  it("renders the refused state for a non-Student before loading any cards", async () => {
     vi.mocked(fetch).mockImplementation(async (input) => {
       if (isIdentityRequest(input)) return jsonResponse(investor);
       throw new Error(`unexpected request: ${String(input)}`);
@@ -56,6 +56,7 @@ describe("Study flashcards", () => {
 
     renderWithProviders(<Study />, { route: "/study", path: "/study" });
 
+    expect(await screen.findByRole("alert")).toHaveTextContent("restricted to Students");
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
     expect(String(vi.mocked(fetch).mock.calls[0][0])).toContain("/auth/me");
   });
