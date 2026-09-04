@@ -897,3 +897,13 @@ Story detail's save control now loads the reader's own Briefs and offers either 
 existing one. The selected existing target uses the new PATCH path; the API still enforces ownership
 and the Student/Investor-only route guard. Focused backend and frontend regressions cover attach,
 replace, remove, Lens and capacity behavior. Frontend build and backend typecheck pass.
+
+**#95 — attach Articles by search, from either record.** Brief detail replaces the raw UUID field
+with a bounded corpus search, showing matching headlines with Publisher and publication date and
+offering an inline Attach action. Already attached Articles are filtered from the result set; the
+existing backend membership, duplicate and capacity guards remain authoritative. Article detail
+now loads the signed-in reader's Briefs, disables full Briefs, and offers the same attach action so
+an Article can be saved without leaving its record.
+
+Verification: record tests cover search-and-attach, duplicate filtering, and Article-to-Brief
+attachment; frontend typecheck/build pass. Full frontend suite: 274 tests passing.

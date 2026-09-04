@@ -850,8 +850,8 @@ describe("Brief detail — the owned artefact", () => {
     renderBrief({ articleCapacityLimit: 1 });
 
     expect(await screen.findByText("1/1 articles · full")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Attach" })).toBeDisabled();
-    expect(screen.getByRole("textbox", { name: /Article id/ })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Attach" })).not.toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Find an Article" })).toBeDisabled();
   });
 
   it("marks its Articles as corpus records and reaches them as such", async () => {
@@ -927,5 +927,59 @@ describe("Brief detail — the owned artefact", () => {
     renderBrief();
     expect(await screen.findByLabelText("Add a cover image")).toBeInTheDocument();
     expect(document.querySelector("img")).not.toBeInTheDocument();
+  });
+
+  it("searches for an Article and attaches the selected result", async () => {
+    const candidate = { ...article, id: "a2", title: "New fabrication update" };
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path.includes("/search?")) return jsonResponse({ items: [{ ...candidate, story, score: 1 }], page: 1, pageSize: 10, total: 1, totalPages: 1 });
+      if (init?.method === "POST") return jsonResponse(candidate, 201);
+      return jsonResponse({ ...brief, articles: [article] });
+    });
+
+    renderWithProviders(<BriefDetail />, { route: "/briefs/b1", path: "/briefs/:id" });
+    await userEvent.type(await screen.findByRole("searchbox", { name: "Find an Article" }), "fabrication");
+
+    expect(await screen.findByRole("link", { name: candidate.title })).toHaveAttribute("href", "/articles/a2");
+    await userEvent.click(screen.getByRole("button", { name: "Attach" }));
+
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([input, init]) => String(input).includes("/briefs/b1/articles") && init?.method === "POST")).toBe(true));
+  });
+
+  it("does not offer an already attached Article from search results", async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const path = String(input);
+      if (path.includes("/search?")) return jsonResponse({ items: [{ ...article, story, score: 1 }], page: 1, pageSize: 10, total: 1, totalPages: 1 });
+      return jsonResponse(brief);
+    });
+
+    renderWithProviders(<BriefDetail />, { route: "/briefs/b1", path: "/briefs/:id" });
+    await userEvent.type(await screen.findByRole("searchbox", { name: "Find an Article" }), "pilot");
+
+    expect(await screen.findByText(/No unattached Articles match/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Attach" })).not.toBeInTheDocument();
+  });
+});
+
+describe("Article detail — attaching to an owned Brief", () => {
+  it("offers owned Briefs and attaches the Article from its record", async () => {
+    const ownedBrief = { ...brief, id: "b2", title: "Market watch", articleCount: 0 };
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path.includes("/auth/me")) return jsonResponse({ id: "u1", email: "reader@example.com", role: "student", colorMode: "light" });
+      if (path.includes("/briefs?")) return jsonResponse({ items: [ownedBrief], page: 1, pageSize: 50, total: 1, totalPages: 1 });
+      if (init?.method === "POST") return jsonResponse(article, 201);
+      return jsonResponse(articleRecord);
+    });
+
+    renderWithProviders(<ArticleDetail />, { route: "/articles/a1", path: "/articles/:id" });
+    const select = await screen.findByRole("combobox", { name: "Brief" });
+    await userEvent.click(select);
+    await userEvent.click(await screen.findByRole("option", { name: /Market watch/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Attach Article" }));
+
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([input, init]) => String(input).includes("/briefs/b2/articles") && init?.method === "POST")).toBe(true));
+    expect(await screen.findByRole("status")).toHaveTextContent("Article attached to your Brief.");
   });
 });

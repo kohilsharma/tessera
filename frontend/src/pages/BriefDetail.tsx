@@ -1,4 +1,4 @@
-import { FormEvent, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
@@ -6,6 +6,7 @@ import {
   deleteBrief,
   detachArticleFromBrief,
   getBrief,
+  search,
   uploadBriefCoverImage,
   COVER_IMAGE_ACCEPT,
   type BriefSummary,
@@ -15,8 +16,6 @@ import { AnalysisRegister } from "../components/analysisRegister";
 import { ArticleEntry } from "../components/indexArchetype";
 import { RecordMasthead, RecordSection } from "../components/recordArchetype";
 import { EmptyState, EntryList, ErrorState, PendingState, RetryableError } from "../components/uiStates";
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // The Brief's cover: the plate beside its identity, and the control that puts an
 // image on it. The plate is always drawn, at a fixed ratio, so the mast holds the
@@ -70,15 +69,20 @@ export default function BriefDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [articleId, setArticleId] = useState("");
+  const [articleSearch, setArticleSearch] = useState("");
   const [attachError, setAttachError] = useState<string | null>(null);
 
   const query = useQuery({ queryKey: ["brief", id], queryFn: () => getBrief(id!), enabled: !!id });
+  const articleMatches = useQuery({
+    queryKey: ["brief-article-search", articleSearch.trim()],
+    queryFn: () => search({ q: articleSearch.trim(), page: 1, pageSize: 10, sort: "relevance:desc" }),
+    enabled: articleSearch.trim().length > 0,
+  });
 
   const attach = useMutation({
     mutationFn: (newArticleId: string) => attachArticleToBrief(id!, newArticleId),
     onSuccess: () => {
-      setArticleId("");
+      setArticleSearch("");
       queryClient.invalidateQueries({ queryKey: ["brief", id] });
     },
     onError: (err: Error) => setAttachError(err.message),
@@ -99,12 +103,7 @@ export default function BriefDetail() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["brief", id] }),
   });
 
-  function onAttach(e: FormEvent) {
-    e.preventDefault();
-    if (!UUID_RE.test(articleId)) {
-      setAttachError("Enter a valid Article id (see the Stories browser).");
-      return;
-    }
+  function onAttach(articleId: string) {
     setAttachError(null);
     attach.mutate(articleId);
   }
@@ -239,30 +238,61 @@ export default function BriefDetail() {
           </p>
         ) : (
           <p className="record-prose">
-            Attach a corpus Article by its id — an Article&rsquo;s record page states it, from{" "}
-            <Link to="/stories">Browse Stories</Link>.
+            Search the corpus by headline or topic, then attach one of the matching Articles.
           </p>
         )}
-        {/* ponytail: pasting a UUID is the seam the API gives us today. An
-            attach-from-the-Article-page control is the real fix and it is the
-            Form archetype's ticket (#35), not this one's. */}
-        <form className="record-attach" onSubmit={onAttach}>
+        <div className="record-attach">
           <label>
-            Article id
+            Find an Article
             <input
-              value={articleId}
+              type="search"
+              placeholder="Search headlines or topics"
+              autoComplete="off"
+              value={articleSearch}
               onChange={(e) => {
-                setArticleId(e.target.value);
+                setArticleSearch(e.target.value);
                 setAttachError(null);
               }}
               disabled={atCapacity}
               aria-invalid={Boolean(attachError)}
             />
           </label>
-          <button type="submit" disabled={atCapacity || attach.isPending}>
-            {attach.isPending ? "Attaching…" : "Attach"}
-          </button>
-        </form>
+        </div>
+        {articleMatches.isPending && articleSearch.trim() && <PendingState>Searching Articles…</PendingState>}
+        {articleMatches.isError && (
+          <RetryableError
+            message={`Could not search Articles: ${(articleMatches.error as Error).message}`}
+            onRetry={() => articleMatches.refetch()}
+            retrying={articleMatches.isFetching}
+          />
+        )}
+        {articleMatches.isSuccess && articleSearch.trim() && (
+          (() => {
+            const attached = new Set(brief.articles.map((article) => article.id));
+            const matches = articleMatches.data.items.filter((article) => !attached.has(article.id));
+            return matches.length > 0 ? (
+              <EntryList total={articleMatches.data.total}>
+                {matches.map((article) => (
+                  <ArticleEntry
+                    key={article.id}
+                    article={article}
+                    action={
+                      <button
+                        type="button"
+                        onClick={() => onAttach(article.id)}
+                        disabled={atCapacity || attach.isPending}
+                      >
+                        {attach.isPending ? "Attaching…" : "Attach"}
+                      </button>
+                    }
+                  />
+                ))}
+              </EntryList>
+            ) : (
+              <EmptyState>No unattached Articles match &ldquo;{articleSearch.trim()}&rdquo;.</EmptyState>
+            );
+          })()
+        )}
         {attachError && <ErrorState>{attachError}</ErrorState>}
       </RecordSection>
     </main>

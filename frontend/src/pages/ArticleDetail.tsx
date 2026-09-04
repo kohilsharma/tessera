@@ -1,9 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
-import { useParams } from "react-router-dom";
-import { getArticle, type AnalysisTextMode } from "../api/client";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useParams } from "react-router-dom";
+import { attachArticleToBrief, getArticle, getBriefs, getMe, type AnalysisTextMode, type BriefSummary } from "../api/client";
 import { RecordMasthead, RecordSection } from "../components/recordArchetype";
-import { PendingState, RetryableError } from "../components/uiStates";
-import { Leaning, LeaningAttribution } from "../components/primitives";
+import { EmptyState, ErrorState, PendingState, RetryableError } from "../components/uiStates";
+import { Leaning, LeaningAttribution, SelectField } from "../components/primitives";
 import leaningStyles from "../components/primitives.module.css";
 
 // CONTEXT.md's Analysis Text Mode, said in words. The raw enum member is the
@@ -34,7 +35,24 @@ function describeMode(mode: string) {
 
 export default function ArticleDetail() {
   const { id } = useParams();
+  const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["article", id], queryFn: () => getArticle(id!), enabled: !!id });
+  const me = useQuery({ queryKey: ["me"], queryFn: getMe });
+  const canAttach = me.data?.role === "student" || me.data?.role === "investor";
+  const briefs = useQuery({
+    queryKey: ["briefs", "article-attach-picker"],
+    // ponytail: cap this picker at 50 Briefs; add Brief search/pagination if that ceiling becomes real.
+    queryFn: () => getBriefs({ page: 1, pageSize: 50, sort: "updatedAt:desc" }).then((page) => page.items),
+    enabled: canAttach,
+  });
+  const [targetBriefId, setTargetBriefId] = useState("");
+  const attach = useMutation({
+    mutationFn: () => attachArticleToBrief(targetBriefId, id!),
+    onSuccess: () => {
+      setTargetBriefId("");
+      queryClient.invalidateQueries({ queryKey: ["briefs"] });
+    },
+  });
 
   if (query.isPending) return <PendingState>Loading Article…</PendingState>;
   // As on Story detail, a missing Article arrives as the 404's own message in
@@ -145,6 +163,50 @@ export default function ArticleDetail() {
           </div>
         </dl>
       </RecordSection>
+
+      {canAttach && (
+        <RecordSection heading="Add to a Brief">
+          <p className="record-prose">
+            Keep this Article with your own cited reading. Choose a Brief you own, or <Link to="/briefs/new">create one</Link>.
+          </p>
+          {briefs.isPending && <PendingState>Loading your Briefs…</PendingState>}
+          {briefs.isError && (
+            <RetryableError
+              message={`Could not load your Briefs: ${(briefs.error as Error).message}`}
+              onRetry={() => briefs.refetch()}
+              retrying={briefs.isFetching}
+            />
+          )}
+          {briefs.isSuccess && briefs.data.length === 0 && (
+            <EmptyState>
+              <p>You have no Briefs yet.</p>
+              <Link to="/briefs/new">Create a Brief</Link>
+            </EmptyState>
+          )}
+          {briefs.isSuccess && briefs.data.length > 0 && (
+            <div className="record-attach">
+              <SelectField
+                label="Brief"
+                value={targetBriefId}
+                onChange={(event) => setTargetBriefId(event.target.value)}
+                disabled={attach.isPending}
+              >
+                <option value="">Choose a Brief</option>
+                {briefs.data.map((brief: BriefSummary) => (
+                  <option key={brief.id} value={brief.id} disabled={brief.articleCount >= brief.articleCapacityLimit}>
+                    {brief.title} ({brief.articleCount}/{brief.articleCapacityLimit}{brief.articleCount >= brief.articleCapacityLimit ? ", full" : ""})
+                  </option>
+                ))}
+              </SelectField>
+              <button type="button" onClick={() => attach.mutate()} disabled={!targetBriefId || attach.isPending}>
+                {attach.isPending ? "Attaching…" : "Attach Article"}
+              </button>
+            </div>
+          )}
+          {attach.isError && <ErrorState>Could not attach this Article: {(attach.error as Error).message}</ErrorState>}
+          {attach.isSuccess && <p className="record-prose" role="status">Article attached to your Brief.</p>}
+        </RecordSection>
+      )}
     </main>
   );
 }
