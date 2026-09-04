@@ -524,3 +524,14 @@ review. The Standards axis also argued, and it was right, that the served-case c
 party's licence as fact when the value came from a column default nobody had verified; hence the
 attribution to Tessera above.
 
+**#80 — API hardening.** The API now assigns or honours an `X-Request-Id`, echoes it on the response,
+and emits one JSON `request.completed` event with user, connector/run, Story and generation identifiers
+when present, duration, status and a non-secret error code. The last-resort error handler emits the
+same structured shape. BullMQ workers wrap every job with completion/failure timing and identifiers;
+the ingestion, clustering and graph job summaries use the logger too. Auth traffic is limited to 30
+requests per minute per app/IP by default, and synchronous Story analysis to 10 per minute per app/IP;
+both windows and limits are environment-configurable and return `429`, `Retry-After` and standard
+rate-limit headers. Redis-backed storage is used when configured, with the library's in-memory store
+remaining for tests and a local process without Redis. `hardening.test.ts` covers the 429 contract,
+request-id propagation and JSON completion event. Backend build and the focused auth/generation tests
+pass.

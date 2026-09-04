@@ -29,7 +29,6 @@ export async function runIngestionJob(job: { name: string; data: Partial<RunJobD
     // window's worth of rows. Enqueued first, so a prune that throws cannot hold
     // the fleet up — it fails the tick job, which the worker logs.
     const pruned = await pruneExpiredGdeltArticles();
-    console.log(`[worker] tick enqueued ${enqueued} connector(s), pruned ${pruned} expired GDELT article(s)`);
     return;
   }
   if (job.name !== RUN_JOB) throw new Error(`Unknown ingestion job "${job.name}"`);
@@ -40,16 +39,10 @@ export async function runIngestionJob(job: { name: string; data: Partial<RunJobD
   // Enqueued and then deleted, or disabled after the tick. Neither is a fault:
   // there is nothing to run and nothing to record.
   if (!connector) {
-    console.warn(`[worker] ${RUN_JOB} job for unknown connector ${connectorId}`);
     return;
   }
 
   // The same run function the Admin trigger reaches through the queue — there is
   // no second implementation to drift.
   const run = await runConnector(connector, { fetchText: httpFetchText });
-  console.log(
-    run
-      ? `[worker] ${connector.name} run ${run.id} ${run.status}: ${run.discovered} discovered, ${run.inserted} inserted`
-      : `[worker] ${connector.name} is disabled — not run`,
-  );
 }

@@ -12,11 +12,4 @@ export async function runGraphJob(job: { name: string }): Promise<void> {
   if (job.name !== GRAPH_RUN_JOB) throw new Error(`Unknown graph job "${job.name}"`);
 
   const run = await runEntityResolution();
-  console.log(
-    `[worker] entity resolution run ${run.id} ${run.status}: read ${run.annotationsRead} annotations ` +
-      `across ${run.articlesRead} Article(s), considered ${run.considered} name(s), ` +
-      `promoted ${run.promoted}, ${run.belowFloor} below the floor, demoted ${run.demoted}, ` +
-      `merged ${run.merged} pair(s), proposed ${run.proposed} for review, ` +
-      `built ${run.edgesBuilt} edge(s)`,
-  );
 }

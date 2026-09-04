@@ -27,10 +27,4 @@ export async function runClusteringJob(job: { name: string }): Promise<void> {
   // (the next naming call, for the namer above) without restarting the worker, and
   // ADR-0023's Mock fallback keeps an offline clone running the same code path.
   const run = await runClustering({ embedder: createEmbeddingProvider(), namer: deferredNamer });
-  console.log(
-    `[worker] clustering run ${run.id} ${run.status}: embedded ${run.embedded}, considered ${run.considered}, ` +
-      `assigned ${run.assigned}, held ${run.heldForReview} for review, ` +
-      `seeded ${run.seeded} into ${run.storiesCreated} new Story(s), ` +
-      `${run.unclustered} left unclustered`,
-  );
 }

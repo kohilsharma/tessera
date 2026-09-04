@@ -7,6 +7,7 @@ import { runGraphJob } from "./graph/jobs";
 import { GRAPH_QUEUE, GRAPH_TICK_JOB, closeGraphQueue, graphQueue } from "./graph/queue";
 import { runIngestionJob } from "./ingestion/jobs";
 import { INGESTION_QUEUE, TICK_JOB, closeIngestionQueue, ingestionQueue, redisUrl } from "./ingestion/queue";
+import { log } from "./lib/logger";
 
 // The ingestion worker: its own process, sharing this repo's DataSource and
 // entities with the API, and run natively rather than in Compose (ADR-0015).
@@ -90,7 +91,37 @@ async function main(): Promise<void> {
     // A worker per queue, so an hourly pass is never queued behind a fleet of feeds —
     // and a concurrency of 1 each, which with the constant job ids is what makes two
     // concurrent runs of the same pass structurally impossible.
-    const worker = new Worker(pipeline.name, pipeline.handler, {
+    const worker = new Worker(pipeline.name, async (job) => {
+      const startedAt = process.hrtime.bigint();
+      try {
+        const result = await pipeline.handler(job);
+        log("info", "job.completed", {
+          jobId: job.id,
+          jobName: job.name,
+          connectorId: job.data?.connectorId,
+          runId: job.data?.runId,
+          storyId: job.data?.storyId,
+          generationRunId: job.data?.generationRunId,
+          durationMs: Math.round((Number(process.hrtime.bigint() - startedAt) / 1e6) * 100) / 100,
+          resultStatus: "completed",
+        });
+        return result;
+      } catch (error) {
+        log("error", "job.failed", {
+          jobId: job.id,
+          jobName: job.name,
+          connectorId: job.data?.connectorId,
+          runId: job.data?.runId,
+          storyId: job.data?.storyId,
+          generationRunId: job.data?.generationRunId,
+          durationMs: Math.round((Number(process.hrtime.bigint() - startedAt) / 1e6) * 100) / 100,
+          resultStatus: "failed",
+          errorCode: "job_failed",
+          message: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    }, {
       // Unlike the queues' connections, a worker waits indefinitely rather than
       // failing a command: a Redis blip should pause draining, not kill the process.
       connection: { url: redisUrl(), maxRetriesPerRequest: null },
@@ -98,16 +129,15 @@ async function main(): Promise<void> {
     });
     // A job that throws is an infrastructure fault: a run that merely fails is a
     // persisted run row with status `failed`, which the Admin console already states.
-    worker.on("failed", (job, err) => console.error(`[worker] job ${job?.name} ${job?.id} failed`, err));
     // Without a listener, a dropped Redis connection is an unhandled 'error' event,
     // which takes the process down — the likeliest thing to happen to a demo.
-    worker.on("error", (err) => console.error("[worker] queue connection error", err));
+    worker.on("error", (err) => log("error", "job.queue_error", { jobId: undefined, errorCode: "queue_connection", message: err.message }));
     workers.push(worker);
-    console.log(`[worker] draining "${pipeline.name}", ticking on "${pipeline.pattern}"`);
+    log("info", "worker.started", { jobName: pipeline.name, schedule: pipeline.pattern });
   }
 
   const shutdown = async (signal: string): Promise<void> => {
-    console.log(`[worker] ${signal} — finishing the current job`);
+    log("info", "worker.shutdown", { signal });
     for (const worker of workers) await worker.close();
     for (const pipeline of PIPELINES) await pipeline.close();
     await AppDataSource.destroy();
@@ -118,6 +148,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error("Failed to start the ingestion worker", err);
+  log("error", "worker.start_failed", { errorCode: "worker_start_failed", message: err instanceof Error ? err.message : String(err) });
   process.exit(1);
 });
