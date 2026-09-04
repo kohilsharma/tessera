@@ -8,7 +8,11 @@ import { setupTestDb } from "./setupTestDb";
 
 setupTestDb();
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  delete process.env.AUTH_RATE_LIMIT_MAX;
+  delete process.env.GENERATION_RATE_LIMIT_MAX;
+});
 
 describe("rate limiting", () => {
   it("returns 429 with retry metadata after the configured window is exhausted", async () => {
@@ -25,6 +29,26 @@ describe("rate limiting", () => {
     expect(limited.headers["retry-after"]).toEqual(expect.any(String));
     expect(limited.body).toEqual({ error: "Too many requests", errorCode: "rate_limited" });
   });
+
+  it("limits login without consuming the quota on unrelated API routes", async () => {
+    process.env.AUTH_RATE_LIMIT_MAX = "1";
+    const app = createApp();
+
+    expect((await request(app).post("/api/v1/auth/login").send({})).status).toBe(422);
+    expect((await request(app).post("/api/v1/auth/login/").send({})).status).toBe(429);
+    expect((await request(app).get("/api/v1/health")).status).toBe(200);
+  });
+
+  it.each(["/api/v1/stories/not-a-uuid/analysis", "/api/v1/flashcards"])(
+    "limits the expensive generation endpoint %s",
+    async (path) => {
+      process.env.GENERATION_RATE_LIMIT_MAX = "1";
+      const app = createApp();
+
+      expect((await request(app).post(path).send({})).status).toBe(401);
+      expect((await request(app).post(path).send({})).status).toBe(429);
+    },
+  );
 });
 
 describe("request observability", () => {

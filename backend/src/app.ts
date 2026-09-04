@@ -75,7 +75,9 @@ export function createApp() {
   app.use("/api/v1", ingestionRouter);
   app.use("/api/v1", clusteringRouter);
   app.use("/api/v1", graphRouter);
-  app.use("/api/v1/stories/:id/analysis", configuredRateLimit("GENERATION", { windowMs: 60_000, max: 10 }));
+  const generationLimiter = configuredRateLimit("GENERATION", { windowMs: 60_000, max: 10 });
+  app.post("/api/v1/stories/:id/analysis", generationLimiter);
+  app.post("/api/v1/flashcards", generationLimiter);
   app.use("/api/v1", generationRouter);
   app.use("/api/v1", promptsRouter);
   app.use("/api/v1", flashcardsRouter);

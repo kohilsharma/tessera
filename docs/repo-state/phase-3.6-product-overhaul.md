@@ -532,6 +532,7 @@ the ingestion, clustering and graph job summaries use the logger too. Auth traff
 requests per minute per app/IP by default, and synchronous Story analysis to 10 per minute per app/IP;
 both windows and limits are environment-configurable and return `429`, `Retry-After` and standard
 rate-limit headers. Redis-backed storage is used when configured, with the library's in-memory store
-remaining for tests and a local process without Redis. `hardening.test.ts` covers the 429 contract,
-request-id propagation and JSON completion event. Backend build and the focused auth/generation tests
-pass.
+remaining for tests and a local process without Redis. The shared generation limiter covers both
+Story analysis and Flashcard deck generation while leaving Flashcard reads and reviews alone.
+`hardening.test.ts` covers the 429 contract, route mounts, request-id propagation and JSON completion
+event. Backend build and the affected auth/generation tests pass.
