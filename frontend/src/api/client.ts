@@ -1003,7 +1003,7 @@ export type Flashcard = {
   answer: string;
   claimType: ClaimType;
   citations: FlashcardCitation[];
-  storyId: string;
+  storyId: string | null;
   storyTitle: string;
   generationRunId: string | null;
   // SM-2's state, as the backend advances it. Shown rather than hidden: a reader
@@ -1063,8 +1063,18 @@ export function reviewFlashcard(id: string, grade: ReviewGrade): Promise<Flashca
   return sendJson("POST", `/api/v1/flashcards/${id}/reviews`, { grade }, "Could not record this review");
 }
 
-export function getAllFlashcards(): Promise<{ cards: Flashcard[] }> {
-  return getJson("/api/v1/flashcards/all", "Could not load your flashcards");
+export type AllFlashcards = {
+  cards: Flashcard[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
+
+export function getAllFlashcards(options: { page?: number; pageSize?: number; status?: "all" | "due" | "upcoming"; q?: string } = {}): Promise<AllFlashcards> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(options)) if (value !== undefined && value !== "") params.set(key, String(value));
+  return getJson(`/api/v1/flashcards/all${params.size ? `?${params}` : ""}`, "Could not load your flashcards");
 }
 
 export function generateFlashcardsFromSearch(input: { q: string; count: 5 | 10 | 20; answerLength: "one_word" | "one_line" | "full" }): Promise<{ cards: Flashcard[] }> {

@@ -387,6 +387,32 @@ describe("the study session", () => {
     });
   });
 
+  it("counts the same citation-valid cards that the session can serve", async () => {
+    const student = await tokenFor("student");
+    const { runId } = await analysisFor(student.token);
+    const made = (await makeDeck(student.token, runId)).body.cards;
+    const [damaged] = await AppDataSource.query(
+      `SELECT "claimId" FROM "flashcards" WHERE "id" = $1`,
+      [made[0].id],
+    );
+    await AppDataSource.query(`DELETE FROM "claim_evidence" WHERE "claimId" = $1`, [damaged.claimId]);
+    await AppDataSource.query(`DELETE FROM "flashcard_citations" WHERE "flashcardId" = $1`, [made[0].id]);
+
+    const due = await studyDeck(student.token);
+    const dashboard = await request(app())
+      .get("/api/v1/dashboard/student")
+      .set("Authorization", `Bearer ${student.token}`);
+
+    expect(due.body.items.map((card: { id: string }) => card.id)).not.toContain(made[0].id);
+    expect(due.body.totalCount).toBe(made.length - 1);
+    expect(due.body.dueCount).toBe(made.length - 1);
+    expect(dashboard.body.flashcards).toEqual({
+      dueCount: made.length - 1,
+      totalCount: made.length - 1,
+      nextDueAt: null,
+    });
+  });
+
   it("reschedules a reviewed card out of the session and says when it returns", async () => {
     const student = await tokenFor("student");
     const { runId } = await analysisFor(student.token);
@@ -532,5 +558,40 @@ describe("search-generated cards and card management", () => {
 
     expect((await request(app()).delete(`/api/v1/flashcards/${card.id}`).set("Authorization", `Bearer ${student.token}`)).status).toBe(204);
     expect((await request(app()).get(`/api/v1/flashcards/${card.id}`).set("Authorization", `Bearer ${student.token}`)).status).toBe(404);
+  });
+
+  it("filters and paginates the full private card list", async () => {
+    const owner = await tokenFor("student");
+    const stranger = await tokenFor("student");
+    const { runId } = await analysisFor(owner.token);
+    const cards = (await makeDeck(owner.token, runId)).body.cards;
+    await makeDeck(stranger.token, runId);
+    await reviewCard(owner.token, cards[0].id, 4);
+    await request(app())
+      .patch(`/api/v1/flashcards/${cards[1].id}`)
+      .set("Authorization", `Bearer ${owner.token}`)
+      .send({ question: "A uniquely searchable question" });
+
+    const first = await request(app())
+      .get("/api/v1/flashcards/all")
+      .query({ page: 1, pageSize: 1, sort: "dueAt:asc" })
+      .set("Authorization", `Bearer ${owner.token}`);
+    expect(first.status).toBe(200);
+    expect(first.body).toMatchObject({ page: 1, pageSize: 1, total: cards.length, totalPages: cards.length });
+    expect(first.body.cards).toHaveLength(1);
+
+    const upcoming = await request(app())
+      .get("/api/v1/flashcards/all")
+      .query({ status: "upcoming" })
+      .set("Authorization", `Bearer ${owner.token}`);
+    expect(upcoming.body.cards.map((card: { id: string }) => card.id)).toEqual([cards[0].id]);
+    expect(upcoming.body.total).toBe(1);
+
+    const searched = await request(app())
+      .get("/api/v1/flashcards/all")
+      .query({ q: "uniquely searchable" })
+      .set("Authorization", `Bearer ${owner.token}`);
+    expect(searched.body.cards.map((card: { id: string }) => card.id)).toEqual([cards[1].id]);
+    expect(searched.body.total).toBe(1);
   });
 });

@@ -119,12 +119,55 @@ export type StudyDeck = StudySummary & {
   items: FlashcardView[];
 };
 
+export type CardListStatus = "all" | "due" | "upcoming";
+
+export type AllCardsOptions = {
+  page?: number;
+  pageSize?: number;
+  sortBy?: "createdAt" | "dueAt";
+  sortDir?: "asc" | "desc";
+  status?: CardListStatus;
+  query?: string;
+};
+
+export type AllCardsResult = {
+  cards: FlashcardView[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
+
+// A card is readable only when its citation resolves inside the EvidenceSet it owns.
+// Keep this predicate beside every list count/page query so a damaged row cannot make
+// the dashboard promise cards that the reader will later drop.
+const VALID_CARD_CITATION = `(
+  EXISTS (
+    SELECT 1
+      FROM "flashcard_citations" fc
+      JOIN "evidence_sets" fes ON fes."id" = f."evidenceSetId"
+      JOIN "evidence_set_articles" fesa
+        ON fesa."evidenceSetId" = fes."id" AND fesa."evidenceId" = fc."evidenceId"
+     WHERE fc."flashcardId" = f."id"
+  )
+  OR EXISTS (
+    SELECT 1
+      FROM "analysis_claims" vc
+      JOIN "generation_runs" vr ON vr."id" = vc."generationRunId"
+      JOIN "claim_evidence" vce ON vce."claimId" = vc."id"
+      JOIN "evidence_set_articles" vesa
+        ON vesa."evidenceSetId" = vr."evidenceSetId" AND vesa."evidenceId" = vce."evidenceId"
+     WHERE vc."id" = f."claimId"
+  )
+)`;
+
 export async function loadStudySummary(ownerId: string): Promise<StudySummary> {
   const [summary]: StudySummary[] = await AppDataSource.query(
     `SELECT COUNT(*)::int AS "totalCount",
             (COUNT(*) FILTER (WHERE "dueAt" <= now()))::int AS "dueCount",
             MIN("dueAt") FILTER (WHERE "dueAt" > now()) AS "nextDueAt"
-       FROM "flashcards" WHERE "ownerId" = $1`,
+       FROM "flashcards" f
+      WHERE f."ownerId" = $1 AND ${VALID_CARD_CITATION}`,
     [ownerId],
   );
   return summary;
@@ -137,7 +180,7 @@ export async function loadStudyDeck(ownerId: string): Promise<StudyDeck> {
   const rows: CardRow[] = await AppDataSource.query(
     `SELECT ${CARD_COLUMNS}
        ${CARD_JOINS}
-      WHERE f."ownerId" = $1 AND f."dueAt" <= now()
+      WHERE f."ownerId" = $1 AND f."dueAt" <= now() AND ${VALID_CARD_CITATION}
       ORDER BY f."dueAt" ASC, f."id" ASC
       LIMIT ${STUDY_SESSION_LIMIT}`,
     [ownerId],
@@ -146,12 +189,36 @@ export async function loadStudyDeck(ownerId: string): Promise<StudyDeck> {
   return { items: await withCitations(ownerId, rows), ...summary };
 }
 
-export async function loadAllCards(ownerId: string): Promise<FlashcardView[]> {
-  const rows: CardRow[] = await AppDataSource.query(
-    `SELECT ${CARD_COLUMNS} ${CARD_JOINS} WHERE f."ownerId" = $1 ORDER BY f."createdAt" DESC`,
-    [ownerId],
+export async function loadAllCards(ownerId: string, options: AllCardsOptions = {}): Promise<AllCardsResult> {
+  const page = options.page ?? 1;
+  const pageSize = options.pageSize ?? 20;
+  const sortBy = options.sortBy ?? "createdAt";
+  const sortDir = options.sortDir === "asc" ? "ASC" : "DESC";
+  const status = options.status ?? "all";
+  const params: unknown[] = [ownerId];
+  const conditions = [`f."ownerId" = $1`, VALID_CARD_CITATION];
+  if (status === "due") conditions.push(`f."dueAt" <= now()`);
+  if (status === "upcoming") conditions.push(`f."dueAt" > now()`);
+  if (options.query?.trim()) {
+    params.push(`%${options.query.trim().toLowerCase()}%`);
+    conditions.push(`(LOWER(f."question") LIKE $${params.length} OR LOWER(f."answer") LIKE $${params.length})`);
+  }
+  const where = conditions.join(" AND ");
+  const countRows: { total: number }[] = await AppDataSource.query(
+    `SELECT COUNT(*)::int AS "total" FROM "flashcards" f WHERE ${where}`,
+    params,
   );
-  return withCitations(ownerId, rows);
+  const total = countRows[0]?.total ?? 0;
+  const offset = (page - 1) * pageSize;
+  const rows: CardRow[] = await AppDataSource.query(
+    `SELECT ${CARD_COLUMNS} ${CARD_JOINS}
+      WHERE ${where}
+      ORDER BY f."${sortBy}" ${sortDir}, f."id" ASC
+      LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    [...params, pageSize, offset],
+  );
+  const cards = await withCitations(ownerId, rows);
+  return { cards, page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
 }
 
 export async function loadCard(ownerId: string, cardId: string): Promise<FlashcardView | null> {

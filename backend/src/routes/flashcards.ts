@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { editCard, deleteCard, generateDeck, loadAllCards, loadCard, loadCardHistory, loadStudyDeck, reviewCard } from "../flashcards/deck";
+import { editCard, deleteCard, generateDeck, loadAllCards, loadCard, loadCardHistory, loadStudyDeck, reviewCard, type CardListStatus } from "../flashcards/deck";
 import { ANSWER_LENGTHS, CARD_COUNTS, generateSearchDeck, type AnswerLength } from "../flashcards/search";
 import { isReviewGrade, MAX_REVIEW_GRADE, MIN_REVIEW_GRADE } from "../flashcards/sm2";
 import { loadReaderRun } from "../generation/readerRun";
@@ -8,6 +8,7 @@ import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
 import { createSynthesisProvider } from "../synthesis";
 import { isUuid } from "../lib/uuid";
+import { parseListQuery } from "../lib/listQuery";
 
 export const flashcardsRouter = Router();
 
@@ -71,7 +72,35 @@ flashcardsRouter.get(
 );
 
 flashcardsRouter.get("/flashcards/all", asyncHandler(async (req, res) => {
-  res.json({ cards: await loadAllCards(req.user!.id) });
+  const parsed = parseListQuery(req.query as Record<string, unknown>, {
+    allowedSortBy: ["createdAt", "dueAt"],
+    defaultSortBy: "createdAt",
+    maxPageSize: 50,
+  });
+  if (!parsed.ok) { res.status(422).json({ error: parsed.error }); return; }
+
+  const rawStatus = req.query.status ?? req.query.filter ?? (req.query.due !== undefined
+    ? (req.query.due === "true" || req.query.due === "1" ? "due" : "upcoming")
+    : "all");
+  const status = String(rawStatus) as CardListStatus;
+  if (!["all", "due", "upcoming"].includes(status)) {
+    res.status(422).json({ error: "status must be all, due, or upcoming" });
+    return;
+  }
+  const rawQuery = req.query.q ?? req.query.search;
+  if (rawQuery !== undefined && typeof rawQuery !== "string") {
+    res.status(422).json({ error: "q must be a string" });
+    return;
+  }
+  const { page, pageSize, sortBy, sortDir } = parsed.value;
+  res.json(await loadAllCards(req.user!.id, {
+    page,
+    pageSize,
+    sortBy,
+    sortDir,
+    status,
+    query: rawQuery,
+  }));
 }));
 
 flashcardsRouter.get("/flashcards/:id", asyncHandler(async (req, res) => {

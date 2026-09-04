@@ -560,3 +560,11 @@ answer lengths. Students can list every card, open, edit, delete, and inspect re
 the existing SM-2 due session and analysis entry point remain intact. The Student study route
 adds search generation controls, an all-cards register, and keyboard grading. Backend and frontend
 builds pass; the flashcard suite now has 21 tests, including search generation and CRUD/history coverage.
+
+**#83 — Flashcard lists agree with the cards a Student can read.** The full-card endpoint now has a
+bounded, paginated envelope with due/upcoming status and question/answer search filters, while
+preserving owner scoping and the existing `cards` field. Study renders those controls and page
+navigation. Summary, due-session, and full-list queries share a citation-validity predicate against
+each card's frozen EvidenceSet, so orphaned citations cannot inflate dashboard counts or create a
+"due" card that the reader later drops. Added regression coverage for citation damage and list
+filtering/pagination; the focused backend suite has 23 passing tests.

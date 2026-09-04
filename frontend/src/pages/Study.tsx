@@ -16,6 +16,7 @@ import {
 } from "../api/client";
 import { EmptyState, ErrorState, PendingState, RetryableError } from "../components/uiStates";
 import { CitationRow } from "../components/analysisRegister";
+import { EntryRegister, FilterRegister } from "../components/indexArchetype";
 import { ClockCounterClockwise, PencilSimple, Trash } from "@phosphor-icons/react";
 
 // The Student's study surface (#58, ADR-0021). One card at a time, not a list: a
@@ -116,7 +117,7 @@ function ManagedCard({ card, onSaved, onDeleted }: { card: Flashcard; onSaved: (
   const history = useQuery({ queryKey: ["flashcards", card.id, "history"], queryFn: () => getFlashcardHistory(card.id), enabled: historyOpen });
   const save = useMutation({ mutationFn: () => updateFlashcard(card.id, { question, answer }), onSuccess: () => { setEditing(false); onSaved(); } });
   const remove = useMutation({ mutationFn: () => deleteFlashcard(card.id), onSuccess: onDeleted });
-  return <article className="study-card">
+  return <li className="study-card">
     {editing ? <form onSubmit={(event) => { event.preventDefault(); save.mutate(); }}>
       <label>Question<textarea value={question} onChange={(event) => setQuestion(event.target.value)} /></label>
       <label>Answer<textarea value={answer} onChange={(event) => setAnswer(event.target.value)} /></label>
@@ -128,7 +129,7 @@ function ManagedCard({ card, onSaved, onDeleted }: { card: Flashcard; onSaved: (
       <button type="button" aria-label="Delete flashcard" title="Delete" onClick={() => remove.mutate()}><Trash aria-hidden /></button>
     </div>
     {historyOpen && (history.isPending ? <PendingState>Loading study history…</PendingState> : history.isError ? <ErrorState>{history.error.message}</ErrorState> : history.data.items.length ? <ul>{history.data.items.map((item) => <li key={item.reviewedAt}><time dateTime={item.reviewedAt}>{new Date(item.reviewedAt).toLocaleString()}</time> · grade {item.grade}</li>)}</ul> : <p>No reviews yet.</p>)}
-  </article>;
+  </li>;
 }
 
 export default function Study() {
@@ -138,7 +139,14 @@ export default function Study() {
     queryFn: getStudyDeck,
     enabled: me.data?.role === "student",
   });
-  const all = useQuery({ queryKey: ["flashcards", "all"], queryFn: getAllFlashcards, enabled: me.data?.role === "student" });
+  const [allFilter, setAllFilter] = useState<"all" | "due" | "upcoming">("all");
+  const [allSearch, setAllSearch] = useState("");
+  const [allPage, setAllPage] = useState(1);
+  const all = useQuery({
+    queryKey: ["flashcards", "all", allFilter, allSearch, allPage],
+    queryFn: () => getAllFlashcards({ status: allFilter, q: allSearch, page: allPage, pageSize: 20 }),
+    enabled: me.data?.role === "student",
+  });
   const [search, setSearch] = useState("");
   const [count, setCount] = useState<5 | 10 | 20>(5);
   const [answerLength, setAnswerLength] = useState<"one_word" | "one_line" | "full">("full");
@@ -209,7 +217,14 @@ export default function Study() {
         // question when the deck is refetched.
         <Card key={card.id} card={card} dueCount={deck.dueCount} />
       )}
-      {all.data?.cards?.length ? <section aria-label="All flashcards"><h2>All cards</h2><div className="entry-list-frame"><div className="entry-list">{all.data.cards.map((item) => <ManagedCard key={item.id} card={item} onSaved={() => all.refetch()} onDeleted={() => { query.refetch(); all.refetch(); }} />)}</div></div></section> : null}
+      {all.data && Array.isArray(all.data.cards) && <section aria-label="All flashcards">
+        <h2>All cards</h2>
+        <FilterRegister label="Filter your flashcards">
+          <label>Filter cards <select value={allFilter} onChange={(event) => { setAllFilter(event.target.value as typeof allFilter); setAllPage(1); }}><option value="all">All</option><option value="due">Due</option><option value="upcoming">Upcoming</option></select></label>
+          <label>Find a card <input value={allSearch} onChange={(event) => { setAllSearch(event.target.value); setAllPage(1); }} placeholder="Question or answer" /></label>
+        </FilterRegister>
+        {all.data.cards.length ? <EntryRegister envelope={all.data} onGoToPage={setAllPage}>{all.data.cards.map((item) => <ManagedCard key={item.id} card={item} onSaved={() => all.refetch()} onDeleted={() => { query.refetch(); all.refetch(); }} />)}</EntryRegister> : <EmptyState><p>No cards match this filter.</p></EmptyState>}
+      </section>}
     </main>
   );
 }
