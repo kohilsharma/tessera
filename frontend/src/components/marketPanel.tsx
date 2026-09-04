@@ -1,6 +1,6 @@
-import { ChartLineUp, TrendDown, TrendUp } from "@phosphor-icons/react";
+import { ChartLineUp, Sparkle, TrendDown, TrendUp } from "@phosphor-icons/react";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import type { MarketPanel as MarketPanelData } from "../api/client";
+import type { MarketPanel as MarketPanelData, MarketRead } from "../api/client";
 import { RolePanel } from "./primitives";
 import { EmptyState, RetryableError } from "./uiStates";
 import styles from "./marketPanel.module.css";
@@ -15,12 +15,20 @@ export function InvestorMarketPanel({
   total,
   onRetry,
   retrying,
+  read,
+  onGenerateRead,
+  generatingRead,
+  readError,
 }: {
   markets: MarketPanelData[] | null | undefined;
   status: "ready" | "empty" | "unavailable" | undefined;
   total: number | undefined;
   onRetry: () => void;
   retrying: boolean;
+  read?: MarketRead;
+  onGenerateRead: () => void;
+  generatingRead: boolean;
+  readError: Error | null;
 }) {
   return (
     <RolePanel role="Investor">
@@ -31,6 +39,20 @@ export function InvestorMarketPanel({
         </div>
         <ChartLineUp aria-hidden="true" size={24} weight="duotone" />
       </div>
+      {read ? (
+        <div className={styles.read}>
+          <p className={styles.readLabel}>Generated read</p>
+          <p>{read.read}</p>
+          <p className={styles.source}>Sources: {read.citationDetails.map((citation) => <a key={citation.evidenceId} className="citation" href={`/articles/${citation.articleId}`} title={citation.title}>{citation.evidenceId} · {citation.publisherName}</a>)} · {read.provider} · <time dateTime={read.generatedAt}>{new Date(read.generatedAt).toLocaleString()}</time></p>
+        </div>
+      ) : status === "ready" && markets && markets.length > 0 ? (
+        <div className={styles.readAction}>
+          <button type="button" className="record-command" onClick={onGenerateRead} disabled={generatingRead}>
+            <Sparkle aria-hidden="true" size={18} /> {generatingRead ? "Writing read…" : "Generate market read"}
+          </button>
+          {readError && <p className={styles.readError} role="alert">Could not generate the market read: {readError.message}</p>}
+        </div>
+      ) : null}
       {status === "unavailable" ? (
         <RetryableError message="Market data could not be loaded from the provider." onRetry={onRetry} retrying={retrying} />
       ) : !markets || markets.length === 0 ? (

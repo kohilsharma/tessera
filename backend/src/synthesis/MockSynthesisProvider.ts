@@ -32,6 +32,13 @@ export class MockSynthesisProvider implements SynthesisProvider {
       const ids = [...request.prompt.matchAll(/\[(A\d+)\]/g)].map((m) => m[1]);
       return JSON.stringify({ cards: ids.map((id) => ({ question: `[mock] recall ${id}`, answer: `Facts from ${id}`, citations: [id] })) });
     }
+    if (request.task === "market_read") {
+      const ids = [...request.prompt.matchAll(/\[(A\d+)\]/g)].map((m) => m[1]);
+      return JSON.stringify({
+        read: "[mock market read] The reporting and supplied indicators are presented together without a causal conclusion.",
+        citations: [...new Set(ids)],
+      });
+    }
     if (!request.json) return `[mock synthesis] ${request.prompt.slice(0, 120)}`;
     // Echoing the evidence ids found in the prompt keeps the Mock honest about
     // ADR-0002's invariant: a claim carries citations, or it is not a claim.

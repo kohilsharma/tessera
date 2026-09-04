@@ -8,7 +8,7 @@ type MarketProviderChoice = "mock" | "tiingo";
 const DEFAULT_TTL_SECONDS = 60;
 const DEFAULT_SERIES_TTL_SECONDS = 3_600;
 
-export type MarketRead<T> =
+export type MarketFetchResult<T> =
   | { status: "ready"; value: T }
   | { status: "empty" | "unavailable"; value: null };
 
@@ -57,7 +57,7 @@ function isCachedQuote(value: CachedQuote | null): value is CachedQuote {
   return value !== null && (value.quote === null || typeof value.quote?.price === "number");
 }
 
-export async function quoteResult(ticker: string): Promise<MarketRead<Quote>> {
+export async function quoteResult(ticker: string): Promise<MarketFetchResult<Quote>> {
   const normalized = normalizeTicker(ticker);
   if (!normalized) return { status: "empty", value: null };
 
@@ -97,7 +97,7 @@ function isCachedSeries(value: CachedSeries | null): value is CachedSeries {
   return value !== null && Array.isArray(value.series);
 }
 
-export async function dailySeriesResult(ticker: string): Promise<MarketRead<DailyBar[]>> {
+export async function dailySeriesResult(ticker: string): Promise<MarketFetchResult<DailyBar[]>> {
   const normalized = normalizeTicker(ticker);
   if (!normalized) return { status: "empty", value: null };
 
@@ -132,3 +132,5 @@ export async function dailySeries(ticker: string): Promise<DailyBar[]> {
 }
 
 export type { DailyBar, MarketProvider, Quote } from "./MarketProvider";
+export { generateMarketRead, validateMarketRead } from "./marketRead";
+export type { MarketRead, MarketReadInput, MarketReadValidation } from "./marketRead";

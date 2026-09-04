@@ -8,6 +8,7 @@ import {
   getStoryTimeline,
   LENS_LABELS,
   requestStoryAnalysis,
+  requestStoryMarketRead,
   saveAnalysisToBrief,
   type GenerationFailureCode,
   type GenerationLens,
@@ -73,6 +74,7 @@ export default function StoryDetail() {
     mutationFn: () => saveAnalysisToBrief(analysis.data!.id),
     onSuccess: (brief) => navigate(`/briefs/${brief.id}`),
   });
+  const marketRead = useMutation({ mutationFn: () => requestStoryMarketRead(id!) });
 
   if (query.isPending) return <PendingState>Loading Story…</PendingState>;
   // A Story that does not exist arrives here too, as the 404's own message
@@ -132,6 +134,10 @@ export default function StoryDetail() {
             total={story.marketTotal}
             onRetry={() => query.refetch()}
             retrying={query.isFetching}
+            read={marketRead.data?.marketRead}
+            onGenerateRead={() => marketRead.mutate()}
+            generatingRead={marketRead.isPending}
+            readError={marketRead.error as Error | null}
           />
         </RecordSection>
       )}

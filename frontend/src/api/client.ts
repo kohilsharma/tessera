@@ -401,6 +401,17 @@ export type MarketPanel = {
   series: { date: string; close: number; adjClose: number }[];
 };
 
+export type MarketRead = {
+  read: string;
+  citations: string[];
+  contentHash: string;
+  provider: string;
+  model: string;
+  generatedAt: string;
+  evidenceSetId: string | null;
+  citationDetails: { evidenceId: string; articleId: string; title: string; publisherName: string }[];
+};
+
 export type CoverageSpectrum = {
   left: number;
   centre: number;
@@ -461,6 +472,10 @@ export function getStories(params: StoryListParams = {}): Promise<ListEnvelope<S
 
 export function getStory(id: string): Promise<StoryDetail> {
   return getJson(`/api/v1/stories/${id}`, "Could not load this Story");
+}
+
+export function requestStoryMarketRead(storyId: string): Promise<{ marketRead: MarketRead }> {
+  return sendJson("POST", `/api/v1/stories/${storyId}/market-read`, {}, "Could not generate this market read");
 }
 
 // CONTEXT.md "Timeline" — mirrors backend/src/timeline/buildTimeline.ts. A *computed*

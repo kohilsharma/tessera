@@ -837,3 +837,13 @@ change, and colours the chart by direction.
 Verification: focused backend market-panel/provider tests (29 assertions), frontend Story-detail
 market rendering coverage, backend and frontend builds pass. The full frontend suite remains green;
 the full backend suite retains the unrelated clustering medoid flake tracked as #107.
+
+**#90 — Generated market read without advice.** Investor Story detail now offers an explicit
+market-read action. The backend freezes accepted Story reporting in an EvidenceSet, combines it with resolved Ticker quotes and
+in-house indicators, asks the existing synthesis provider for one concise read, and validates its
+JSON, citations and investor-language guard before returning it. Reads are cached in Redis by a
+SHA-256 of the Story inputs plus provider identity, so repeated requests do not pay for another model
+call. Advice-shaped text is refused through the same matcher used by analysis; focused tests cover
+that refusal and cache reuse. The Mock provider returns a clearly labelled deterministic read for the
+offline demo. Verification: backend and frontend builds pass; focused market-read and market-panel
+tests pass. Full suites retain their pre-existing timing flakes on this machine.

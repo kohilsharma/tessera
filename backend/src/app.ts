@@ -68,6 +68,8 @@ export function createApp() {
     next();
   }, authRouter);
   app.use("/api/v1", dashboardRouter);
+  const generationLimiter = configuredRateLimit("GENERATION", { windowMs: 60_000, max: 10 });
+  app.post("/api/v1/stories/:id/market-read", generationLimiter);
   app.use("/api/v1", storiesRouter);
   app.use("/api/v1", articlesRouter);
   app.use("/api/v1", briefsRouter);
@@ -75,7 +77,6 @@ export function createApp() {
   app.use("/api/v1", ingestionRouter);
   app.use("/api/v1", clusteringRouter);
   app.use("/api/v1", graphRouter);
-  const generationLimiter = configuredRateLimit("GENERATION", { windowMs: 60_000, max: 10 });
   app.post("/api/v1/stories/:id/analysis", generationLimiter);
   app.post("/api/v1/flashcards", generationLimiter);
   app.use("/api/v1", generationRouter);

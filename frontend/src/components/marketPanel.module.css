@@ -16,6 +16,13 @@
 .readouts dt { color: var(--quiet); font: var(--t-micro)/1.2 var(--font-mono); text-transform: uppercase; }
 .readouts dd { margin: var(--s-2) 0 0; color: var(--ink); font: var(--t-body)/1.2 var(--font-mono); font-weight: 700; }
 .source { margin: var(--s-4) 0 0; color: var(--quiet); font-size: var(--t-small); }
+.read { margin: var(--s-5) 0 0; padding: var(--s-4); background: var(--wash-imply); border: 1px solid var(--rule); }
+.read p { max-width: 68ch; margin: 0; color: var(--ink); }
+.readLabel { margin-bottom: var(--s-2) !important; color: var(--imply-text) !important; font: var(--t-micro)/1.2 var(--font-mono); text-transform: uppercase; }
+.read .source { margin-top: var(--s-3); color: var(--quiet); }
+.readAction { margin-top: var(--s-5); }
+.readAction button { display: inline-flex; align-items: center; gap: var(--s-2); }
+.readError { margin: var(--s-3) 0 0; color: var(--down); }
 
 @media (max-width: 560px) {
   .itemHeader { display: grid; }

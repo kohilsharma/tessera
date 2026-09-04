@@ -6,6 +6,7 @@ import { GenerationRun } from "../entities/GenerationRun";
 import { Story, STORY_CATEGORIES } from "../entities/Story";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
+import { requireRole } from "../middleware/requireRole";
 import { toPublicArticle } from "../lib/articleView";
 import { paginate, parseListQuery, toEnvelope } from "../lib/listQuery";
 import { ACCEPTED_ASSIGNMENT, acceptedMembership } from "../lib/storyMembership";
@@ -13,6 +14,9 @@ import { isUuid } from "../lib/uuid";
 import { buildTimeline, toTimelineEvents } from "../timeline/buildTimeline";
 import { buildCoverageSpectrum, type CoverageSpectrum } from "../lib/coverageSpectrum";
 import { loadStoryMarket } from "../market/storyMarket";
+import { generateMarketRead } from "../market/marketRead";
+import { contentHashOf, excerptOf, freezeEvidence } from "../generation/evidence";
+import { createSynthesisProvider, synthesisProviderIdentity } from "../synthesis";
 
 export const storiesRouter = Router();
 
@@ -84,6 +88,69 @@ storiesRouter.get(
         total,
       ),
     );
+  }),
+);
+
+storiesRouter.post(
+  "/stories/:id/market-read",
+  requireAuth,
+  requireRole("investor"),
+  asyncHandler(async (req, res) => {
+    if (!isUuid(req.params.id)) {
+      res.status(404).json({ error: "Story not found" });
+      return;
+    }
+    const story = await storyRepo().findOneBy({ id: req.params.id });
+    if (!story) {
+      res.status(404).json({ error: "Story not found" });
+      return;
+    }
+    const market = await loadStoryMarket(story.id);
+    if (!market.market?.length) {
+      res.status(422).json({ error: "This Story has no usable market data to read" });
+      return;
+    }
+    const articles = await AppDataSource.getRepository(Article).find({
+      where: { storyId: story.id, storyAssignmentStatus: ACCEPTED_ASSIGNMENT },
+      relations: { publisher: true },
+      order: { publishedAt: "ASC" },
+      take: 8,
+    });
+    if (articles.length === 0) {
+      res.status(422).json({ error: "This Story has no accepted reporting to read" });
+      return;
+    }
+    const input = {
+      storyId: story.id,
+      reporting: articles.map((article, index) => ({
+        evidenceId: `A${index + 1}`,
+        articleId: article.id,
+        publisherName: article.publisher.name,
+        title: article.title,
+        excerpt: (article.analysisText ?? article.title).slice(0, 900),
+      })),
+      markets: market.market.map(({ entity, quote, indicators }) => ({
+        ticker: entity.ticker,
+        canonicalName: entity.canonicalName,
+        price: quote.price,
+        change: quote.change,
+        changePercent: quote.changePercent,
+        ...indicators,
+      })),
+    };
+    const evidenceSet = await freezeEvidence(story.id, articles.map((article, index) => ({
+      articleId: article.id, evidenceId: `A${index + 1}`, title: article.title, url: article.url,
+      publishedAt: article.publishedAt, analysisText: article.analysisText ?? article.title,
+      analysisTextMode: article.analysisTextMode, publisherId: article.publisherId,
+      publisherName: article.publisher.name, publisherDomain: article.publisher.domain,
+      termsClass: article.publisher.termsClass, sourceRank: index + 1,
+      articleContentHash: contentHashOf(article.analysisText ?? article.title), selectionReason: "centroid_rank" as const,
+      excerpt: excerptOf(article.analysisText ?? article.title),
+    })));
+    const provider = createSynthesisProvider();
+    const identity = synthesisProviderIdentity();
+    const marketRead = await generateMarketRead(provider, input, identity.provider, identity.model, evidenceSet.id);
+    res.json({ marketRead });
   }),
 );
 

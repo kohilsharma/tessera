@@ -87,6 +87,7 @@ const OMISSION_PHRASES: RegExp[] = [
 const INVESTMENT_ADVICE_PHRASES: RegExp[] = [
   /\b(?:investors?|shareholders?|readers?|traders?|holders?|you|we)\b[^.]{0,40}\b(?:should|must|ought to)\b[^.]{0,40}\b(?:buy|sell|short|hold|invest|divest|exit|add|trim)\b/i,
   /\b(?:recommend|advis|urg)\w*\b[^.]{0,40}\b(?:buy|sell|short|hold|invest|divest|exit)\b/i,
+  /\bconsider(?:ing)?\b[^.]{0,40}\b(?:accumulat\w*|buy|sell|short|hold|invest|divest|exit|add|trim)\b/i,
   // A bare imperative, which is how a cheap model writes advice when it drops the
   // subject: "Sell the position ahead of the decision."
   /^(?:buy|sell|short|hold|divest|exit)\b/i,
@@ -98,6 +99,10 @@ const INVESTMENT_ADVICE_PHRASES: RegExp[] = [
   /\bentry point\b/i,
   /\bstrong (?:buy|sell)\b/i,
 ];
+
+export function hasProhibitedInvestorLanguage(text: string): boolean {
+  return INVESTMENT_ADVICE_PHRASES.some((phrase) => phrase.test(text));
+}
 
 // Why a claim was dropped, worded so the same string can be shown to an Admin and fed
 // back to the model as the repair instruction.
@@ -225,7 +230,7 @@ export function validateAnalysis(
       drop("omission_language");
       continue;
     }
-    if (INVESTMENT_ADVICE_PHRASES.some((phrase) => phrase.test(text))) {
+    if (hasProhibitedInvestorLanguage(text)) {
       drop("prohibited_investor_language");
       continue;
     }
