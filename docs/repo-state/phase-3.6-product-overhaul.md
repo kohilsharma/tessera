@@ -559,4 +559,4 @@ only, freezes the top 5/10/20 matches, and generates cited cards with one-word, 
 answer lengths. Students can list every card, open, edit, delete, and inspect review history;
 the existing SM-2 due session and analysis entry point remain intact. The Student study route
 adds search generation controls, an all-cards register, and keyboard grading. Backend and frontend
-builds pass; the existing 19 flashcard tests remain green.
+builds pass; the flashcard suite now has 21 tests, including search generation and CRUD/history coverage.

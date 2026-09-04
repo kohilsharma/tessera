@@ -138,7 +138,7 @@ function reviewCard(token: string, cardId: string, grade: unknown) {
 
 beforeEach(async () => {
   await AppDataSource.query(
-    `TRUNCATE "articles", "publishers", "stories", "users", "evidence_sets", "generation_runs", "flashcard_question_cache" CASCADE`,
+    `TRUNCATE "articles", "publishers", "stories", "users", "evidence_sets", "generation_runs", "flashcard_question_cache", "flashcard_generation_cache" CASCADE`,
   );
   // Taken by TRUNCATE users CASCADE, and reinstated for the same reason
   // tests/generation.test.ts does: the pipeline reads the current version on every
@@ -487,5 +487,50 @@ describe("whose cards these are", () => {
     }
 
     expect((await request(app()).get("/api/v1/flashcards")).status).toBe(401);
+  });
+});
+
+describe("search-generated cards and card management", () => {
+  it("freezes accepted search matches into cited cards with generation options", async () => {
+    const student = await tokenFor("student");
+    await twoPublisherStory();
+    const made = await request(app())
+      .post("/api/v1/flashcards/search")
+      .set("Authorization", `Bearer ${student.token}`)
+      .send({ q: "Semiconductor alliance", count: 5, answerLength: "one_line" });
+
+    expect(made.status).toBe(201);
+    expect(made.body.cards.length).toBeGreaterThan(0);
+    expect(made.body.cards.length).toBeLessThanOrEqual(5);
+    expect(made.body.cards.every((card: { citations: unknown[]; generationRunId: string | null; storyId: string | null }) =>
+      card.citations.length > 0 && card.generationRunId === null && card.storyId === null)).toBe(true);
+
+    const [set] = await AppDataSource.query(`SELECT "storyId", "articleCount" FROM "evidence_sets" ORDER BY "createdAt" DESC LIMIT 1`);
+    expect(set.storyId).toBeNull();
+    expect(set.articleCount).toBeGreaterThan(0);
+  });
+
+  it("supports private open, edit, history, list, and delete operations", async () => {
+    const student = await tokenFor("student");
+    const { runId } = await analysisFor(student.token);
+    const created = await makeDeck(student.token, runId);
+    const card = created.body.cards[0];
+
+    expect((await request(app()).get("/api/v1/flashcards/all").set("Authorization", `Bearer ${student.token}`)).body.cards).toHaveLength(created.body.cards.length);
+    expect((await request(app()).get(`/api/v1/flashcards/${card.id}`).set("Authorization", `Bearer ${student.token}`)).body.id).toBe(card.id);
+
+    const edited = await request(app()).patch(`/api/v1/flashcards/${card.id}`).set("Authorization", `Bearer ${student.token}`).send({ question: "Edited question", answer: "Edited answer" });
+    expect(edited.status).toBe(200);
+    expect(edited.body.question).toBe("Edited question");
+    expect(edited.body.answer).toBe("Edited answer");
+
+    await reviewCard(student.token, card.id, 4);
+    const history = await request(app()).get(`/api/v1/flashcards/${card.id}/history`).set("Authorization", `Bearer ${student.token}`);
+    expect(history.status).toBe(200);
+    expect(history.body.items).toHaveLength(1);
+    expect(history.body.items[0].grade).toBe(4);
+
+    expect((await request(app()).delete(`/api/v1/flashcards/${card.id}`).set("Authorization", `Bearer ${student.token}`)).status).toBe(204);
+    expect((await request(app()).get(`/api/v1/flashcards/${card.id}`).set("Authorization", `Bearer ${student.token}`)).status).toBe(404);
   });
 });
