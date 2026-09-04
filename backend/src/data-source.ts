@@ -58,7 +58,9 @@ import { EntityAlias } from "./entities/EntityAlias";
 import { EntityMergeRefusal } from "./entities/EntityMergeRefusal";
 import { EntityMergeProposal } from "./entities/EntityMergeProposal";
 import { StoryMergeRecord } from "./entities/StoryMergeRecord";
+import { WatchlistItem } from "./entities/WatchlistItem";
 import { AddStoryRolePanels1755771000000 } from "./migrations/1755771000000-AddStoryRolePanels";
+import { CreateWatchlistItems1755772000000 } from "./migrations/1755772000000-CreateWatchlistItems";
 
 const url = process.env.DATABASE_URL;
 
@@ -103,6 +105,7 @@ export const AppDataSource = new DataSource({
     EntityMergeRefusal,
     EntityMergeProposal,
     StoryMergeRecord,
+    WatchlistItem,
   ],
   migrations: [
     InitPgvector1755740000000,
@@ -137,6 +140,7 @@ export const AppDataSource = new DataSource({
     AddPublisherLeaning1755769000000,
     AddEntityTicker1755770000000,
     AddStoryRolePanels1755771000000,
+    CreateWatchlistItems1755772000000,
   ],
   synchronize: false,
   logging: false,

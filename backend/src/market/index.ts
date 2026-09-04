@@ -91,6 +91,40 @@ export async function quote(ticker: string): Promise<Quote | null> {
   return (await quoteResult(ticker)).value;
 }
 
+export async function quotesResult(tickers: string[]): Promise<Map<string, MarketFetchResult<Quote>>> {
+  const normalized = [...new Set(tickers.map(normalizeTicker).filter((ticker): ticker is string => !!ticker))];
+  const results = new Map<string, MarketFetchResult<Quote>>();
+  if (normalized.length === 0) return results;
+  const misses: string[] = [];
+  for (const ticker of normalized) {
+    const cached = await cacheGet<CachedQuote>(`tessera:quote:v1:${ticker}`);
+    if (isCachedQuote(cached)) results.set(ticker, cached.quote ? { status: "ready", value: cached.quote } : { status: "empty", value: null });
+    else misses.push(ticker);
+  }
+  if (misses.length === 0) return results;
+  const provider = createMarketProvider();
+  let fresh: (Quote | null)[];
+  try {
+    fresh = await provider.quotes(misses);
+  } catch (error) {
+    console.warn(`[market] batch quote failed: ${(error as Error).message}`);
+    for (const ticker of misses) results.set(ticker, { status: "unavailable", value: null });
+    return results;
+  }
+  const ttl = ttlFromEnv("MARKET_QUOTE_CACHE_TTL_SECONDS", DEFAULT_TTL_SECONDS);
+  for (const [index, ticker] of misses.entries()) {
+    const value = fresh[index] ?? null;
+    await cacheSet<CachedQuote>(`tessera:quote:v1:${ticker}`, { quote: value }, ttl);
+    results.set(ticker, value ? { status: "ready", value } : { status: "empty", value: null });
+  }
+  return results;
+}
+
+export async function quotes(tickers: string[]): Promise<Map<string, Quote>> {
+  const results = await quotesResult(tickers);
+  return new Map([...results].flatMap(([ticker, result]) => result.value ? [[ticker, result.value] as const] : []));
+}
+
 type CachedSeries = { series: DailyBar[] };
 
 function isCachedSeries(value: CachedSeries | null): value is CachedSeries {

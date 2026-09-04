@@ -610,6 +610,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    app has a single input: paper stock inside an ink rule, reading face, native
    control. */
 .form-field :is(input, select, textarea), .record-attach input { border: 1px solid var(--quiet-ink); background: var(--stock-paper); padding: 10px 12px; color: var(--bureau-ink); font: 400 .92rem var(--font-ui); }
+.market-up { color: var(--up); }
+.market-down { color: var(--down); }
+.icon-command { display: inline-grid; min-width: 44px; min-height: 44px; place-items: center; border: 1px solid var(--quiet-ink); background: var(--stock-paper); color: var(--bureau-ink); cursor: pointer; }
 .form-field :is(input, select, textarea):disabled, .record-attach input:disabled { border-color: var(--registration-rule); background: var(--bench-stock); color: var(--quiet-ink); }
 /* Fields take the sheet's measure rather than each guessing its own: a form of
    four boxes at four widths reads as an accident, and the panel is already

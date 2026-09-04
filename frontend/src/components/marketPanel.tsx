@@ -1,4 +1,4 @@
-import { ChartLineUp, Sparkle, TrendDown, TrendUp } from "@phosphor-icons/react";
+import { ChartLineUp, Eye, Sparkle, TrendDown, TrendUp } from "@phosphor-icons/react";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { MarketPanel as MarketPanelData, MarketRead } from "../api/client";
 import { RolePanel } from "./primitives";
@@ -19,6 +19,8 @@ export function InvestorMarketPanel({
   onGenerateRead,
   generatingRead,
   readError,
+  onAddWatchlist,
+  addingWatchlist,
 }: {
   markets: MarketPanelData[] | null | undefined;
   status: "ready" | "empty" | "unavailable" | undefined;
@@ -29,6 +31,8 @@ export function InvestorMarketPanel({
   onGenerateRead: () => void;
   generatingRead: boolean;
   readError: Error | null;
+  onAddWatchlist?: (ticker: string) => void;
+  addingWatchlist?: boolean;
 }) {
   return (
     <RolePanel role="Investor">
@@ -77,6 +81,7 @@ export function InvestorMarketPanel({
                     <span>{change}</span>
                   </div>
                 </div>
+                {onAddWatchlist && <button type="button" className="record-command" onClick={() => onAddWatchlist(market.entity.ticker)} disabled={addingWatchlist}><Eye aria-hidden size={16} /> {addingWatchlist ? "Adding…" : "Add to watchlist"}</button>}
                 <div className={styles.chart} role="img" aria-label={`${market.entity.ticker} adjusted closing price over the available series`}>
                   <ResponsiveContainer width="100%" height={220}>
                     <LineChart data={market.series} margin={{ top: 12, right: 12, bottom: 4, left: 0 }}>

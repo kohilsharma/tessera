@@ -858,3 +858,16 @@ generation runs so inline unmerge can restore them while the survivor is unchang
 frontend Story-detail role isolation test and full frontend suite (267 tests), backend Story API
 suite (37 tests), and frontend typecheck; backend's existing strict test error in
 `tests/hardening.test.ts:63` remains unrelated.
+
+**#92 — Investor watchlist.** Investors now own `WatchlistItem` rows for normalized Tickers and
+Story sectors. `GET/POST/DELETE /watchlist` is investor-only, ownership is enforced in every query,
+and a database uniqueness constraint prevents duplicate follows. The Investor dashboard leads with
+the user's bounded watchlist, showing batched quote movement for Tickers and coverage counts for
+sectors, with remove actions and an honest empty state. Story market panels can add a resolved
+Ticker directly. Refreshes use the provider's comma-separated batch quote form and the existing
+Redis-backed quote cache, so a watchlist does not spend one provider request per Ticker.
+
+Verification: backend watchlist API coverage plus market/provider tests pass; frontend dashboard and
+Story-detail suites pass; both package builds pass. Full frontend suite: 268 passing. Full backend
+suite: 577 passing, with the pre-existing clustering backlog timeout and Readability chunked-response
+timeout failures unrelated to this ticket.

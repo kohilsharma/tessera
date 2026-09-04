@@ -16,6 +16,7 @@ import { flashcardsRouter } from "./routes/flashcards";
 import { log, logger } from "./lib/logger";
 import pinoHttp from "pino-http";
 import { configuredRateLimit } from "./middleware/rateLimit";
+import { watchlistRouter } from "./routes/watchlist";
 
 // Last resort for anything an async handler rejects with (a DB fault, a bug):
 // one 500 with nothing internal leaked, instead of an unhandled rejection.
@@ -68,6 +69,7 @@ export function createApp() {
     next();
   }, authRouter);
   app.use("/api/v1", dashboardRouter);
+  app.use("/api/v1", watchlistRouter);
   const generationLimiter = configuredRateLimit("GENERATION", { windowMs: 60_000, max: 10 });
   app.post("/api/v1/stories/:id/market-read", generationLimiter);
   app.use("/api/v1", storiesRouter);

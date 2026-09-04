@@ -148,8 +148,17 @@ export type ComparableStory = {
 };
 export type InvestorDashboardData = {
   role: "investor";
+  watchlist: WatchlistDashboardItem[];
+  watchlistTotal: number;
   sectors: Sector[];
   comparableStories: ComparableStory[];
+};
+
+export type WatchlistItem = { id: string; kind: "sector" | "ticker"; value: string; createdAt: string };
+export type WatchlistDashboardItem = WatchlistItem & {
+  quote?: MarketPanel["quote"] | null;
+  quoteStatus?: "ready" | "empty" | "unavailable";
+  coverage?: { storyCount: number; articleCount: number };
 };
 
 export type ConnectorKind = "gdelt_gkg" | "gdelt_doc" | "rss" | "readability";
@@ -331,6 +340,14 @@ export function getStudentDashboard(): Promise<StudentDashboardData> {
 
 export function getInvestorDashboard(): Promise<InvestorDashboardData> {
   return getJson("/api/v1/dashboard/investor", "Could not load this dashboard");
+}
+
+export function addToWatchlist(input: { kind: "sector" | "ticker"; value: string }): Promise<WatchlistItem> {
+  return sendJson("POST", "/api/v1/watchlist", input, "Could not add this to your watchlist");
+}
+
+export function removeFromWatchlist(id: string): Promise<void> {
+  return sendJson("DELETE", `/api/v1/watchlist/${id}`, undefined, "Could not remove this from your watchlist");
 }
 
 export function getAdminDashboard(): Promise<AdminDashboardData> {

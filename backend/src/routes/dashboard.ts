@@ -19,8 +19,11 @@ import { comparableStories } from "../generation/evidence";
 import { toPublicIngestionRun } from "../lib/ingestionRunView";
 import { toPublicLeaning } from "../lib/publisherLeaning";
 import { acceptedMembership } from "../lib/storyMembership";
+import { WatchlistItem } from "../entities/WatchlistItem";
+import { quotesResult } from "../market";
 
 export const dashboardRouter = Router();
+const WATCHLIST_DASHBOARD_LIMIT = 50;
 
 // Deep enough to tell a feed that has been failing all morning from one that
 // failed once; shallow enough that the Admin payload has a fixed ceiling.
@@ -73,7 +76,7 @@ dashboardRouter.get(
   "/dashboard/investor",
   requireAuth,
   requireRole("investor"),
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
     const sectors = await AppDataSource.getRepository(Story)
       .createQueryBuilder("story")
       .select("story.category", "category")
@@ -86,8 +89,19 @@ dashboardRouter.get(
       .orderBy("story.category", "ASC")
       .getRawMany<{ category: StoryCategory; storyCount: string; articleCount: string }>();
 
+    const sectorMap = new Map<string, { storyCount: number; articleCount: number }>(sectors.map((row) => [row.category, { storyCount: Number(row.storyCount), articleCount: Number(row.articleCount) }]));
+    const [watchlist, watchlistTotal] = await Promise.all([
+      AppDataSource.getRepository(WatchlistItem).find({ where: { ownerId: req.user!.id }, order: { createdAt: "ASC" }, take: WATCHLIST_DASHBOARD_LIMIT }),
+      AppDataSource.getRepository(WatchlistItem).count({ where: { ownerId: req.user!.id } }),
+    ]);
+    const tickerQuotes = await quotesResult(watchlist.filter((item) => item.kind === "ticker").map((item) => item.value));
     res.json({
       role: "investor",
+      watchlistTotal,
+      watchlist: watchlist.map((item) => ({
+        ...toWatchlistItem(item),
+        ...(item.kind === "ticker" ? { quote: tickerQuotes.get(item.value)?.value ?? null, quoteStatus: tickerQuotes.get(item.value)?.status ?? "empty" } : { coverage: sectorMap.get(item.value) ?? { storyCount: 0, articleCount: 0 } }),
+      })),
       sectors: sectors.map((row) => ({
         category: row.category,
         storyCount: Number(row.storyCount),
@@ -97,6 +111,10 @@ dashboardRouter.get(
     });
   }),
 );
+
+function toWatchlistItem(item: WatchlistItem) {
+  return { id: item.id, kind: item.kind, value: item.value, createdAt: item.createdAt };
+}
 
 // ADR-0004's Admin surface is connectors / clustering review / generation
 // inspection. Connectors and Publishers exist and are seed-only in Phase 1, so

@@ -2,7 +2,7 @@
 // interface, a real provider selected from env, and a deterministic Mock beside it so
 // the demo runs offline on the same code path.
 //
-// Narrow deliberately: one symbol in, one Quote out. Everything that makes a market
+// Narrow deliberately: one Ticker in for panels, with a batch path for watchlists. Everything that makes a market
 // panel trustworthy is above this seam — the indicators are ours and arithmetic (#88),
 // the Read is validated like any other generated claim (#90) — so nothing here needs to
 // grow when those land.
@@ -34,6 +34,7 @@ export interface MarketProvider {
   // is not an answer and throws instead. Both leave a market panel showing nothing
   // (spec §4), but only the first is worth caching — see `quote()` in ./index.ts.
   quote(ticker: string): Promise<Quote | null>;
+  quotes(tickers: string[]): Promise<(Quote | null)[]>;
   dailySeries(ticker: string): Promise<DailyBar[]>;
 }
 

@@ -9,6 +9,11 @@ import { DailyBar, MarketProvider, Quote } from "./MarketProvider";
 // about what real companies are worth, and a stale one within a day.
 export class MockMarketProvider implements MarketProvider {
   async quote(ticker: string): Promise<Quote | null> {
+    return (await this.quotes([ticker]))[0] ?? null;
+  }
+
+  async quotes(tickers: string[]): Promise<(Quote | null)[]> {
+    return tickers.map((ticker) => {
     const seed = hash(ticker);
     const previousClose = round(20 + (seed % 48_000) / 100);
     // A signed swing of at most ±5%, so a panel shows both directions across a
@@ -27,6 +32,7 @@ export class MockMarketProvider implements MarketProvider {
       asOf: "2026-01-01T00:00:00.000Z",
       source: "mock",
     };
+    });
   }
 
   async dailySeries(ticker: string): Promise<DailyBar[]> {

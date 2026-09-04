@@ -1,5 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
-import { getInvestorDashboard } from "../api/client";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Plus, Trash, TrendDown, TrendUp } from "@phosphor-icons/react";
+import { addToWatchlist, getInvestorDashboard, removeFromWatchlist, type WatchlistDashboardItem } from "../api/client";
 import DashboardShell from "./DashboardShell";
 import {
   DashboardOnward,
@@ -7,7 +8,29 @@ import {
   DashboardRegister,
   RegisterRow,
 } from "../components/dashboardArchetype";
-import { EmptyState, EntryList } from "../components/uiStates";
+import { EmptyState, EntryList, ErrorState } from "../components/uiStates";
+
+function WatchlistRegister({ items, total, onRemove, removing, error }: { items: WatchlistDashboardItem[]; total: number; onRemove: (id: string) => void; removing: boolean; error: Error | null }) {
+  return (
+    <DashboardRegister heading="Your watchlist" folio={`Showing ${items.length} of ${total} tracked`}>
+      {items.length === 0 ? (
+        <EmptyState><p>No Tickers or sectors are tracked yet. Open a Story or browse a sector to add one.</p></EmptyState>
+      ) : (
+        <EntryList>
+          {items.map((item) => {
+            const quote = item.quote;
+            const rising = quote ? quote.change >= 0 : true;
+            return <RegisterRow key={item.id} name={item.value} to={item.kind === "sector" ? `/stories?category=${item.value}` : undefined} meta={[
+              { term: "Type", value: item.kind },
+              ...(quote ? [{ term: "Price", value: `$${quote.price.toFixed(2)}` }, { term: "Day", value: <span className={rising ? "market-up" : "market-down"}>{rising ? <TrendUp aria-hidden size={16} /> : <TrendDown aria-hidden size={16} />} {quote.changePercent >= 0 ? "+" : ""}{quote.changePercent.toFixed(2)}%</span> }] : item.coverage ? [{ term: "Stories", value: item.coverage.storyCount }, { term: "Articles", value: item.coverage.articleCount }] : item.kind === "ticker" ? [{ term: "Quote", value: item.quoteStatus === "unavailable" ? "Unavailable" : "No quote" }] : []),
+            ]} action={<button type="button" aria-label={`Remove ${item.value} from watchlist`} className="icon-command" onClick={() => onRemove(item.id)} disabled={removing}><Trash aria-hidden size={18} /></button>} />;
+          })}
+        </EntryList>
+      )}
+      {error && <ErrorState>Could not update your watchlist: {error.message}</ErrorState>}
+    </DashboardRegister>
+  );
+}
 
 // The Investor surface (#36): the corpus rolled up by sector, as a register of
 // categories against their coverage. The bar beside each count is relative to
@@ -23,6 +46,9 @@ import { EmptyState, EntryList } from "../components/uiStates";
 // and refused on opening, with the reason stated on the record.
 export default function InvestorDashboard() {
   const query = useQuery({ queryKey: ["dashboard", "investor"], queryFn: getInvestorDashboard });
+  const queryClient = useQueryClient();
+  const remove = useMutation({ mutationFn: removeFromWatchlist, onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dashboard", "investor"] }) });
+  const add = useMutation({ mutationFn: addToWatchlist, onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dashboard", "investor"] }) });
 
   return (
     <DashboardShell query={query}>
@@ -39,6 +65,7 @@ export default function InvestorDashboard() {
             title="Sector watch"
             dek="Coverage across the corpus by sector, and the Stories more than one Publisher has reported. Counts are live, not a forecast."
           >
+            <WatchlistRegister items={data.watchlist ?? []} total={data.watchlistTotal ?? data.watchlist?.length ?? 0} onRemove={(id) => remove.mutate(id)} removing={remove.isPending} error={(remove.error ?? add.error) as Error | null} />
             <DashboardRegister heading="Sectors" folio={`${data.sectors.length} covered`}>
               {data.sectors.length === 0 ? (
                 <EmptyState>
@@ -59,6 +86,7 @@ export default function InvestorDashboard() {
                         { term: "Stories", value: sector.storyCount },
                         { term: "Articles", value: sector.articleCount },
                       ]}
+                      action={<button type="button" className="record-command" onClick={() => add.mutate({ kind: "sector", value: sector.category })} disabled={add.isPending}><Plus aria-hidden size={16} /> Track</button>}
                     />
                   ))}
                 </EntryList>

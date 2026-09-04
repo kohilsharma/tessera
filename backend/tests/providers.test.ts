@@ -244,6 +244,15 @@ describe("market provider", () => {
     expect(init.redirect).toBe("error");
   });
 
+  it("does not reuse one returned row for another Ticker in a batch", async () => {
+    configureTiingo();
+    const fetchMock = stubTiingo([TIINGO_ROW]);
+    const quotes = await createMarketProvider().quotes(["AAPL", "NOPE"]);
+    expect(quotes[0]?.ticker).toBe("AAPL");
+    expect(quotes[1]).toBeNull();
+    expect(fetchMock.mock.calls[0][0]).toContain("tickers=AAPL%2CNOPE");
+  });
+
   it("maps Tiingo adjusted daily bars", async () => {
     configureTiingo();
     const fetchMock = stubTiingo([{ date: "2026-09-03T00:00:00Z", close: 100, adjClose: 99.5 }]);

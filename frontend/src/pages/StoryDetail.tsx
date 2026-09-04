@@ -10,6 +10,7 @@ import {
   LENS_LABELS,
   requestStoryAnalysis,
   requestStoryMarketRead,
+  addToWatchlist,
   makeFlashcards,
   mergeStories,
   unmergeStory,
@@ -135,6 +136,7 @@ export default function StoryDetail() {
     onSuccess: (brief) => navigate(`/briefs/${brief.id}`),
   });
   const marketRead = useMutation({ mutationFn: () => requestStoryMarketRead(id!) });
+  const watchlist = useMutation({ mutationFn: (ticker: string) => addToWatchlist({ kind: "ticker", value: ticker }) });
 
   if (query.isPending) return <PendingState>Loading Story…</PendingState>;
   // A Story that does not exist arrives here too, as the 404's own message
@@ -201,7 +203,11 @@ export default function StoryDetail() {
             onGenerateRead={() => marketRead.mutate()}
             generatingRead={marketRead.isPending}
             readError={marketRead.error as Error | null}
+            onAddWatchlist={(ticker) => watchlist.mutate(ticker)}
+            addingWatchlist={watchlist.isPending}
           />
+          {watchlist.isError && <ErrorState>Could not add this Ticker to your watchlist: {(watchlist.error as Error).message}</ErrorState>}
+          {watchlist.isSuccess && <p role="status">Ticker added to your watchlist.</p>}
         </RecordSection>
       )}
 
