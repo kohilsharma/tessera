@@ -2,27 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cacheDelete, cacheGet, cacheSet, setCacheClientForTests, type CacheClient } from "../src/lib/cache";
 import { AppDataSource } from "../src/data-source";
 import { comparableStories, invalidateComparableStoriesCache } from "../src/generation/evidence";
+import { fakeRedis } from "./fakeCache";
 
 afterEach(() => setCacheClientForTests(undefined));
-
-function fakeRedis(): CacheClient & { values: Map<string, string>; ttl?: number } {
-  const values = new Map<string, string>();
-  return {
-    values,
-    async get(key) {
-      return values.get(key) ?? null;
-    },
-    async set(key, value, _mode, ttl) {
-      values.set(key, value);
-      this.ttl = Number(ttl);
-      return "OK";
-    },
-    async del(key) {
-      values.delete(key);
-      return 1;
-    },
-  } as CacheClient & { values: Map<string, string>; ttl?: number };
-}
 
 describe("Redis cache seam", () => {
   it("round-trips JSON with an expiry and deletes explicitly", async () => {

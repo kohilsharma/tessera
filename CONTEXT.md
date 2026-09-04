@@ -208,6 +208,12 @@ Terms are canonical: use these words in code, docs, and conversation.
   what joins reporting to markets: a Story shows a market panel when its resolved organizations
   carry Tickers, and shows nothing when they do not.
 
+- **Quote** — one Ticker's current price and what the day did to it, as a market data provider
+  reports it. It always carries the name of the provider that produced it, so a simulated price
+  from the offline Mock can never be displayed as though a market set it. A Quote is *fetched and
+  cached*; an **Indicator** is arithmetic Tessera computes over a price series; a **Market Read** is
+  a model call about both. (ADR-0036)
+
 - **Market Read** — a generated paragraph describing what the reporting and the computed indicators
   each show. It states no causal link between them and never advises: the same
   `prohibited_investor_language` validation that governs analysis governs this. Contrast: an

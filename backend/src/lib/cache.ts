@@ -25,9 +25,15 @@ function redisClient(): CacheClient | null {
   return client;
 }
 
+// Every cached surface tunes its own TTL from its own key, so reading one lives here
+// rather than being copied beside each caller.
+export function ttlFromEnv(key: string, fallback: number): number {
+  const configured = Number(process.env[key]);
+  return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : fallback;
+}
+
 function ttlSeconds(): number {
-  const configured = Number(process.env.COMPARABLE_STORIES_CACHE_TTL_SECONDS);
-  return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : DEFAULT_TTL_SECONDS;
+  return ttlFromEnv("COMPARABLE_STORIES_CACHE_TTL_SECONDS", DEFAULT_TTL_SECONDS);
 }
 
 export async function cacheGet<T>(key: string): Promise<T | null> {

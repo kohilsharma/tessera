@@ -3,6 +3,9 @@ import { EMBEDDING_DIMENSIONS } from "../src/embeddings/EmbeddingProvider";
 import { GeminiEmbeddingProvider } from "../src/embeddings/GeminiEmbeddingProvider";
 import { createEmbeddingProvider } from "../src/embeddings";
 import { createSynthesisProvider } from "../src/synthesis";
+import { createMarketProvider, quote } from "../src/market";
+import { setCacheClientForTests } from "../src/lib/cache";
+import { fakeRedis } from "./fakeCache";
 import { STORY_CATEGORIES } from "../src/entities/Story";
 
 // ADR-0003: a provider is chosen by env config, never hardcoded. These are the
@@ -11,17 +14,20 @@ import { STORY_CATEGORIES } from "../src/entities/Story";
 const KEYS = [
   "EMBEDDING_PROVIDER", "EMBEDDING_API_KEY", "EMBEDDING_API_BASE", "EMBEDDING_MODEL", "GEMINI_API_KEY",
   "SYNTHESIS_PROVIDER", "SYNTHESIS_API_KEY", "SYNTHESIS_API_BASE", "SYNTHESIS_MODEL", "SYNTHESIS_ALLOWED_ORIGIN",
+  "MARKET_PROVIDER", "MARKET_API_KEY", "MARKET_API_BASE", "MARKET_QUOTE_CACHE_TTL_SECONDS",
 ] as const;
 
 afterEach(() => {
   for (const key of KEYS) delete process.env[key];
   vi.unstubAllGlobals();
+  setCacheClientForTests(undefined);
 });
 
 describe("provider selection", () => {
   it("falls back to the Mock providers when no key is configured", () => {
     expect(createEmbeddingProvider().constructor.name).toBe("MockEmbeddingProvider");
     expect(createSynthesisProvider().constructor.name).toBe("MockSynthesisProvider");
+    expect(createMarketProvider().constructor.name).toBe("MockMarketProvider");
   });
 
   it("infers the hosted provider from whichever key is present", () => {
@@ -168,6 +174,136 @@ describe("provider selection", () => {
     expect(parsed.title).toBe("[mock] Talks resume");
     expect(STORY_CATEGORIES).toContain(parsed.category);
     expect(await mock.complete({ task: "story_name", prompt, json: true })).toBe(out);
+  });
+});
+
+
+// #87 / ADR-0036: the third instance of the same selection rule, so the market panel
+// runs offline on the code path a key switches to a live provider.
+describe("market provider", () => {
+  const FINNHUB_QUOTE = { c: 261.74, d: 0.06, dp: 0.0229, h: 263.31, l: 260.68, o: 261.07, pc: 261.68, t: 1_582_641_000 };
+
+  function stubFinnhub(response: unknown, ok = true) {
+    const fetchMock = vi.fn().mockResolvedValue({ ok, status: ok ? 200 : 429, json: async () => response });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  function configureFinnhub() {
+    process.env.MARKET_API_KEY = "finnhub-key";
+    process.env.MARKET_API_BASE = "https://finnhub.io/api/v1";
+  }
+
+  it("infers Finnhub from the key and lets an explicit choice override it", () => {
+    configureFinnhub();
+    expect(createMarketProvider().constructor.name).toBe("FinnhubMarketProvider");
+    process.env.MARKET_PROVIDER = "mock";
+    expect(createMarketProvider().constructor.name).toBe("MockMarketProvider");
+  });
+
+  it("refuses a provider it has no key for, and an unknown name", () => {
+    process.env.MARKET_PROVIDER = "finnhub";
+    expect(() => createMarketProvider()).toThrow(/MARKET_API_KEY/);
+    process.env.MARKET_PROVIDER = "typo";
+    expect(() => createMarketProvider()).toThrow(/MARKET_PROVIDER/);
+  });
+
+  it("requires an https endpoint from configuration rather than hardcoding one", () => {
+    process.env.MARKET_API_KEY = "finnhub-key";
+    expect(() => createMarketProvider()).toThrow(/MARKET_API_BASE/);
+    process.env.MARKET_API_BASE = "http://finnhub.io/api/v1";
+    expect(() => createMarketProvider()).toThrow(/https/);
+  });
+
+  it("maps a Finnhub quote and sends the token as a header, not a query parameter", async () => {
+    configureFinnhub();
+    const fetchMock = stubFinnhub(FINNHUB_QUOTE);
+
+    expect(await createMarketProvider().quote("AAPL")).toEqual({
+      ticker: "AAPL",
+      price: 261.74,
+      change: 0.06,
+      changePercent: 0.0229,
+      previousClose: 261.68,
+      asOf: "2020-02-25T14:30:00.000Z",
+      source: "finnhub",
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://finnhub.io/api/v1/quote?symbol=AAPL");
+    expect(url).not.toContain("finnhub-key");
+    expect((init.headers as Record<string, string>)["X-Finnhub-Token"]).toBe("finnhub-key");
+    expect(init.redirect).toBe("error");
+  });
+
+  // Finnhub answers an unknown Ticker with a 200 and zeroes, so the zero is the 404.
+  it("reads a zeroed Finnhub response as no quote, and a failure as a throw", async () => {
+    configureFinnhub();
+    stubFinnhub({ c: 0, d: null, dp: null, h: 0, l: 0, o: 0, pc: 0, t: 0 });
+    expect(await createMarketProvider().quote("NOTATICKER")).toBeNull();
+
+    stubFinnhub({}, false);
+    await expect(createMarketProvider().quote("AAPL")).rejects.toThrow(/429/);
+  });
+
+  it("answers deterministically from the Mock, and differently per Ticker", async () => {
+    const mock = createMarketProvider();
+    const first = await mock.quote("AAPL");
+    expect(await mock.quote("AAPL")).toEqual(first);
+    expect(first?.source).toBe("mock");
+    expect(first?.price).toBeGreaterThan(0);
+    expect((await mock.quote("MSFT"))?.price).not.toBe(first?.price);
+    // The day's move has to be consistent with the close a panel draws it against.
+    expect(first?.price).toBeCloseTo((first?.previousClose ?? 0) + (first?.change ?? 0), 1);
+  });
+
+  it("serves a cached quote instead of calling the provider again", async () => {
+    configureFinnhub();
+    const redis = fakeRedis();
+    setCacheClientForTests(redis);
+    const fetchMock = stubFinnhub(FINNHUB_QUOTE);
+
+    expect((await quote("aapl"))?.price).toBe(261.74);
+    expect((await quote("AAPL"))?.price).toBe(261.74);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(redis.values.has("tessera:quote:v1:AAPL")).toBe(true);
+    expect(redis.ttl).toBe(60);
+
+    process.env.MARKET_QUOTE_CACHE_TTL_SECONDS = "5";
+    await quote("MSFT");
+    expect(redis.ttl).toBe(5);
+  });
+
+  // A Ticker nothing trades under is an answer, and re-asking it on every page read
+  // would spend the free tier's whole budget on a row that will never resolve.
+  it("caches a confirmed-unknown Ticker but never an outage", async () => {
+    configureFinnhub();
+    setCacheClientForTests(fakeRedis());
+    const unknown = stubFinnhub({ c: 0, d: null, dp: null, h: 0, l: 0, o: 0, pc: 0, t: 0 });
+    expect(await quote("ZZZZ")).toBeNull();
+    expect(await quote("ZZZZ")).toBeNull();
+    expect(unknown).toHaveBeenCalledOnce();
+
+    const failing = stubFinnhub({}, false);
+    expect(await quote("AAPL")).toBeNull();
+    expect(await quote("AAPL")).toBeNull();
+    expect(failing).toHaveBeenCalledTimes(2);
+  });
+
+  it("lets a misconfiguration throw rather than degrade into an empty panel", async () => {
+    process.env.MARKET_PROVIDER = "finnhub";
+    process.env.MARKET_API_KEY = "finnhub-key";
+    process.env.MARKET_API_BASE = "http://finnhub.io/api/v1";
+    await expect(quote("AAPL")).rejects.toThrow(/https/);
+  });
+
+  it("refuses a string that is not a Ticker before it reaches a provider or a key", async () => {
+    configureFinnhub();
+    const fetchMock = stubFinnhub(FINNHUB_QUOTE);
+    for (const bad of ["", "  ", "AAPL; DROP", "TOOLONGSYMBOL", "../../etc", "9AAPL"]) {
+      expect(await quote(bad)).toBeNull();
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
