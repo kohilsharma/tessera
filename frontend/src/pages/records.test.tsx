@@ -358,6 +358,32 @@ function renderStoryWithAnalysis(produced: StoryAnalysis) {
 }
 
 describe("Story detail — the analysis", () => {
+  it("reads an existing analysis on render instead of asking again", async () => {
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path.includes("/auth/me")) return jsonResponse({ id: "u2", email: "s@b.c", role: "student", colorMode: "light" });
+      if (path.includes("/analysis") && !init?.method) return jsonResponse(analysis);
+      return storyGet(input);
+    });
+
+    renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
+
+    expect(await screen.findByText(analysis.claims[0].text)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request analysis" })).not.toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.some(([input, init]) => String(input).includes("/analysis") && !init?.method)).toBe(true);
+  });
+
+  it("states when a repeated request reused the stored analysis", async () => {
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (init?.method === "POST") return jsonResponse({ ...analysis, reused: true });
+      return String(input).includes("/auth/me") ? jsonResponse({ id: "u2", email: "s@b.c", role: "student", colorMode: "light" }) : storyGet(input);
+    });
+    renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Request analysis" }));
+    expect(await screen.findByText("This analysis was reused; it was not regenerated.")).toBeInTheDocument();
+  });
+
   it("is asked for, then groups its claims by kind with a citation on each", async () => {
     renderStoryWithAnalysis(analysis);
 

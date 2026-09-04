@@ -871,3 +871,17 @@ Verification: backend watchlist API coverage plus market/provider tests pass; fr
 Story-detail suites pass; both package builds pass. Full frontend suite: 268 passing. Full backend
 suite: 577 passing, with the pre-existing clustering backlog timeout and Readability chunked-response
 timeout failures unrelated to this ticket.
+
+**#93 — Read a Story's existing analysis instead of re-requesting it.** Added a lens-aware
+`GET /stories/:id/analysis` that returns the latest completed GenerationRun through the existing
+`loadGenerationView` seam, or `null` when no completed run exists. Student and Investor lenses remain
+derived from role; Admins must provide a valid `lens` query and readers cannot override theirs.
+Story detail now loads analysis with React Query, so the result remains in the shared cache across
+navigation, while POST still owns generation and updates that cache on success. Reused POST responses
+are rendered explicitly as “This analysis was reused; it was not regenerated.”
+
+Verification: focused generation API tests cover empty/read/lens rules; Story-detail tests cover
+render-time reads and reused messaging. Frontend typecheck/build and full suite pass (270 tests).
+Backend focused generation tests pass; full suite reaches 578 passing with three pre-existing timing
+flakes in clustering and Readability, plus the repository's unrelated strict `hardening.test.ts`
+typecheck error.

@@ -1067,6 +1067,14 @@ export function requestStoryAnalysis(storyId: string, lens?: GenerationLens): Pr
   );
 }
 
+export async function getStoryAnalysis(storyId: string, lens?: GenerationLens): Promise<StoryAnalysis | null> {
+  const data = await getJson<Analysis | null>(
+    `/api/v1/stories/${storyId}/analysis${toQueryString({ lens })}`,
+    "Could not load this Story's existing analysis",
+  );
+  return data && "status" in data ? { ...data, reused: false } : null;
+}
+
 // #52: the merge. Unlike the run trigger this is not an enqueue — the Stories are
 // one Story by the time it answers, so what comes back is what it did.
 export type StoryMerge = { survivorStoryId: string; mergedStoryId: string; movedArticles: number };

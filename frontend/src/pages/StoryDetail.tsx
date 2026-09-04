@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
@@ -6,6 +6,7 @@ import {
   getMe,
   getStories,
   getStory,
+  getStoryAnalysis,
   getStoryTimeline,
   LENS_LABELS,
   requestStoryAnalysis,
@@ -104,6 +105,7 @@ const UNAVAILABLE: Record<GenerationFailureCode, string> = {
 // body. Everything shaped here is shared — see components/recordArchetype.
 export default function StoryDetail() {
   const { id } = useParams();
+  const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["story", id], queryFn: () => getStory(id!), enabled: !!id });
   // Read from the same cache the shell's identity menu fills, so this costs no extra
   // request: an Admin is the one caller who has to say which Lens they are reading
@@ -120,19 +122,29 @@ export default function StoryDetail() {
   });
   const isAdmin = me.data?.role === "admin";
   const [adminLens, setAdminLens] = useState<GenerationLens>("student_context");
+  const analysisKey = ["story-analysis", id, isAdmin ? adminLens : me.data?.role];
+  const existingAnalysis = useQuery({
+    queryKey: analysisKey,
+    queryFn: () => getStoryAnalysis(id!, isAdmin ? adminLens : undefined),
+    enabled: !!id && ["student", "investor", "admin"].includes(me.data?.role ?? ""),
+  });
   // A mutation, not a query: asking for an analysis may spend money and create a
   // run, so it happens when a reader asks and never on render. Repeating it is
   // cheap — the backend answers a second identical request with the run it already
   // has — but that is the backend's decision to make, not a reason to poll it.
   const analysis = useMutation({
     mutationFn: () => requestStoryAnalysis(id!, isAdmin ? adminLens : undefined),
+    onSuccess: (data) => queryClient.setQueryData(analysisKey, data),
   });
+  const produced = analysis.data && (!isAdmin || analysis.data.lens === adminLens)
+    ? analysis.data
+    : existingAnalysis.data ?? undefined;
   const navigate = useNavigate();
   // #55: the ownership loop. Saving is creating a Brief, so it lands the reader on the
   // Brief they now own — the analysis is theirs from here, and stays as it is while
   // this Story goes on being reported.
   const save = useMutation({
-    mutationFn: () => saveAnalysisToBrief(analysis.data!.id),
+    mutationFn: () => saveAnalysisToBrief(analysis.data?.id ?? existingAnalysis.data!.id),
     onSuccess: (brief) => navigate(`/briefs/${brief.id}`),
   });
   const marketRead = useMutation({ mutationFn: () => requestStoryMarketRead(id!) });
@@ -155,7 +167,6 @@ export default function StoryDetail() {
     );
 
   const story = query.data;
-  const produced = analysis.data;
   const completed = produced?.status === "completed";
 
   return (
@@ -214,6 +225,10 @@ export default function StoryDetail() {
       {/* The flagship, on the record it analyses (#53). Above the Articles, because
           the analysis is what a reader came for and the Articles are what it cites. */}
       <RecordSection heading="Analysis">
+        {existingAnalysis.isPending && !analysis.isPending && <PendingState>Checking for an existing analysis…</PendingState>}
+        {existingAnalysis.isError && (
+          <ErrorState>Could not load this Story's existing analysis: {(existingAnalysis.error as Error).message}</ErrorState>
+        )}
         {!completed && (
           <>
             <p className="record-prose">
@@ -263,6 +278,7 @@ export default function StoryDetail() {
           ) : (
             <>
               <AnalysisRegister analysis={produced} />
+              {produced.reused && <p role="status">This analysis was reused; it was not regenerated.</p>}
               {/* Offered to the two roles that own Briefs, and to nobody else: an
                   Admin owns no artefacts (ADR-0004), so the API refuses them this
                   exactly as it refuses them a Brief. Waits for the identity to

@@ -792,6 +792,48 @@ describe("citation validation", () => {
 });
 
 describe("reuse", () => {
+  it("reads the latest completed analysis for the reader's Lens, or null when absent", async () => {
+    const { story } = await twoPublisherStory();
+    const student = await tokenFor("student");
+
+    const before = await request(app())
+      .get(`/api/v1/stories/${story.id}/analysis`)
+      .set("Authorization", `Bearer ${student}`);
+    expect(before.status).toBe(200);
+    expect(before.body).toBeNull();
+
+    answering(publishable(["A1", "A2"]));
+    const created = await requestAnalysis(story.id, student);
+    const after = await request(app())
+      .get(`/api/v1/stories/${story.id}/analysis`)
+      .set("Authorization", `Bearer ${student}`);
+    expect(after.status).toBe(200);
+    expect(after.body.id).toBe(created.body.id);
+    expect(after.body).not.toHaveProperty("reused");
+    expect(after.body.claims).toEqual(created.body.claims);
+  });
+
+  it("derives a reader's Lens and requires one explicitly for Admins", async () => {
+    const { story } = await twoPublisherStory();
+    const student = await tokenFor("student");
+    const admin = await tokenFor("admin");
+
+    const refused = await request(app())
+      .get(`/api/v1/stories/${story.id}/analysis?lens=investor_implication`)
+      .set("Authorization", `Bearer ${student}`);
+    expect(refused.status).toBe(422);
+
+    const missing = await request(app())
+      .get(`/api/v1/stories/${story.id}/analysis`)
+      .set("Authorization", `Bearer ${admin}`);
+    expect(missing.status).toBe(422);
+
+    const invalid = await request(app())
+      .get(`/api/v1/stories/${story.id}/analysis?lens=not-a-lens`)
+      .set("Authorization", `Bearer ${admin}`);
+    expect(invalid.status).toBe(422);
+  });
+
   it("returns the existing run rather than calling the model again", async () => {
     const { story } = await twoPublisherStory();
     const token = await tokenFor("student");
