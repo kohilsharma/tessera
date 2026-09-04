@@ -581,3 +581,64 @@ the existing 720/560px breakpoints, and keeps long registers bounded. Added a fo
 interaction test. Frontend verification: **262 tests across 18 files**, `npm run build`, and the
 Impeccable detector all pass.
 The non-Student route now renders the shared Refused state before any card query, keeping all four route states distinct.
+
+**#85 — Publisher leaning, reproduced from AllSides.** `Publisher` gains a second classification
+axis and its first that is somebody else's judgement rather than Tessera's: `leaning` (AllSides'
+five-point vocabulary, stored as they publish it) plus `leaningSource`. ADR-0035 records the
+decision and the reasoning that reconciles it with the retired design system's objection — a leaning
+is *reproduced*, never inferred, so it is a cited claim about a publisher and the same shape as
+everything else the product displays.
+
+The invariant is structural rather than conventional. Three CHECK constraints: the vocabulary is
+pinned, `("leaning" IS NULL) = ("leaningSource" IS NULL)` so half a claim cannot be stored, and
+`leaningSource` is limited to raters Tessera reproduces — without that third one the pairing is
+satisfied by citing ourselves, which is an inferred verdict wearing a citation as a disguise and
+exactly what the ticket forbids. `toPublicLeaning` is the one shape a rating leaves the API in and carries
+the source *inside* the value rather than beside it, so no surface can arrange the parts into a
+verdict with nobody's name on it — a row whose source key is unrecognised reads as unrated instead.
+`leaningFor(domain)` in `backend/src/lib/publisherLeaning.ts` is the single writer, matching on the
+dot boundary and the longest rated suffix so `edition.cnn.com` inherits `cnn.com`'s rating while
+`notfoxnews.com` inherits nothing.
+
+Ratings reach publishers by two paths sharing that one function: `resolvePublisher` rates a
+publisher as ingestion discovers it, and a new `seedPublisherLeanings()` pass converges every row a
+database already holds — down as well as up, so a withdrawn rating leaves Tessera too. The migration
+deliberately backfills nothing: restating eighteen third-party claims in SQL would give them a second
+home to drift from, and `npm run seed` is the same catch-up path `AddPublisherTermsClass` used.
+
+The table is eighteen domains, each read off AllSides' own per-source page on 2026-09-04 rather than
+recalled — a remembered rating would be exactly the invented claim about a real outlet the feature
+exists to prevent. Two checks during that reading changed what shipped: **The Guardian is rated
+Left, not Lean Left**, and **AP is Lean Left, not Center**. Spread: 1 left, 7 lean left, 3 center,
+3 lean right, 3 right. Five of the ten seeded RSS feeds resolve to rated outlets and five
+(Ars Technica, NASA, Krebs, ScienceDaily, TechCrunch) do not, so the demo shows both states
+side by side without arranging for it.
+
+Two surfaces show it, and neither can show a rating without its credit. The Admin publishers
+register gains a **Leaning** cell beside Terms, with one attribution line for the register that
+renders nothing when no row carried a rating. The Article record's rights-and-provenance ledger
+gains a **Publisher leaning** entry: the mark, one line saying Tessera reproduces ratings and rates
+no publisher itself, and the licence. The mark is five ticks — the rated one taller *and* coloured
+from `--left --centre --right`, so DESIGN.md §2 rule 3 holds with every colour stripped. Unrated
+ticks take `--quiet` rather than `--rule2`: the scale is what makes the mark legible as a position,
+which is meaning, and §3 measures `--rule2` at 1.49–1.81 against paper — right for a hairline
+between blocks, wrong for a carrier of meaning. The 5→3 collapse onto the spectrum axis is decided
+once at the read seam and served, so #86's spectrum and this mark cannot disagree about which side
+a rating counts on.
+
+One residual is named rather than hidden: the rater's *name* is inside the rating's value and cannot
+be dropped without deleting the rating, but the licence line is a separate component rendered once
+per surface. Both surfaces render it and both are tested; a future third surface could forget it.
+ADR-0035 records that as a convention rather than a constraint.
+
+The frontend pass ran through the `impeccable` skill, and two of its checks changed what shipped:
+the tick scale moved off `--rule2` (1.49–1.81 against paper) onto `--quiet`, and the leaning's
+context line moved out of the global `styles.css` into `primitives.module.css` beside the mark it
+explains, per ADR-0030.
+
+Verification: backend `npm test` and frontend `npm test` + `npm run build` green — 265 frontend
+tests across 18 files, and 10 new backend assertions at the leaning seam plus route, ingestion and
+seed coverage including all three CHECK constraints. The full backend suite is flaky on this
+machine under concurrency and was so before this ticket: the clean tree at `305630e` fails three
+tests across two files under the same command, this branch one, and every one of them passes in
+isolation.

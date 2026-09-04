@@ -164,11 +164,36 @@ export type ConnectorSummary = {
 // per-Publisher rights vocabulary deciding whether text may be served.
 export const TERMS_CLASSES = ["open_metadata", "syndicated_excerpt", "internal_only", "licensed"] as const;
 export type TermsClass = (typeof TERMS_CLASSES)[number];
+// #85: mirrors backend/src/lib/publisherLeaning.ts. CONTEXT.md "Publisher
+// Leaning" — a publisher's placement on a left/centre/right axis, taken from a
+// published third-party rating and never Tessera's own inference. `source` is
+// part of the value rather than a sibling of it, so no surface can render a
+// rating without the credit its licence asks for; `null` where the rater has
+// published nothing about this Publisher, which is the common case.
+export const PUBLISHER_LEANINGS = ["left", "lean_left", "center", "lean_right", "right"] as const;
+export type PublisherLeaning = (typeof PUBLISHER_LEANINGS)[number];
+export type LeaningSource = {
+  name: string;
+  attribution: string;
+  url: string;
+  licence: string;
+  licenceUrl: string;
+};
+export type LeaningRating = {
+  rating: PublisherLeaning;
+  // The rater's own wording. Rendered verbatim: a rating shown under a word they
+  // do not use is a misquote of the only thing entitling us to show it at all.
+  label: string;
+  band: "left" | "centre" | "right";
+  source: LeaningSource;
+};
+
 export type PublisherSummary = {
   id: string;
   name: string;
   domain: string;
   termsClass: TermsClass;
+  leaning: LeaningRating | null;
   articleCount: number;
 };
 
@@ -382,6 +407,9 @@ export type ArticleDetail = {
   analysisTextMode: AnalysisTextMode;
   publishedAt: string;
   publisher: { id: string; name: string; domain: string };
+  // A third party's claim *about* this Publisher rather than a field of Tessera's
+  // record of it, which is why it sits beside `publisher` and not inside it (#85).
+  publisherLeaning: LeaningRating | null;
   story: { id: string; slug: string; title: string };
 };
 

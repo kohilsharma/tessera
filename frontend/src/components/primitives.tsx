@@ -1,6 +1,7 @@
 import React, { type ComponentPropsWithoutRef, type ReactNode } from "react";
 import { ArrowClockwise, LockKey, WarningCircle } from "@phosphor-icons/react";
 import { Button as BaseButton, Input as BaseInput, Select } from "@base-ui-components/react";
+import { PUBLISHER_LEANINGS, type LeaningRating, type LeaningSource } from "../api/client";
 import styles from "./primitives.module.css";
 
 type Archetype = "index" | "record" | "form" | "dashboard";
@@ -53,6 +54,67 @@ export function TextAreaField({ label, ...props }: ComponentPropsWithoutRef<"tex
 
 export function CitationChip({ evidenceId, publisher, href }: { evidenceId: string; publisher: string; href: string }) {
   return <a className={styles.citation} href={href}>{evidenceId} · {publisher}</a>;
+}
+
+// CONTEXT.md "Publisher Leaning" · DESIGN.md §8. A rating is somebody else's
+// published judgement, so the mark is a *position on their five-point scale*
+// rather than a coloured badge: the filled notch says where the outlet sits,
+// the label says it in their words, and the colour only reinforces the side
+// (§2 rule 3 — remove all colour and the reading survives). The rater's name is
+// inside the component, not beside it, so there is no arrangement of these parts
+// that shows a verdict about a real publisher with nobody's name on it.
+export function Leaning({ leaning }: { leaning: LeaningRating | null }) {
+  // Not a blank: raters cover nationally prominent outlets, so most publishers
+  // carry no rating and the honest answer is words, not an empty cell. It names
+  // no rater, because there is no rating here and therefore nobody whose
+  // judgement this is — which is also what keeps the rater's name out of the
+  // component and in the data (ADR-0035).
+  if (!leaning) return <span className={styles.leaningUnrated}>No published rating</span>;
+  return (
+    <span className={styles.leaning}>
+      <span className={styles.leaningScale} data-band={leaning.band} aria-hidden="true">
+        {PUBLISHER_LEANINGS.map((step) => (
+          <span key={step} data-on={step === leaning.rating ? "" : undefined} />
+        ))}
+      </span>
+      <span className={styles.leaningLabel}>{leaning.label}</span>
+      <a
+        className={styles.leaningSource}
+        href={leaning.source.url}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={`${leaning.source.name} media bias ratings`}
+      >
+        {leaning.source.name}
+      </a>
+    </span>
+  );
+}
+
+// The credit the rating's licence asks for, once per surface that shows ratings:
+// the rater's own attribution line and the licence it is published under, both
+// openable. Deduplicated here rather than at each call site, so a page hands over
+// every rating it drew and gets one line per distinct rater back — including none
+// at all when it drew no rating, which is why an unrated page states no licence.
+export function LeaningAttribution({ sources }: { sources: LeaningSource[] }) {
+  const distinct = [...new Map(sources.map((source) => [source.name, source])).values()];
+  if (distinct.length === 0) return null;
+  return (
+    <p className={styles.leaningAttribution}>
+      {distinct.map((source) => (
+        <span key={source.name}>
+          <a href={source.url} target="_blank" rel="noreferrer">
+            {source.attribution}
+          </a>{" "}
+          Licensed under{" "}
+          <a href={source.licenceUrl} target="_blank" rel="noreferrer">
+            {source.licence}
+          </a>
+          .
+        </span>
+      ))}
+    </p>
+  );
 }
 
 export function RolePanel({ role, children }: { role: string; children: ReactNode }) {

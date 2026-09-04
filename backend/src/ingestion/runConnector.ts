@@ -14,6 +14,7 @@ import { GkgAnnotation } from "../entities/GkgAnnotation";
 import { Publisher, TERMS_CLASSES, mayServeText, mayStoreText } from "../entities/Publisher";
 import { PENDING_ASSIGNMENT } from "../lib/storyMembership";
 import { canonicalizeUrl, normalizeTitle, publisherDomain } from "./canonicalUrl";
+import { leaningFor } from "../lib/publisherLeaning";
 import { DOC_MAX_RECORDS, docRequestUrl, parseDocArtList } from "./doc";
 import {
   MAX_CATCH_UP_WINDOWS,
@@ -482,9 +483,21 @@ function fail(reason: string): never {
 // A new Publisher takes the column's `licensed` default (ADR-0032), so its text is
 // both held for analysis and readable by the reader who asks "says who?". Narrowing
 // one is an Admin reclassification, never a code change.
+// A *newly inserted* Publisher also takes whatever AllSides published about it
+// (#85), so one this run discovers first arrives rated rather than waiting for the
+// next `npm run seed` — and unrated, honestly, when AllSides has not rated it,
+// which is the common case out here in the firehose. The insert is `orIgnore`, so
+// a Publisher already held keeps whatever it has and the seed's convergence pass
+// is what catches it up. `leaningFor` is the only writer of these two columns:
+// nothing in ingestion may infer a leaning from what a publisher printed.
 async function resolvePublisher(manager: EntityManager, domain: string, name: string): Promise<Publisher> {
   const publishers = manager.getRepository(Publisher);
-  await publishers.createQueryBuilder().insert().values({ domain, name }).orIgnore().execute();
+  await publishers
+    .createQueryBuilder()
+    .insert()
+    .values({ domain, name, ...leaningFor(domain) })
+    .orIgnore()
+    .execute();
   const publisher = await publishers.findOneByOrFail({ domain });
   // A name that is still just the domain is what GKG leaves behind — it reports no
   // publisher name at all — so the first source that offers a real one replaces

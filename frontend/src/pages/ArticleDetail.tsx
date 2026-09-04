@@ -3,6 +3,8 @@ import { useParams } from "react-router-dom";
 import { getArticle, type AnalysisTextMode } from "../api/client";
 import { RecordMasthead, RecordSection } from "../components/recordArchetype";
 import { PendingState, RetryableError } from "../components/uiStates";
+import { Leaning, LeaningAttribution } from "../components/primitives";
+import leaningStyles from "../components/primitives.module.css";
 
 // CONTEXT.md's Analysis Text Mode, said in words. The raw enum member is the
 // backend's vocabulary, not a statement a reader can act on: `held` completes
@@ -111,6 +113,26 @@ export default function ArticleDetail() {
                 : article.analysisText
                   ? "Tessera classifies this Publisher's text as cleared to show, so the body above is the reporting as Tessera holds it. Publisher, title, date, and link are open metadata."
                   : "Tessera does not classify this Publisher's text as cleared to show, so the body stays inside Tessera for analysis and appears on no page. Publisher, title, date, and link are open metadata."}
+            </dd>
+          </div>
+          {/* CONTEXT.md "Publisher Leaning" (#85). It belongs in this register and
+              nowhere else on the page: like the Terms Class above it, it is a
+              statement about the *source* rather than about this article, and the
+              register is where the reader already comes to ask who is speaking.
+              The rating is reproduced, never computed — which is what lets a
+              product built on "no claim without a citation" show one at all. */}
+          <div>
+            <dt>Publisher leaning</dt>
+            <dd>
+              <Leaning leaning={article.publisherLeaning} />
+              <p className={leaningStyles.leaningNote}>
+                {article.publisherLeaning
+                  ? `Published by ${article.publisherLeaning.source.name} and shown in their words. Tessera reproduces third-party ratings and rates no publisher itself.`
+                  : `No third-party rating has been published for ${article.publisher.name}. Tessera reproduces ratings rather than making them, so it states none here instead of inferring one.`}
+              </p>
+              <LeaningAttribution
+                sources={article.publisherLeaning ? [article.publisherLeaning.source] : []}
+              />
             </dd>
           </div>
           <div>

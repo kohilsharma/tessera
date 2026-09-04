@@ -145,7 +145,29 @@ describe("Admin dashboard", () => {
       },
     ],
     publishers: [
-      { id: "p1", name: "The Ledger", domain: "ledger.example", termsClass: "internal_only", articleCount: 7 },
+      // #85: one rated and one not, because both are ordinary states of this
+      // register — AllSides rates nationally prominent outlets, so an invented
+      // demo domain having no rating is the norm rather than missing data.
+      { id: "p1", name: "The Ledger", domain: "ledger.example", termsClass: "internal_only", articleCount: 7, leaning: null },
+      {
+        id: "p2",
+        name: "Fox News",
+        domain: "foxnews.com",
+        termsClass: "licensed",
+        articleCount: 3,
+        leaning: {
+          rating: "right",
+          label: "Right",
+          band: "right",
+          source: {
+            name: "AllSides",
+            attribution: "AllSides Media Bias Ratings™. AllSides Technologies, Inc. Retrieved September 2026.",
+            url: "https://www.allsides.com/media-bias/media-bias-ratings",
+            licence: "CC BY-NC 4.0",
+            licenceUrl: "https://creativecommons.org/licenses/by-nc/4.0/",
+          },
+        },
+      },
     ],
     ...overrides,
   });
@@ -289,6 +311,15 @@ describe("Admin dashboard", () => {
     // Story 20: the Terms Class sits beside the article count, so an operator can
     // see which sources are cleared to serve text (#40).
     expect(within(publishers).getByText("Internal only")).toBeInTheDocument();
+    // #85: the second axis, and the one that is somebody else's judgement. Both
+    // states read as statements — an unrated publisher says so rather than
+    // leaving the operator to read a blank cell as a rating of zero.
+    expect(within(publishers).getByText("Right")).toBeInTheDocument();
+    expect(within(publishers).getByText("No published rating")).toBeInTheDocument();
+    // The credit the ratings are licensed under, once for the register that shows
+    // them: a rating and its attribution ship together or not at all (ADR-0035).
+    expect(within(publishers).getByText(/AllSides Media Bias Ratings/)).toBeInTheDocument();
+    expect(within(publishers).getByRole("link", { name: "CC BY-NC 4.0" })).toBeInTheDocument();
   });
 
   // #39: the ingestion panel across the four shared UI states. Loading and error

@@ -264,6 +264,11 @@ describe("runConnector over an RSS feed", () => {
       // held for analysis *and* readable — the reader who asks "says who?" gets an
       // answer without an Admin classifying anything first.
       expect(article.publisher.termsClass).toBe("licensed");
+      // #85: a publisher a connector discovers arrives carrying whatever AllSides
+      // published about it, so a rating does not wait for the next `npm run seed`.
+      // Read, never inferred — nothing in ingestion looks at what NPR printed.
+      expect(article.publisher.leaning).toBe("lean_left");
+      expect(article.publisher.leaningSource).toBe("allsides");
     }
 
     // content:encoded is HTML in a CDATA block: what lands is the text, not the
@@ -644,6 +649,11 @@ describe("runConnector over a GKG window", () => {
       expect(article.tone).not.toBeNull();
       // Auto-created and `licensed`, exactly as for RSS (ADR-0032).
       expect(article.publisher.termsClass).toBe("licensed");
+      // #85: none of the four regional outlets in this window is on AllSides'
+      // chart, so all four stay unrated. This is the firehose's normal state and
+      // the one ingestion must not paper over — a leaning is only ever *read*.
+      expect(article.publisher.leaning).toBeNull();
+      expect(article.publisher.leaningSource).toBeNull();
     }
     // One Publisher per GKG source domain, even when the document is served from
     // a more specific host.

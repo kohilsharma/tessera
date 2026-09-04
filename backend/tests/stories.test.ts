@@ -543,6 +543,10 @@ describe("GET /api/v1/articles/:id", () => {
       title: "Alpha, from Publisher A",
       analysisText: "Alpha coverage from Publisher A.",
       publisher: { name: "Publisher A", domain: "publisher-a.example" },
+      // #85: an invented fixture domain has no published AllSides rating, and the
+      // record says so. A rating is only ever a third party's claim, so "we have
+      // none" is the honest answer rather than a gap for the page to fill.
+      publisherLeaning: null,
       story: { title: "Story Alpha" },
     });
   });

@@ -76,10 +76,26 @@ function renderStory(overrides: Partial<Timeline> = {}) {
   return renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
 }
 
+// #85: the fixture Publisher is unrated, which is the common case — AllSides
+// rates nationally prominent outlets, and most of what ingestion finds is not one.
 const articleRecord: ArticleRecord = {
   ...article,
   analysisText: "The pilot line is scheduled for 2027.",
+  publisherLeaning: null,
   story: { id: "s1", slug: story.slug, title: story.title },
+};
+
+const allSidesRating: NonNullable<ArticleRecord["publisherLeaning"]> = {
+  rating: "lean_left",
+  label: "Lean Left",
+  band: "left",
+  source: {
+    name: "AllSides",
+    attribution: "AllSides Media Bias Ratings™. AllSides Technologies, Inc. Retrieved September 2026.",
+    url: "https://www.allsides.com/media-bias/media-bias-ratings",
+    licence: "CC BY-NC 4.0",
+    licenceUrl: "https://creativecommons.org/licenses/by-nc/4.0/",
+  },
 };
 
 function renderArticle(overrides: Partial<ArticleRecord> = {}) {
@@ -627,6 +643,41 @@ describe("Article detail — the record's own terms", () => {
     renderArticle({ analysisTextMode: "syndicated_wire" as ArticleRecord["analysisTextMode"] });
 
     expect(await screen.findByText("syndicated_wire")).toBeInTheDocument();
+  });
+
+  // #85 / ADR-0035. The whole justification for showing a leaning is that it is
+  // somebody else's published claim, so the credit is not decoration on it — it is
+  // the thing that makes it showable. These two tests are what stops a later
+  // restyle from separating them.
+  it("shows a Publisher's leaning in the rater's own words, with the rater named", async () => {
+    renderArticle({ publisherLeaning: allSidesRating });
+
+    expect(await screen.findByText("Lean Left")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "AllSides media bias ratings" })).toHaveAttribute(
+      "href",
+      allSidesRating.source.url,
+    );
+    expect(screen.getByText(/rates no publisher itself/)).toBeInTheDocument();
+  });
+
+  it("carries the rating's licence wherever the rating is", async () => {
+    renderArticle({ publisherLeaning: allSidesRating });
+
+    expect(await screen.findByText(/AllSides Media Bias Ratings/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "CC BY-NC 4.0" })).toHaveAttribute(
+      "href",
+      allSidesRating.source.licenceUrl,
+    );
+  });
+
+  it("states an unrated Publisher as unrated, and claims no licence it is not using", async () => {
+    renderArticle();
+
+    // The honest empty state: no rating exists, so none is implied — and with no
+    // rating on the page there is nothing to attribute either.
+    expect(await screen.findByText("No published rating")).toBeInTheDocument();
+    expect(screen.getByText(/reproduces ratings rather than making them/)).toBeInTheDocument();
+    expect(screen.queryByText(/CC BY-NC/)).not.toBeInTheDocument();
   });
 
   it("goes back to its parent Story, not the Stories index", async () => {

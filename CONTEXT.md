@@ -193,7 +193,10 @@ Terms are canonical: use these words in code, docs, and conversation.
   taken from a **published third-party rating** (AllSides, CC BY-NC 4.0) and always displayed with
   its source named. It is a *cited claim about a publisher*, never Tessera's own inference — which
   is what lets the product show it at all. A publisher with no rating is stated as unrated, never
-  guessed.
+  guessed — the common case, since the rater rates nationally prominent outlets and the Curated
+  Corpus's publishers are invented. Stored in the rater's own five-point vocabulary and collapsed
+  onto the three-way axis once, at the read seam, so every surface that draws it counts the same
+  rating on the same side. (ADR-0035)
 
 - **Coverage Spectrum** — how one Story's accepted reporting distributes across Leanings. Counted
   over Articles, not Publishers, so five reports from one outlet do not read as five viewpoints.

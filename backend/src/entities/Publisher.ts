@@ -27,6 +27,15 @@ export function mayStoreText(_termsClass: TermsClass): boolean {
   return true;
 }
 
+// CONTEXT.md "Publisher Leaning" (ADR-0035): AllSides' published five-point
+// vocabulary, stored exactly as they publish it rather than collapsed onto
+// DESIGN.md's three-way `--left --centre --right` axis. Collapsing at rest would
+// make Tessera say "Left" where AllSides said "Lean Left" — a misquote of the
+// only thing that entitles the product to show a leaning at all. `center` is
+// AllSides' spelling of their own rating; `--centre` stays the token's name.
+export const PUBLISHER_LEANINGS = ["left", "lean_left", "center", "lean_right", "right"] as const;
+export type PublisherLeaning = (typeof PUBLISHER_LEANINGS)[number];
+
 @Entity("publishers")
 export class Publisher {
   @PrimaryGeneratedColumn("uuid")
@@ -45,6 +54,18 @@ export class Publisher {
   // who?". Reclassifying one by hand is what narrows it again.
   @Column({ type: "varchar", default: "licensed" })
   termsClass!: TermsClass;
+
+  // A rating and the key of whoever published it, always both or neither, and the
+  // key limited to raters Tessera reproduces — two CHECK constraints enforce both
+  // (migration 1755769000000), so "never model-inferred" is a rule the database
+  // keeps rather than a promise this comment makes. Null is the honest and common
+  // state: AllSides rates nationally prominent outlets, so most of what a
+  // connector discovers has no published rating. `leaningFor()` is the one writer.
+  @Column({ type: "varchar", nullable: true })
+  leaning!: PublisherLeaning | null;
+
+  @Column({ type: "varchar", nullable: true })
+  leaningSource!: string | null;
 
   @OneToMany(() => Article, (article) => article.publisher)
   articles!: Article[];

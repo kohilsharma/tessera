@@ -15,6 +15,7 @@ import {
   RegisterRow,
 } from "../components/dashboardArchetype";
 import { EmptyState, EntryList, ErrorState, PendingState } from "../components/uiStates";
+import { Leaning, LeaningAttribution } from "../components/primitives";
 import {
   ClusteringReviewRegister,
   ClusteringRunsRegister,
@@ -228,12 +229,24 @@ export default function AdminDashboard() {
                       meta={[
                         { term: "Domain", value: <code>{publisher.domain}</code> },
                         { term: "Terms", value: TERMS_CLASS_LABEL[publisher.termsClass] },
+                        // #85: the second classification axis, and the first that
+                        // is somebody else's judgement rather than ours. Beside
+                        // Terms because an operator reads both as facts about the
+                        // source, not as anything Tessera concluded about it.
+                        { term: "Leaning", value: <Leaning leaning={publisher.leaning} /> },
                         { term: "Articles", value: publisher.articleCount },
                       ]}
                     />
                   ))}
                 </EntryList>
               )}
+              {/* One credit for the whole register rather than one per row: every
+                  rating here is a cited claim, and the licence asks for the rater
+                  named where the ratings are. Renders nothing when no row on this
+                  page carried a rating (ADR-0035). */}
+              <LeaningAttribution
+                sources={data.publishers.flatMap((publisher) => (publisher.leaning ? [publisher.leaning.source] : []))}
+              />
             </DashboardRegister>
 
             <DashboardOnward

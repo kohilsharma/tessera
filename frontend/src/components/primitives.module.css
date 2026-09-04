@@ -146,6 +146,36 @@
 .meter { height: 6px; overflow: hidden; background: var(--rule); }
 .meter > span { display: block; width: var(--share, 0%); height: 100%; background: var(--agree); }
 
+/* Publisher Leaning (#85). Five ticks because the rater publishes five ratings,
+   and the rated one is *taller* as well as coloured: DESIGN.md §2 rule 3, so the
+   reading survives with every colour stripped. The unrated ticks take --quiet
+   rather than --rule2 — the scale is what makes the mark legible as a position,
+   which is meaning, and --rule2 measures 1.5:1 against paper (§3) where a
+   hairline between blocks belongs but a carrier of meaning does not. */
+.leaning { display: inline-flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; }
+.leaningScale { display: inline-flex; align-items: end; gap: var(--s-1); flex: none; height: 16px; }
+.leaningScale > span { width: 3px; height: 9px; background: var(--quiet); }
+.leaningScale > span[data-on] { height: 16px; }
+.leaningScale[data-band="left"] > span[data-on] { background: var(--left); }
+.leaningScale[data-band="centre"] > span[data-on] { background: var(--centre); }
+.leaningScale[data-band="right"] > span[data-on] { background: var(--right); }
+.leaningLabel { color: var(--ink); font-weight: 700; }
+.leaningSource,
+.leaningAttribution a { color: var(--quiet); text-underline-offset: 3px; }
+.leaningSource:hover,
+.leaningAttribution a:hover { color: var(--ink); }
+.leaningUnrated { color: var(--quiet); }
+/* The attribution is a licence condition, so it is set at reading size rather
+   than shrunk to a footnote: text nobody can read is not displayed. --t-small,
+   not --t-meta — §4's metadata step is for values beside a label, and this is a
+   sentence. */
+.leaningAttribution { margin: var(--s-3) 0 0; max-width: 68ch; color: var(--quiet); font: var(--t-small)/1.5 var(--font-ui); }
+
+/* The line of context under a leaning: what the rating is, then why it reads the
+   way it does. Lives here beside the mark it explains rather than in the global
+   sheet, per ADR-0030 — one feature, one stylesheet. */
+.leaningNote { margin: var(--s-2) 0 0; color: var(--quiet); }
+
 .rolePanel { border: 1px solid var(--rule2); border-radius: var(--radius); background: var(--paper2); padding: var(--s-5); }
 .rolePanelLabel { display: flex; align-items: center; gap: var(--s-2); margin: 0 0 var(--s-3); color: var(--quiet); font: var(--t-micro)/1.2 var(--font-mono); text-transform: uppercase; }
 

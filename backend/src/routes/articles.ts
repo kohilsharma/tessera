@@ -5,6 +5,7 @@ import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
 import { mayServeText } from "../entities/Publisher";
 import { toPublicArticle } from "../lib/articleView";
+import { toPublicLeaning } from "../lib/publisherLeaning";
 import { ACCEPTED_ASSIGNMENT } from "../lib/storyMembership";
 import { isUuid } from "../lib/uuid";
 
@@ -47,6 +48,12 @@ articlesRouter.get(
       analysisText: mayServeText(article.publisher.termsClass, article.analysisTextMode)
         ? article.analysisText
         : null,
+      // CONTEXT.md "Publisher Leaning" (#85). A top-level key rather than a field
+      // inside `publisher`: it is a third party's claim *about* this publisher,
+      // not a property of Tessera's record of it, and the shape says so. Null
+      // where AllSides has published no rating — the reader is told that, never
+      // shown a guess.
+      publisherLeaning: toPublicLeaning(article.publisher),
       story: { id: article.story.id, slug: article.story.slug, title: article.story.title },
     });
   }),

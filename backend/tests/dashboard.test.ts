@@ -12,6 +12,7 @@ import { Story } from "../src/entities/Story";
 import { signToken } from "../src/auth/jwt";
 import { EMBEDDING_DIMENSIONS } from "../src/embeddings/EmbeddingProvider";
 import { toVectorLiteral } from "../src/embeddings/pgvector";
+import { leaningFor } from "../src/lib/publisherLeaning";
 import { setupTestDb } from "./setupTestDb";
 
 setupTestDb();
@@ -304,7 +305,32 @@ describe("dashboard RBAC", () => {
       // Story 20: an operator can see which sources are cleared, and this one is
       // at the default — `licensed` since ADR-0032.
       termsClass: "licensed",
+      // #85: an invented demo domain is one AllSides has not rated, and the
+      // console says so rather than filling the gap in.
+      leaning: null,
       articleCount: 0,
+    });
+  });
+
+  // #85 / ADR-0035. The rating is a cited claim about a publisher, so what the
+  // console receives is the rating *and* its credit — never the bare verdict.
+  it("serves an Admin a rated publisher with the source that published the rating", async () => {
+    const token = await createAdminToken("admin-ratings@example.com");
+    const publisher = await AppDataSource.getRepository(Publisher).save({
+      name: "Fox News",
+      domain: "foxnews.com",
+      ...leaningFor("foxnews.com"),
+    });
+
+    const res = await request(app()).get("/api/v1/dashboard/admin").set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    const served = res.body.publishers.find((row: { id: string }) => row.id === publisher.id);
+    expect(served.leaning).toEqual({
+      rating: "right",
+      label: "Right",
+      band: "right",
+      source: expect.objectContaining({ name: "AllSides", licence: "CC BY-NC 4.0" }),
     });
   });
 });

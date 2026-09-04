@@ -19,6 +19,7 @@ import { SEED_CONNECTORS, SEED_PUBLISHERS, SEED_STORIES } from "./seedData/corpu
 import { seedCoverImagePng } from "./seedData/coverImage";
 import { LocalDiskFileStorageProvider } from "./storage/LocalDiskFileStorageProvider";
 import { invalidateComparableStoriesCache } from "./generation/evidence";
+import { leaningFor } from "./lib/publisherLeaning";
 
 // ADR-0015: `npm run seed` so the demo is never empty. Admin is deliberately not
 // registrable through /auth/register (it is assigned, not self-served), so this
@@ -247,6 +248,30 @@ async function seedBrief(): Promise<void> {
   console.log(`+ brief "${SEED_BRIEF_TITLE}" (${attached.length} articles, cover image)`);
 }
 
+// #85 / ADR-0035. AllSides' ratings resolve onto whatever Publishers the database
+// actually holds, which is why this is a convergence pass over every row rather
+// than a fixture list: publishers arrive from connectors, not from this file.
+// On a fresh `npm run seed` nothing is rated — the Curated Corpus's publishers are
+// invented, so they are unrated by construction and the demo shows the honest
+// unrated state beside the rated one once live ingestion has run (spec §3).
+// It converges *down* as well as up, so a rating AllSides has withdrawn leaves
+// Tessera too. Safe because no operator path sets a leaning by hand: `leaningFor`
+// is the only writer, here and in `resolvePublisher`.
+async function seedPublisherLeanings(): Promise<void> {
+  const publishers = AppDataSource.getRepository(Publisher);
+  let converged = 0;
+  for (const publisher of await publishers.find()) {
+    const published = leaningFor(publisher.domain);
+    const leaning = published?.leaning ?? null;
+    const leaningSource = published?.leaningSource ?? null;
+    if (leaning === publisher.leaning && leaningSource === publisher.leaningSource) continue;
+    await publishers.update({ id: publisher.id }, { leaning, leaningSource });
+    console.log(`~ publisher ${publisher.domain} leaning -> ${leaning ?? "unrated"}`);
+    converged += 1;
+  }
+  if (converged === 0) console.log("= publisher leanings already converged");
+}
+
 // #62. The Curated Corpus's own GKG Annotations. A separate pass rather than part
 // of seedCorpus, because seedCorpus skips a Story it already holds — a database
 // seeded before this ticket would otherwise never get them, the same reason the
@@ -274,6 +299,7 @@ async function seedAnnotations(): Promise<void> {
 export async function seedAll(): Promise<void> {
   await seedUsers();
   await seedCorpus();
+  await seedPublisherLeanings();
   await seedAnnotations();
   await seedConnectors();
   await seedBrief();

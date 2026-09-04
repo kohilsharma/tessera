@@ -17,6 +17,7 @@ import { requireRole } from "../middleware/requireRole";
 import { MAX_REQUESTED_CLAIMS, MIN_SURVIVING_CLAIMS } from "../generation/config";
 import { comparableStories } from "../generation/evidence";
 import { toPublicIngestionRun } from "../lib/ingestionRunView";
+import { toPublicLeaning } from "../lib/publisherLeaning";
 import { acceptedMembership } from "../lib/storyMembership";
 
 export const dashboardRouter = Router();
@@ -185,6 +186,12 @@ dashboardRouter.get(
         // since ADR-0032, so an operator has to be able to see which sources someone
         // has narrowed and which are still where the connector left them.
         termsClass: publisher.termsClass,
+        // CONTEXT.md "Publisher Leaning" (#85): a third party's published rating,
+        // never Tessera's. Served through `toPublicLeaning` rather than as the two
+        // raw columns, so the credit AllSides' licence asks for travels with the
+        // rating and no console can render one without the other. `null` for a
+        // publisher AllSides has not rated, which is most of them.
+        leaning: toPublicLeaning(publisher),
         articleCount: publisher.articleCount ?? 0,
       })),
     });

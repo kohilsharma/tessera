@@ -3,6 +3,7 @@ import { AppDataSource } from "../src/data-source";
 import { IntelligenceBrief } from "../src/entities/IntelligenceBrief";
 import { User, USER_ROLES } from "../src/entities/User";
 import { Story } from "../src/entities/Story";
+import { Publisher } from "../src/entities/Publisher";
 import { BriefArticle } from "../src/entities/BriefArticle";
 import { IngestionConnector } from "../src/entities/IngestionConnector";
 import { GkgAnnotation } from "../src/entities/GkgAnnotation";
@@ -25,6 +26,62 @@ describe("npm run seed", () => {
 
   beforeAll(async () => {
     await seedAll();
+  });
+
+  // #85 / ADR-0035. Spec §3: on a fresh seed the corpus is fictional, so ratings
+  // resolve only after live ingestion. What must hold either way is that an
+  // unrated publisher reads as unrated rather than as a guess, and that no row
+  // can ever hold a verdict with nobody's name on it.
+  describe("publisher leanings", () => {
+    it("leaves the invented corpus publishers unrated rather than guessing", async () => {
+      const publishers = await AppDataSource.getRepository(Publisher).find();
+      expect(publishers.length).toBeGreaterThan(0);
+      for (const publisher of publishers) {
+        expect(publisher.leaning).toBeNull();
+        expect(publisher.leaningSource).toBeNull();
+      }
+    });
+
+    it("converges a rating onto a real publisher a connector already created", async () => {
+      // The catch-up path the migration names: publishers arrive from connectors,
+      // and a database migrated before this ticket holds them unrated until a
+      // re-seed reads the ratings table over them.
+      const publishers = AppDataSource.getRepository(Publisher);
+      const held = await publishers.save({ name: "The Guardian", domain: "theguardian.com" });
+      expect(held.leaning).toBeNull();
+
+      await seedAll();
+
+      const converged = await publishers.findOneByOrFail({ id: held.id });
+      expect(converged.leaning).toBe("left");
+      expect(converged.leaningSource).toBe("allsides");
+    });
+
+    it("refuses an uncredited or self-credited rating at the schema, not just in code", async () => {
+      // The invariant that makes "always displayed with its source named" true of
+      // the data and not only of the pages: half a claim cannot be stored at all.
+      await expect(
+        AppDataSource.query(
+          `INSERT INTO "publishers" ("name", "domain", "leaning") VALUES ('Unsourced', 'unsourced.example', 'right')`,
+        ),
+      ).rejects.toThrow(/publishers_leaning_sourced_check/);
+      await expect(
+        AppDataSource.query(
+          `INSERT INTO "publishers" ("name", "domain", "leaning", "leaningSource")
+           VALUES ('Invented', 'invented.example', 'hard-left', 'allsides')`,
+        ),
+      ).rejects.toThrow(/publishers_leaning_check/);
+      // And the credit has to name a rater Tessera reproduces. Without this the
+      // pairing above is satisfied by citing ourselves — an inferred verdict
+      // wearing a citation as a disguise, which is the one thing ADR-0035 exists
+      // to make impossible rather than merely discouraged.
+      await expect(
+        AppDataSource.query(
+          `INSERT INTO "publishers" ("name", "domain", "leaning", "leaningSource")
+           VALUES ('Self-cited', 'self-cited.example', 'right', 'tessera')`,
+        ),
+      ).rejects.toThrow(/publishers_leaning_source_check/);
+    });
   });
 
   it("creates a login for all three roles", async () => {
