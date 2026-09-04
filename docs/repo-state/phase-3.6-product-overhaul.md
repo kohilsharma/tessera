@@ -762,3 +762,54 @@ one pre-existing `hardening.test.ts` error. The full backend suite is 549 passin
 `clustering.test.ts` that passes in isolation — the concurrency flake #85 already recorded on this
 machine, unrelated to this seam, which touches no clustering path. No frontend in this ticket, so no
 `impeccable` pass; the market panel is #89.
+
+**#88 — Technical indicators, computed in-house.** `backend/src/market/indicators.ts` holds three
+pure functions over a series of closes, oldest first: `simpleMovingAverage`,
+`relativeStrengthIndex` and `volatility`. The module has **zero imports** — the ticket's "no I/O in
+this module at all" is structural rather than a convention, so it cannot drift into reaching for a
+provider.
+
+**The fixture is the point of this ticket, and it took the longest.** An indicator test that computes
+its expected values with the same algorithm proves only that the code agrees with itself. RSI is
+tested against **Wilder's published 14-period worked example**, reproduced from outside this repo:
+`relativeStrengthIndex` returns 70.464 for its first computed point, matching the published table
+exactly. Getting there surfaced a real detail — the published series is quoted to **two** decimals,
+and at four decimals it cannot be reproduced (max divergence 0.123 against 0.085). The two-decimal
+input matches the first value to the digit and drifts by at most 0.085 over nineteen periods, which
+is the published table's own intermediate rounding carried forward by Wilder's smoothing. The
+volatility fixture is likewise computed independently: six alternating ±10%/−9.09% log returns have a
+sample deviation of 0.104407, annualising to **165.7411%**.
+
+Three decisions inside the arithmetic.
+
+**A flat series reads as RSI 50, not 100.** The usual shortcut — no losses means 100 — would call a
+motionless price extremely overbought, so the no-movement case is answered before the divide. A
+series that only rises is still 100 and one that only falls is still 0; both are tested.
+
+**Volatility is the annualised sample deviation of daily *log* returns.** Log returns because they
+compose additively, which is what makes scaling by √252 valid at all; the sample deviation (n−1)
+because a price history is a sample. Three closes minimum, since two returns are the fewest that have
+a spread between them.
+
+**Every function answers `null` rather than a number it cannot stand behind** — a series shorter than
+the window, a period that is not a positive whole number, or a series with a hole in it. The hole
+case is checked across the **whole series, not just the window**: a vendor row can arrive missing, and
+a `NaN` rendered silently as a number is the failure worth engineering against. A displayed indicator
+is a claim.
+
+**Feed these `adjClose`, never `close`**, and the module says so at the top. Over raw closes a
+2-for-1 split reads as a 50% crash and every indicator downstream inherits it. Measured on the live
+AAPL year: the two SMA-50s differ by 0.17 from **dividends alone**, with no split in the window at
+all.
+
+Checked against real data as well as fixtures — 252 live Tiingo bars for AAPL gave SMA-50 314.08,
+SMA-200 283.17, RSI-14 63.48 and 25.02% volatility, putting the price **4.50% above its 50-day
+average**. Spec §4's own illustrative sentence is "trading 4.4% above its 50-day average", so the
+worked example in the spec and the running code agree to within a decimal.
+
+Verification: 14 assertions in `tests/indicators.test.ts` covering the published RSI fixture and its
+forward smoothing, the rising/falling/flat cases, the annualisation fixture, the monotonicity of
+volatility in swing size, and every refusal — short series, bad period, holed series. Backend suite
+**568 passing**; the one failure is `clustering.test.ts`'s medoid test, now filed as **#107** (a
+Story's name is decided by a random UUID tie-break) rather than left as folklore about concurrency —
+it is unrelated to this ticket, which touches no clustering path.
