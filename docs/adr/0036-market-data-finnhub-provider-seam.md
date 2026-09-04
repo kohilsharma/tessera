@@ -78,14 +78,20 @@ strongest — a market panel looks like a product feature in a way an embedding 
 - `vitest.config.ts` pins `MARKET_*` empty alongside the embedding and synthesis keys, so no test run
   can reach a live provider from a developer's own `.env`. There is no live smoke test for market
   data; if one is added it takes an opt-in flag like `SYNTHESIS_LIVE_SMOKE`.
-- **What this ADR does not settle, and #89 must:** #88's indicators are pure functions over a *price
-  series*, and this seam returns a single quote. Whether that series comes from Finnhub's candle
-  endpoint is **unverified** — their docs and pricing pages render client-side and could not be read
-  on 2026-09-04, and historical OHLCV is the field most vendors move behind a paid plan. #89 must
-  check it against a real key before designing a chart around it, and if it is premium the answer is
-  another free provider behind this same interface, not a paid account. Recording the question
-  unanswered is deliberate: a remembered tier is exactly the kind of claim ADR-0035 refused to make
-  about a publisher.
+- **Finnhub's free tier has no price series, and #89 needs a second provider.** Checked against a
+  real key on 2026-09-04, not recalled: `GET /stock/candle?symbol=AAPL&resolution=D` answers
+  **403 `{"error":"You don't have access to this resource."}`**, while `GET /quote` answers 200 with
+  live data on the same key. So the free tier is real-time quotes *only*, and #88's indicators —
+  pure functions over a price *series* — have nothing here to run on. The decision that follows is
+  #89's and is already constrained by ADR-0033: another free provider behind this same interface,
+  never a paid account. It also means `MarketProvider` grows a second method (a daily series) rather
+  than staying at one, and that a Ticker's quote and its series may come from two different
+  providers — which the `source` field on a value already anticipates.
+- **The quote mapping and the zero-as-404 reading are verified, not assumed.** The same live check
+  returned `{"c":328.21,"d":3.25,"dp":1.0001,"h":330.81,"l":324.11,"o":324.87,"pc":324.96,...}` for a
+  real Ticker, and `{"c":0,"d":null,"dp":null,...}` with **HTTP 200** for a nonexistent one. Decision
+  6's premise is Finnhub's actual behaviour, and `d`/`dp` really do arrive `null` there, which is why
+  they are defaulted rather than trusted.
 - **A null is two things, and #89 has to decide whether that matters.** `quote()` answers `null` for
   a Ticker nothing trades under *and* for a provider that could not be reached. The seam distinguishes
   them internally — that is what decides whether the answer is cached — but does not report which to

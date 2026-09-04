@@ -707,12 +707,19 @@ edits (#89). The seam says **Ticker** throughout, CONTEXT.md's own term, and lea
 belongs: Finnhub's name for the field on the wire. There is no retry loop: retrying into a rate limit spends the budget the cache exists to
 protect, and a 5-second `AbortSignal.timeout` bounds the call.
 
-**What #89 has to check before it designs a chart.** #88's indicators are pure functions over a price
-*series*, and this seam returns a single quote. Whether that series can come from Finnhub's candle
-endpoint is **unverified** — their docs and pricing pages render client-side and could not be read on
-2026-09-04, and historical OHLCV is the field most vendors move behind a paid plan. ADR-0036 records
-the question unanswered rather than guessing at a tier, and names the answer if it is premium: another
-free provider behind this same interface, never a paid account.
+**The open question was checked against a real key the same day, and the answer is the awkward one.**
+`GET /stock/candle?symbol=AAPL&resolution=D` returns **403 `You don't have access to this resource`**
+on the free tier; `GET /quote` returns 200 with live data on the same key. Finnhub free is real-time
+quotes *only*, so #88's indicators have no series to run on and **#89 needs a second provider** —
+another free one behind this same interface, never a paid account (ADR-0033). Two consequences worth
+carrying: `MarketProvider` grows a daily-series method rather than staying at one call, and a Ticker's
+quote and its series may come from different providers, which is exactly what the `source` field on a
+value already anticipates.
+
+The same check verified the two things this seam asserts about Finnhub rather than leaving them
+inferred: a real Ticker returns `{"c":328.21,"d":3.25,"dp":1.0001,...}`, and a nonexistent one returns
+`{"c":0,"d":null,"dp":null,...}` with **HTTP 200** — so the zero really is the 404, and `d`/`dp`
+really do arrive `null`, which is why they are defaulted rather than trusted.
 
 `vitest.config.ts` pins `MARKET_PROVIDER`, `MARKET_API_KEY`, `MARKET_API_BASE` and
 `MARKET_QUOTE_CACHE_TTL_SECONDS` empty beside the embedding and synthesis keys, so no test run reaches
