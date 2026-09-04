@@ -331,8 +331,11 @@ export function evidenceDataMode(selected: SelectedEvidence[]): AnalysisTextMode
 // The freeze itself, before a single token is sent. One transaction, so a set is
 // either whole or absent — a half-written set would be a citation resolving to
 // nothing.
-export async function freezeEvidence(storyId: string, selected: SelectedEvidence[]): Promise<EvidenceSet> {
-  return AppDataSource.transaction(async (manager) => {
+export async function freezeEvidence(storyId: string | null, selected: SelectedEvidence[]): Promise<EvidenceSet> {
+  return AppDataSource.transaction((manager) => freezeEvidenceWith(manager, storyId, selected));
+}
+
+export async function freezeEvidenceWith(manager: EntityManager, storyId: string | null, selected: SelectedEvidence[]): Promise<EvidenceSet> {
     const set = await manager.getRepository(EvidenceSet).save({
       storyId,
       contentHash: evidenceContentHash(selected),
@@ -359,7 +362,6 @@ export async function freezeEvidence(storyId: string, selected: SelectedEvidence
       })),
     );
     return set;
-  });
 }
 
 // v3 §16.5's last rejection: an `articleContentHash` that no longer matches at

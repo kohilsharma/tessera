@@ -915,7 +915,7 @@ export type GenerationFailureCode =
 
 export type Analysis = {
   id: string;
-  storyId: string;
+  storyId: string | null;
   lens: GenerationLens;
   promptVersion: string;
   status: "completed" | "failed";
@@ -1005,7 +1005,7 @@ export type Flashcard = {
   citations: FlashcardCitation[];
   storyId: string;
   storyTitle: string;
-  generationRunId: string;
+  generationRunId: string | null;
   // SM-2's state, as the backend advances it. Shown rather than hidden: a reader
   // deciding how hard a card was is entitled to know it comes back in six days.
   repetitions: number;
@@ -1026,6 +1026,7 @@ export type StudySummary = {
 
 export type StudyDeck = StudySummary & {
   items: Flashcard[];
+  cards?: Flashcard[];
 };
 
 export type FlashcardDeck = {
@@ -1060,4 +1061,25 @@ export function getStudyDeck(): Promise<StudyDeck> {
 
 export function reviewFlashcard(id: string, grade: ReviewGrade): Promise<Flashcard> {
   return sendJson("POST", `/api/v1/flashcards/${id}/reviews`, { grade }, "Could not record this review");
+}
+
+export function getAllFlashcards(): Promise<{ cards: Flashcard[] }> {
+  return getJson("/api/v1/flashcards/all", "Could not load your flashcards");
+}
+
+export function generateFlashcardsFromSearch(input: { q: string; count: 5 | 10 | 20; answerLength: "one_word" | "one_line" | "full" }): Promise<{ cards: Flashcard[] }> {
+  return sendJson("POST", "/api/v1/flashcards/search", input, "Could not generate flashcards");
+}
+
+export function updateFlashcard(id: string, input: { question?: string; answer?: string }): Promise<Flashcard> {
+  return sendJson("PATCH", `/api/v1/flashcards/${id}`, input, "Could not update flashcard");
+}
+
+export async function deleteFlashcard(id: string): Promise<void> {
+  const res = await authFetch(`/api/v1/flashcards/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(await parseErrorMessage(res, "Could not delete flashcard"));
+}
+
+export function getFlashcardHistory(id: string): Promise<{ items: { grade: number; reviewedAt: string }[] }> {
+  return getJson(`/api/v1/flashcards/${id}/history`, "Could not load study history");
 }

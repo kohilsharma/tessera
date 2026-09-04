@@ -16,12 +16,12 @@ export class EvidenceSet {
   @PrimaryGeneratedColumn("uuid")
   id!: string;
 
-  @ManyToOne(() => Story)
+  @ManyToOne(() => Story, { nullable: true })
   @JoinColumn({ name: "storyId" })
-  story!: Story;
+  story!: Story | null;
 
   @Column({ type: "uuid" })
-  storyId!: string;
+  storyId!: string | null;
 
   // The composite hash over this set's rows — each row's evidence id and the hash
   // of the Article's full analysis text, in evidence-id order. Half of ADR-0027's

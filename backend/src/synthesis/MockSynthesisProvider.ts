@@ -28,6 +28,10 @@ export class MockSynthesisProvider implements SynthesisProvider {
         questions: numbers.map((number) => ({ number, question: `[mock] what does claim ${number} state?` })),
       });
     }
+    if (request.task === "flashcard_cards") {
+      const ids = [...request.prompt.matchAll(/\[(A\d+)\]/g)].map((m) => m[1]);
+      return JSON.stringify({ cards: ids.map((id) => ({ question: `[mock] recall ${id}`, answer: `Facts from ${id}`, citations: [id] })) });
+    }
     if (!request.json) return `[mock synthesis] ${request.prompt.slice(0, 120)}`;
     // Echoing the evidence ids found in the prompt keeps the Mock honest about
     // ADR-0002's invariant: a claim carries citations, or it is not a claim.

@@ -18,7 +18,7 @@ export interface SynthesisRequest {
   // a typo is a compile error rather than synthesis-shaped output arriving where a Story
   // name was expected. Optional because a provider test asks for nothing in particular;
   // absent reads as "synthesis".
-  task?: "synthesis" | "story_name" | "flashcard_questions";
+  task?: "synthesis" | "story_name" | "flashcard_questions" | "flashcard_cards";
   // Total budget for the call including retries. A hung endpoint would otherwise
   // hold the worker forever: concurrency is 1, so one stuck request stalls the
   // whole queue (#42).

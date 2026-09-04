@@ -551,3 +551,12 @@ Measured on the live seeded corpus (10 comparable Stories, six reads): uncached 
 still pays the normal computation and populates the key. `backend/tests/cache.test.ts` covers JSON
 round-tripping/TTL, explicit deletion, failing cache clients, malformed payloads, and the comparable-Story miss/hit
 path; backend build and the affected dashboard tests pass.
+
+**#82 — Flashcards own their answer and frozen citations.** Flashcards now carry an answer and
+private citation rows into an immutable EvidenceSet, while cards made from completed analyses are
+backfilled from their existing claims. `POST /flashcards/search` selects accepted Story members
+only, freezes the top 5/10/20 matches, and generates cited cards with one-word, one-line or full
+answer lengths. Students can list every card, open, edit, delete, and inspect review history;
+the existing SM-2 due session and analysis entry point remain intact. The Student study route
+adds search generation controls, an all-cards register, and keyboard grading. Backend and frontend
+builds pass; the existing 19 flashcard tests remain green.

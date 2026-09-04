@@ -29,6 +29,7 @@ import { CreateEntityMergeReview1755764000000 } from "./migrations/1755764000000
 import { RequeueFailedExtractionAttempts1755765000000 } from "./migrations/1755765000000-RequeueFailedExtractionAttempts";
 import { AddUserColorMode1755766000000 } from "./migrations/1755766000000-AddUserColorMode";
 import { RelaxPublisherTermsPolicy1755767000000 } from "./migrations/1755767000000-RelaxPublisherTermsPolicy";
+import { RegroundFlashcards1755768000000 } from "./migrations/1755768000000-RegroundFlashcards";
 import { User } from "./entities/User";
 import { Publisher } from "./entities/Publisher";
 import { Story } from "./entities/Story";
@@ -47,6 +48,7 @@ import { AnalysisClaim } from "./entities/AnalysisClaim";
 import { ClaimEvidence } from "./entities/ClaimEvidence";
 import { PromptTemplate } from "./entities/PromptTemplate";
 import { Flashcard } from "./entities/Flashcard";
+import { FlashcardCitation } from "./entities/FlashcardCitation";
 import { Entity } from "./entities/Entity";
 import { EntityEdge } from "./entities/EntityEdge";
 import { EntityResolutionRun } from "./entities/EntityResolutionRun";
@@ -89,6 +91,7 @@ export const AppDataSource = new DataSource({
     ClaimEvidence,
     PromptTemplate,
     Flashcard,
+    FlashcardCitation,
     Entity,
     EntityEdge,
     EntityResolutionRun,
@@ -125,6 +128,7 @@ export const AppDataSource = new DataSource({
     RequeueFailedExtractionAttempts1755765000000,
     AddUserColorMode1755766000000,
     RelaxPublisherTermsPolicy1755767000000,
+    RegroundFlashcards1755768000000,
   ],
   synchronize: false,
   logging: false,

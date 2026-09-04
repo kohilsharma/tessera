@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
 import Wordmark from "./Wordmark";
 import IdentityMenu from "./IdentityMenu";
+import { Cards } from "@phosphor-icons/react";
 
 const NAV_LINKS = [
   { to: "/stories", label: "Stories" },
@@ -9,6 +10,7 @@ const NAV_LINKS = [
   // retained firehose, so it is a third way into the corpus and not a view of a Story.
   { to: "/graph", label: "Graph" },
   { to: "/briefs", label: "My Briefs" },
+  { to: "/study", label: "Flashcards" },
 ];
 
 // The full chrome for authenticated routes — wordmark, primary nav, identity
@@ -22,7 +24,7 @@ export default function AppShell() {
         <nav className="site-nav" aria-label="Primary navigation">
           {NAV_LINKS.map(({ to, label }) => (
             <NavLink key={to} to={to}>
-              {label}
+              {to === "/study" && <Cards aria-hidden size={16} />} {label}
             </NavLink>
           ))}
         </nav>

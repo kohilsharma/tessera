@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { generateDeck, loadStudyDeck, reviewCard } from "../flashcards/deck";
+import { editCard, deleteCard, generateDeck, loadAllCards, loadCard, loadCardHistory, loadStudyDeck, reviewCard } from "../flashcards/deck";
+import { ANSWER_LENGTHS, CARD_COUNTS, generateSearchDeck, type AnswerLength } from "../flashcards/search";
 import { isReviewGrade, MAX_REVIEW_GRADE, MIN_REVIEW_GRADE } from "../flashcards/sm2";
 import { loadReaderRun } from "../generation/readerRun";
 import { asyncHandler } from "../middleware/asyncHandler";
@@ -47,6 +48,19 @@ flashcardsRouter.post(
   }),
 );
 
+flashcardsRouter.post(
+  "/flashcards/search",
+  asyncHandler(async (req, res) => {
+    const { q, count = 5, answerLength = "full" } = req.body ?? {};
+    if (typeof q !== "string" || !q.trim()) { res.status(422).json({ error: "q is required" }); return; }
+    if (!CARD_COUNTS.includes(Number(count) as (typeof CARD_COUNTS)[number])) { res.status(422).json({ error: "count must be 5, 10, or 20" }); return; }
+    if (!ANSWER_LENGTHS.includes(answerLength as AnswerLength)) { res.status(422).json({ error: "answerLength must be one_word, one_line, or full" }); return; }
+    const ids = await generateSearchDeck(createSynthesisProvider(), req.user!.id, q.trim(), Number(count), answerLength as AnswerLength);
+    const cards = (await Promise.all(ids.map((id) => loadCard(req.user!.id, id)))).filter(Boolean);
+    res.status(201).json({ query: q.trim(), cards });
+  }),
+);
+
 // The study session: what is due now, with both counts so the surface can tell "you
 // have no cards" from "you are finished for today".
 flashcardsRouter.get(
@@ -55,6 +69,42 @@ flashcardsRouter.get(
     res.json(await loadStudyDeck(req.user!.id));
   }),
 );
+
+flashcardsRouter.get("/flashcards/all", asyncHandler(async (req, res) => {
+  res.json({ cards: await loadAllCards(req.user!.id) });
+}));
+
+flashcardsRouter.get("/flashcards/:id", asyncHandler(async (req, res) => {
+  if (!isUuid(req.params.id)) { res.status(404).json({ error: "Flashcard not found" }); return; }
+  const card = await loadCard(req.user!.id, req.params.id);
+  if (!card) { res.status(404).json({ error: "Flashcard not found" }); return; }
+  res.json(card);
+}));
+
+flashcardsRouter.patch("/flashcards/:id", asyncHandler(async (req, res) => {
+  if (!isUuid(req.params.id)) { res.status(404).json({ error: "Flashcard not found" }); return; }
+  const body = req.body ?? {};
+  const input: { question?: string; answer?: string } = {};
+  for (const key of ["question", "answer"] as const) if (body[key] !== undefined) {
+    if (typeof body[key] !== "string" || !body[key].trim()) { res.status(422).json({ error: `${key} must be a non-empty string` }); return; }
+    input[key] = body[key].trim();
+  }
+  const card = await editCard(req.user!.id, req.params.id, input);
+  if (!card) { res.status(404).json({ error: "Flashcard not found" }); return; }
+  res.json(card);
+}));
+
+flashcardsRouter.delete("/flashcards/:id", asyncHandler(async (req, res) => {
+  if (!isUuid(req.params.id) || !(await deleteCard(req.user!.id, req.params.id))) { res.status(404).json({ error: "Flashcard not found" }); return; }
+  res.status(204).end();
+}));
+
+flashcardsRouter.get("/flashcards/:id/history", asyncHandler(async (req, res) => {
+  if (!isUuid(req.params.id)) { res.status(404).json({ error: "Flashcard not found" }); return; }
+  const history = await loadCardHistory(req.user!.id, req.params.id);
+  if (!history) { res.status(404).json({ error: "Flashcard not found" }); return; }
+  res.json({ items: history });
+}));
 
 // Recording an outcome, which is what reschedules the card (SM-2, flashcards/sm2.ts).
 // A POST to a sub-collection rather than a PATCH on the card: a review is an event

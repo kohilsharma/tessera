@@ -32,9 +32,9 @@ export type FlashcardView = {
   answer: string;
   claimType: ClaimType;
   citations: CardCitation[];
-  storyId: string;
+  storyId: string | null;
   storyTitle: string;
-  generationRunId: string;
+  generationRunId: string | null;
   repetitions: number;
   easeFactor: number;
   intervalDays: number;
@@ -42,7 +42,7 @@ export type FlashcardView = {
   lastReviewedAt: Date | null;
 };
 
-type CardRow = Omit<FlashcardView, "citations"> & { claimId: string };
+type CardRow = Omit<FlashcardView, "citations"> & { claimId: string | null };
 
 // Two queries and a group, rather than one query and a de-duplicate: a card has up to
 // ten citations, so joining them onto the card row would multiply the deck by its
@@ -53,9 +53,9 @@ type CardRow = Omit<FlashcardView, "citations"> & { claimId: string };
 // into its run's own frozen set is not rendered, and a card left with no citation is
 // not served at all. Validation makes that impossible upstream, which is precisely
 // why it is worth being structurally impossible here too.
-async function citationsFor(ownerId: string, claimIds: string[]): Promise<Map<string, CardCitation[]>> {
+async function citationsFor(ownerId: string, claimIds: string[], cardIds: string[]): Promise<Map<string, CardCitation[]>> {
   const byClaim = new Map<string, CardCitation[]>();
-  if (claimIds.length === 0) return byClaim;
+  if (claimIds.length === 0 && cardIds.length === 0) return byClaim;
   const rows: (CardCitation & { claimId: string })[] = await AppDataSource.query(
     `SELECT ce."claimId", ce."evidenceId", ce."articleId",
             esa."titleSnapshot" AS "title", esa."publisherNameSnapshot" AS "publisherName"
@@ -64,13 +64,21 @@ async function citationsFor(ownerId: string, claimIds: string[]): Promise<Map<st
        JOIN "generation_runs" r ON r."id" = c."generationRunId"
        JOIN "evidence_set_articles" esa
          ON esa."evidenceSetId" = r."evidenceSetId" AND esa."evidenceId" = ce."evidenceId"
-      WHERE ce."claimId" = ANY($1)
+      WHERE ce."claimId" = ANY($1::uuid[])
         AND EXISTS (
           SELECT 1 FROM "flashcards" owned
            WHERE owned."claimId" = ce."claimId" AND owned."ownerId" = $2
         )
-      ORDER BY esa."sourceRank" ASC`,
-    [claimIds, ownerId],
+      UNION ALL
+      SELECT fc."flashcardId" AS "claimId", fc."evidenceId", fc."articleId",
+             esa."titleSnapshot" AS "title", esa."publisherNameSnapshot" AS "publisherName"
+        FROM "flashcard_citations" fc
+        JOIN "flashcards" f ON f."id" = fc."flashcardId" AND f."ownerId" = $2
+        JOIN "evidence_sets" es ON es."id" = f."evidenceSetId"
+        JOIN "evidence_set_articles" esa ON esa."evidenceSetId" = es."id" AND esa."evidenceId" = fc."evidenceId"
+      WHERE fc."flashcardId" = ANY($3::uuid[])
+      ORDER BY "title" ASC`,
+    [claimIds.filter(Boolean), ownerId, cardIds],
   );
   for (const { claimId, ...citation } of rows) {
     byClaim.set(claimId, [...(byClaim.get(claimId) ?? []), citation]);
@@ -80,17 +88,21 @@ async function citationsFor(ownerId: string, claimIds: string[]): Promise<Map<st
 
 const CARD_COLUMNS = `f."id", f."question", f."claimId", f."repetitions", f."easeFactor",
         f."intervalDays", f."dueAt", f."lastReviewedAt", f."generationRunId",
-        c."claimType", c."text" AS "answer", r."storyId", s."title" AS "storyTitle"`;
+        COALESCE(c."claimType", 'source_specific') AS "claimType",
+        COALESCE(NULLIF(f."answer", ''), c."text") AS "answer",
+        COALESCE(r."storyId", es."storyId") AS "storyId",
+        COALESCE(s."title", 'Search study set') AS "storyTitle"`;
 
 const CARD_JOINS = `FROM "flashcards" f
-       JOIN "analysis_claims" c ON c."id" = f."claimId"
-       JOIN "generation_runs" r ON r."id" = f."generationRunId"
-       JOIN "stories" s ON s."id" = r."storyId"`;
+       LEFT JOIN "analysis_claims" c ON c."id" = f."claimId"
+       LEFT JOIN "generation_runs" r ON r."id" = f."generationRunId"
+       LEFT JOIN "stories" s ON s."id" = r."storyId"
+       LEFT JOIN "evidence_sets" es ON es."id" = f."evidenceSetId"`;
 
 async function withCitations(ownerId: string, rows: CardRow[]): Promise<FlashcardView[]> {
-  const citations = await citationsFor(ownerId, rows.map((row) => row.claimId));
+  const citations = await citationsFor(ownerId, rows.flatMap((row) => row.claimId ? [row.claimId] : []), rows.map((row) => row.id));
   return rows
-    .map(({ claimId, ...card }) => ({ ...card, citations: citations.get(claimId) ?? [] }))
+    .map(({ claimId, ...card }) => ({ ...card, citations: citations.get(claimId ?? card.id) ?? [] }))
     .filter((card) => card.citations.length > 0);
 }
 
@@ -132,6 +144,45 @@ export async function loadStudyDeck(ownerId: string): Promise<StudyDeck> {
   );
   const summary = await loadStudySummary(ownerId);
   return { items: await withCitations(ownerId, rows), ...summary };
+}
+
+export async function loadAllCards(ownerId: string): Promise<FlashcardView[]> {
+  const rows: CardRow[] = await AppDataSource.query(
+    `SELECT ${CARD_COLUMNS} ${CARD_JOINS} WHERE f."ownerId" = $1 ORDER BY f."createdAt" DESC`,
+    [ownerId],
+  );
+  return withCitations(ownerId, rows);
+}
+
+export async function loadCard(ownerId: string, cardId: string): Promise<FlashcardView | null> {
+  const rows: CardRow[] = await AppDataSource.query(
+    `SELECT ${CARD_COLUMNS} ${CARD_JOINS} WHERE f."ownerId" = $1 AND f."id" = $2`,
+    [ownerId, cardId],
+  );
+  return (await withCitations(ownerId, rows))[0] ?? null;
+}
+
+export async function editCard(ownerId: string, cardId: string, input: { question?: string; answer?: string }): Promise<FlashcardView | null> {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  for (const key of ["question", "answer"] as const) {
+    if (input[key] !== undefined) { fields.push(`"${key}" = $${values.length + 1}`); values.push(input[key]); }
+  }
+  if (fields.length === 0) return loadCard(ownerId, cardId);
+  values.push(cardId, ownerId);
+  await AppDataSource.query(`UPDATE "flashcards" SET ${fields.join(", ")} WHERE "id" = $${values.length - 1} AND "ownerId" = $${values.length}`, values);
+  return loadCard(ownerId, cardId);
+}
+
+export async function deleteCard(ownerId: string, cardId: string): Promise<boolean> {
+  const result = await AppDataSource.query(`DELETE FROM "flashcards" WHERE "id" = $1 AND "ownerId" = $2 RETURNING "id"`, [cardId, ownerId]);
+  return result.length > 0;
+}
+
+export async function loadCardHistory(ownerId: string, cardId: string): Promise<unknown[] | null> {
+  const owned = await AppDataSource.query(`SELECT 1 FROM "flashcards" WHERE "id" = $1 AND "ownerId" = $2`, [cardId, ownerId]);
+  if (!owned.length) return null;
+  return AppDataSource.query(`SELECT "grade", "repetitions", "easeFactor", "intervalDays", "dueAt", "reviewedAt" FROM "flashcard_reviews" WHERE "flashcardId" = $1 AND "ownerId" = $2 ORDER BY "reviewedAt" DESC`, [cardId, ownerId]);
 }
 
 // A deck for one analysis, whatever its cards' schedules: what a Student is shown
@@ -179,9 +230,10 @@ export async function generateDeck(
   ownerId: string,
   generationRunId: string,
 ): Promise<FlashcardView[]> {
-  const claims: { id: string; claimType: ClaimType; text: string }[] = await AppDataSource.query(
-    `SELECT c."id", c."claimType", c."text"
+  const claims: { id: string; claimType: ClaimType; text: string; evidenceSetId: string }[] = await AppDataSource.query(
+    `SELECT c."id", c."claimType", c."text", r."evidenceSetId"
        FROM "analysis_claims" c
+       JOIN "generation_runs" r ON r."id" = c."generationRunId"
       WHERE c."generationRunId" = $1
         AND EXISTS (SELECT 1 FROM "claim_evidence" ce WHERE ce."claimId" = c."id")
         AND NOT EXISTS (SELECT 1 FROM "flashcards" f WHERE f."claimId" = c."id" AND f."ownerId" = $2)
@@ -215,6 +267,8 @@ export async function generateDeck(
           ownerId,
           generationRunId,
           claimId: claim.id,
+          evidenceSetId: claim.evidenceSetId,
+          answer: claim.text,
           question: questionsByHash.get(hashes[index])!,
           dueAt: new Date(),
         })),
