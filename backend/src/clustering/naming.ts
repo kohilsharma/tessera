@@ -2,6 +2,7 @@ import { AppDataSource } from "../data-source";
 import { STORY_CATEGORIES, type StoryCategory } from "../entities/Story";
 import type { SynthesisProvider } from "../synthesis";
 import { STORY_NAME_MAX_LENGTH, STORY_NAMING_TIMEOUT_MS } from "./config";
+import { parseModelObject } from "../lib/modelJson";
 
 // #51: the one non-deterministic step in clustering. Re-running a run reproduces
 // membership — the vectors, thresholds and gates are all deterministic — but not
@@ -54,16 +55,9 @@ function promptFor(headlines: string[]): string {
 }
 
 function parseName(answer: string): StoryName | null {
-  // Cheap models fence their JSON even when asked for an object, so take the
-  // outermost braces rather than trusting the whole response to parse.
-  const object = answer.match(/\{[\s\S]*\}/)?.[0];
-  if (!object) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(object);
-  } catch {
-    return null;
-  }
+  // One tolerance for every model answer, fenced block first (src/lib/modelJson.ts).
+  const parsed = parseModelObject(answer);
+  if (!parsed) return null;
   const { title, category } = (parsed ?? {}) as { title?: unknown; category?: unknown };
   const trimmed = typeof title === "string" ? title.replace(/\s+/g, " ").trim() : "";
   if (trimmed === "" || trimmed.length > STORY_NAME_MAX_LENGTH) return null;

@@ -2,6 +2,7 @@ import type { ClaimEvidenceRelationship } from "../entities/ClaimEvidence";
 import { claimTypesFor, type ClaimType, type CoreClaimType } from "../entities/AnalysisClaim";
 import type { GenerationFailureCode, GenerationLens, GenerationValidationResult } from "../entities/GenerationRun";
 import { MIN_SURVIVING_CLAIMS } from "./config";
+import { parseModelObject } from "../lib/modelJson";
 
 // ADR-0002's invariant, in code, below the prompt, non-tunable:
 //
@@ -109,22 +110,6 @@ const ISSUE_GUIDANCE: Record<string, string> = {
   claim_type_not_requested: "used a core claim type the current prompt version did not request",
 };
 
-// Cheap models fence their JSON even when asked for an object, and some prepend a
-// sentence — so take the outermost braces rather than trusting the whole response to
-// parse. Same tolerance clustering/naming.ts applies, for the same reason.
-function parseObject(raw: string): Record<string, unknown> | null {
-  const object = raw.match(/\{[\s\S]*\}/)?.[0];
-  if (!object) return null;
-  try {
-    const parsed = JSON.parse(object);
-    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 // `a1`, ` A1 ` and `[A1]` are all the model naming A1. Normalising them is not
 // leniency about the invariant — an id either is in the frozen set after this or it
 // is not — it is refusing to fail a run over the syntax of a reference that is
@@ -142,7 +127,7 @@ export function validateAnalysis(
     surfacedClaimTypes: readonly CoreClaimType[];
   },
 ): Validation {
-  const parsed = parseObject(raw);
+  const parsed = parseModelObject(raw);
   if (!parsed) {
     return {
       ok: false,
