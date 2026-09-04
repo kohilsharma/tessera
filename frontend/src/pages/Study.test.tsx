@@ -31,6 +31,7 @@ const card: Flashcard = {
 const dueDeck: StudyDeck = { items: [card], dueCount: 1, totalCount: 1, nextDueAt: null };
 const student = { id: "student-1", email: "student@tessera.example", role: "student" as const };
 const investor = { id: "investor-1", email: "investor@tessera.example", role: "investor" as const };
+const allDeck = { cards: [card], page: 1, pageSize: 20, total: 1, totalPages: 1 };
 
 function isIdentityRequest(input: RequestInfo | URL): boolean {
   return String(input).includes("/auth/me");
@@ -135,5 +136,22 @@ describe("Study flashcards", () => {
       .mock.calls.find(([, options]) => options?.method === "POST");
     expect(review?.[0]).toBe("/api/v1/flashcards/card-1/reviews");
     expect(JSON.parse(String(review?.[1]?.body))).toEqual({ grade: 4 });
+  });
+
+  it("browses the full deck with due filters and card actions", async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      if (isIdentityRequest(input)) return jsonResponse(student);
+      if (String(input).includes("/flashcards/all")) return jsonResponse(allDeck);
+      return jsonResponse(dueDeck);
+    });
+
+    renderWithProviders(<Study />, { route: "/study", path: "/study" });
+
+    expect(await screen.findByRole("heading", { name: "Your deck" })).toBeInTheDocument();
+    expect(screen.getAllByText(card.question)).toHaveLength(2);
+    expect(screen.getAllByText("Due now")).toHaveLength(2);
+    await userEvent.click(screen.getByRole("button", { name: "Edit flashcard" }));
+    expect(screen.getByDisplayValue(card.question)).toBeInTheDocument();
+    expect(screen.getByDisplayValue(card.answer)).toBeInTheDocument();
   });
 });

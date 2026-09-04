@@ -568,3 +568,15 @@ navigation. Summary, due-session, and full-list queries share a citation-validit
 each card's frozen EvidenceSet, so orphaned citations cannot inflate dashboard counts or create a
 "due" card that the reader later drops. Added regression coverage for citation damage and list
 filtering/pagination; the focused backend suite has 23 passing tests.
+
+**#84 — The Flashcards surface.** Flashcards is now a first-class Student destination in the shell,
+with a Phosphor icon and a bounded study workspace. The page leads with the due session: one prompt,
+an explicit reveal action, cited answer, Story link, four SM-2 grades, and keyboard support (Space to
+reveal, 1–4 to grade). A separate full-deck register makes every card findable, shows due/upcoming
+state, supports status and text filters, paginates through the existing API envelope, and keeps edit,
+delete, and study-history actions in place. Search generation is grouped into a dedicated form with
+5/10/20 card-count and one-word/one-line/full answer-length controls; success, error, loading, empty
+deck, and nothing-due states remain distinct. The new Studio treatment is token-only, responsive at
+the existing 720/560px breakpoints, and keeps long registers bounded. Added a focused full-deck
+interaction test. Frontend verification: **262 tests across 18 files**, `npm run build`, and the
+Impeccable detector all pass.

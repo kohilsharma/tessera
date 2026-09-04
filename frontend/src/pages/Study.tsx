@@ -17,7 +17,7 @@ import {
 import { EmptyState, ErrorState, PendingState, RetryableError } from "../components/uiStates";
 import { CitationRow } from "../components/analysisRegister";
 import { EntryRegister, FilterRegister } from "../components/indexArchetype";
-import { ClockCounterClockwise, PencilSimple, Trash } from "@phosphor-icons/react";
+import { ArrowClockwise, Cards, ClockCounterClockwise, Eye, MagnifyingGlass, PencilSimple, Trash } from "@phosphor-icons/react";
 
 // The Student's study surface (#58, ADR-0021). One card at a time, not a list: a
 // screen of twenty questions with their answers beside them is a transcript of an
@@ -63,7 +63,7 @@ function Card({ card, dueCount }: { card: Flashcard; dueCount: number }) {
   }, [revealed, review.isPending]);
 
   return (
-    <div className="study-card">
+    <article className="study-card" aria-label="Flashcard study prompt">
       <p className="study-folio">
         {/* What is left, not "card 3 of 8": nothing records when a session started, so
             a position would be a number this surface invented. The count falls as each
@@ -77,8 +77,8 @@ function Card({ card, dueCount }: { card: Flashcard; dueCount: number }) {
 
       {!revealed ? (
         <div className="record-actions">
-          <button type="button" className="record-command" onClick={() => setRevealed(true)}>
-            Show answer
+          <button type="button" className="record-command study-reveal" onClick={() => setRevealed(true)} aria-label="Show answer" aria-keyshortcuts="Space">
+            <Eye aria-hidden size={20} /> Show answer
           </button>
         </div>
       ) : (
@@ -105,7 +105,7 @@ function Card({ card, dueCount }: { card: Flashcard; dueCount: number }) {
           {review.isError && <ErrorState>Could not record this review: {review.error.message}</ErrorState>}
         </>
       )}
-    </div>
+    </article>
   );
 }
 
@@ -117,17 +117,24 @@ function ManagedCard({ card, onSaved, onDeleted }: { card: Flashcard; onSaved: (
   const history = useQuery({ queryKey: ["flashcards", card.id, "history"], queryFn: () => getFlashcardHistory(card.id), enabled: historyOpen });
   const save = useMutation({ mutationFn: () => updateFlashcard(card.id, { question, answer }), onSuccess: () => { setEditing(false); onSaved(); } });
   const remove = useMutation({ mutationFn: () => deleteFlashcard(card.id), onSuccess: onDeleted });
-  return <li className="study-card">
+  const due = new Date(card.dueAt).getTime() <= Date.now();
+  return <li className="study-deck-card">
+    <div className="study-deck-card-head">
+      <span className={`study-status${due ? " study-status--due" : ""}`}>{due ? "Due now" : `Due ${new Date(card.dueAt).toLocaleDateString()}`}</span>
+      <span className="study-card-kind">{CARD_KIND[card.claimType]}</span>
+    </div>
     {editing ? <form onSubmit={(event) => { event.preventDefault(); save.mutate(); }}>
       <label>Question<textarea value={question} onChange={(event) => setQuestion(event.target.value)} /></label>
       <label>Answer<textarea value={answer} onChange={(event) => setAnswer(event.target.value)} /></label>
       <div className="record-actions"><button type="submit" disabled={save.isPending}>Save</button><button type="button" onClick={() => setEditing(false)}>Cancel</button></div>
-    </form> : <><p className="study-question">{card.question}</p><p className="study-answer">{card.answer}</p><CitationRow citations={card.citations} /></>}
+      {save.isError && <ErrorState>Could not save this card: {save.error.message}</ErrorState>}
+    </form> : <><p className="study-deck-question">{card.question}</p><p className="study-deck-answer">{card.answer}</p><CitationRow citations={card.citations} /></>}
     <div className="record-actions">
       <button type="button" aria-label="Edit flashcard" title="Edit" onClick={() => setEditing(true)}><PencilSimple aria-hidden /></button>
       <button type="button" aria-label="Show study history" title="Study history" onClick={() => setHistoryOpen((open) => !open)}><ClockCounterClockwise aria-hidden /></button>
       <button type="button" aria-label="Delete flashcard" title="Delete" onClick={() => remove.mutate()}><Trash aria-hidden /></button>
     </div>
+    {remove.isError && <ErrorState>Could not delete this card: {remove.error.message}</ErrorState>}
     {historyOpen && (history.isPending ? <PendingState>Loading study history…</PendingState> : history.isError ? <ErrorState>{history.error.message}</ErrorState> : history.data.items.length ? <ul>{history.data.items.map((item) => <li key={item.reviewedAt}><time dateTime={item.reviewedAt}>{new Date(item.reviewedAt).toLocaleString()}</time> · grade {item.grade}</li>)}</ul> : <p>No reviews yet.</p>)}
   </li>;
 }
@@ -150,7 +157,7 @@ export default function Study() {
   const [search, setSearch] = useState("");
   const [count, setCount] = useState<5 | 10 | 20>(5);
   const [answerLength, setAnswerLength] = useState<"one_word" | "one_line" | "full">("full");
-  const generate = useMutation({ mutationFn: () => generateFlashcardsFromSearch({ q: search, count, answerLength }), onSuccess: () => { query.refetch(); all.refetch(); } });
+  const generate = useMutation({ mutationFn: () => generateFlashcardsFromSearch({ q: search, count, answerLength }), onSuccess: () => { setSearch(""); query.refetch(); all.refetch(); } });
 
   if (me.isPending) return <PendingState>Loading your flashcards…</PendingState>;
   if (me.isError)
@@ -175,22 +182,31 @@ export default function Study() {
 
   const deck = query.data;
   const card = deck.items[0];
+  const allCards = all.data?.cards ?? [];
+  const allEnvelope = all.data ? { ...all.data, cards: allCards, total: all.data.total ?? allCards.length } : null;
 
   return (
-    <main className="stated-page">
-      <h1>Flashcards</h1>
-      <p className="record-prose">
-        Each card answers with a claim from an analysis you studied, and names the reporting behind it. Answer
-        honestly — how hard it was is what decides when the card comes back.
-      </p>
-      <form className="record-actions" onSubmit={(event) => { event.preventDefault(); if (search.trim()) generate.mutate(); }}>
-        <label>Make cards from search <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search accepted reporting" /></label>
-        <select value={count} onChange={(event) => setCount(Number(event.target.value) as 5 | 10 | 20)} aria-label="Card count"><option value={5}>5 cards</option><option value={10}>10 cards</option><option value={20}>20 cards</option></select>
-        <select value={answerLength} onChange={(event) => setAnswerLength(event.target.value as typeof answerLength)} aria-label="Answer length"><option value="one_word">One word</option><option value="one_line">One line</option><option value="full">Full</option></select>
-        <button type="submit" disabled={generate.isPending || !search.trim()}>Generate</button>
-      </form>
-      {generate.isError && <ErrorState>{generate.error.message}</ErrorState>}
+    <main className="stated-page study-page">
+      <header className="study-header">
+        <div>
+          <p className="study-kicker"><Cards aria-hidden size={18} /> Student study desk</p>
+          <h1>Flashcards</h1>
+          <p className="record-prose">Recall first, then check the cited answer. Your grade decides when each card returns.</p>
+        </div>
+        <div className="study-count" aria-label={`${deck.totalCount} cards in deck`}><strong>{deck.totalCount}</strong><span>in deck</span></div>
+      </header>
 
+      <section className="study-create" aria-labelledby="create-cards-heading">
+        <div className="study-section-heading"><div><h2 id="create-cards-heading">Make a new set</h2><p>Search accepted reporting and freeze the results into your own cited cards.</p></div></div>
+        <form className="study-create-form" onSubmit={(event) => { event.preventDefault(); if (search.trim()) generate.mutate(); }}>
+          <label className="study-search-field"><span>Search reporting</span><span className="study-input-wrap"><MagnifyingGlass aria-hidden size={20} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Try a topic, place, or person" /></span></label>
+          <label><span>Cards</span><select value={count} onChange={(event) => setCount(Number(event.target.value) as 5 | 10 | 20)} aria-label="Card count"><option value={5}>5 cards</option><option value={10}>10 cards</option><option value={20}>20 cards</option></select></label>
+          <label><span>Answer length</span><select value={answerLength} onChange={(event) => setAnswerLength(event.target.value as typeof answerLength)} aria-label="Answer length"><option value="one_word">One word</option><option value="one_line">One line</option><option value="full">Full answer</option></select></label>
+          <button type="submit" disabled={generate.isPending || !search.trim()}>{generate.isPending ? <><ArrowClockwise className="study-spin" aria-hidden size={18} /> Making cards…</> : "Generate cards"}</button>
+        </form>
+        {generate.isError && <ErrorState>{generate.error.message}</ErrorState>}
+        {generate.isSuccess && <p className="study-success" role="status">Cards added to your deck.</p>}
+      </section>
       {deck.totalCount === 0 ? (
         <EmptyState>
           <p>No flashcards yet. A deck is made from an analysis of a Story you are studying.</p>
@@ -217,14 +233,16 @@ export default function Study() {
         // question when the deck is refetched.
         <Card key={card.id} card={card} dueCount={deck.dueCount} />
       )}
-      {all.data && Array.isArray(all.data.cards) && <section aria-label="All flashcards">
-        <h2>All cards</h2>
+      <section className="study-deck" aria-labelledby="all-cards-heading">
+        <div className="study-section-heading"><div><h2 id="all-cards-heading">Your deck</h2><p>Browse every card, including the ones scheduled for later.</p></div></div>
+        {all.isPending ? <PendingState>Loading your full deck…</PendingState> : all.isError ? <RetryableError message={`Could not load your full deck: ${all.error.message}`} onRetry={() => all.refetch()} retrying={all.isFetching} /> : <>
         <FilterRegister label="Filter your flashcards">
-          <label>Filter cards <select value={allFilter} onChange={(event) => { setAllFilter(event.target.value as typeof allFilter); setAllPage(1); }}><option value="all">All</option><option value="due">Due</option><option value="upcoming">Upcoming</option></select></label>
-          <label>Find a card <input value={allSearch} onChange={(event) => { setAllSearch(event.target.value); setAllPage(1); }} placeholder="Question or answer" /></label>
+          <label>Show <select value={allFilter} onChange={(event) => { setAllFilter(event.target.value as typeof allFilter); setAllPage(1); }}><option value="all">All cards</option><option value="due">Due now</option><option value="upcoming">Upcoming</option></select></label>
+          <label>Find <input value={allSearch} onChange={(event) => { setAllSearch(event.target.value); setAllPage(1); }} placeholder="Question or answer" /></label>
         </FilterRegister>
-        {all.data.cards.length ? <EntryRegister envelope={all.data} onGoToPage={setAllPage}>{all.data.cards.map((item) => <ManagedCard key={item.id} card={item} onSaved={() => all.refetch()} onDeleted={() => { query.refetch(); all.refetch(); }} />)}</EntryRegister> : <EmptyState><p>No cards match this filter.</p></EmptyState>}
-      </section>}
+        {allCards.length && allEnvelope ? <EntryRegister envelope={allEnvelope} onGoToPage={setAllPage}>{allCards.map((item) => <ManagedCard key={item.id} card={item} onSaved={() => all.refetch()} onDeleted={() => { query.refetch(); all.refetch(); }} />)}</EntryRegister> : <EmptyState><p>{allFilter === "all" && !allSearch ? "Your deck is empty. Generate cards above or from a completed analysis." : "No cards match this filter."}</p></EmptyState>}
+        </>}
+      </section>
     </main>
   );
 }
