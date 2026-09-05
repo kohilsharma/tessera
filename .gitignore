@@ -55,3 +55,29 @@ shots/
 
 semantic-review/
 uploads/
+
+# --- Kept locally, out of the published repo -------------------------------
+# Working notes and tooling for the AI-assisted workflow. These are how the work
+# was done, not what was built; the repo carries the result and the ADRs behind it.
+AGENTS.md
+CLAUDE.md
+skills-lock.json
+docs/agents/
+docs/repo-state.md
+docs/repo-state/
+
+# Internal planning and exploration, superseded by the ADRs and the README.
+PRODUCT.md
+docs/design-brief.md
+docs/phase-3.6-spec.md
+docs/research/
+docs/Tessera Directions.html
+docs/architecture/*.json
+
+# QA evidence and course submission artifacts — large, and neither is source.
+docs/verification/
+project-docs/
+
+# Personal recording script and the unfinished eval harness.
+docs/demo-runbook.md
+backend/src/eval.ts

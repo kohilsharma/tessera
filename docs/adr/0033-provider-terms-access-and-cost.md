@@ -52,7 +52,7 @@ boundary rests on one.**
    embeddings, Google's OpenAI-compatible endpoint for synthesis. Both are already reachable through
    ADR-0025's transport with no new code, which is the seam earning its keep. `vector(1024)`, the HNSW
    cosine index and the `EmbeddingProvider` interface are unchanged — the swap is Matryoshka-family
-   and needs no migration, though it does need a fresh volume, as `SETUP.md` says.
+   and needs no migration, though it does need a fresh volume, as the README says.
 4. **If a no-training destination is ever wanted**, it is an `.env` change plus a paid account, and
    ADR-0003's interface is what makes that a config edit. That is the whole of the mitigation, and it
    is enough for this project.

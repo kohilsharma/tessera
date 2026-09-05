@@ -21,7 +21,7 @@ frontend. Two classic solo failure modes: "works on my machine" (pgvector/Node m
 - **Seed script** (`npm run seed`) loads fixtures (ADR-0007) so the app is never empty:
   seeded users for all 3 roles, multi-source Stories, and at least one completed
   GenerationRun/Brief to demo instantly.
-- **SETUP.md**: prerequisites + exact commands (compose up → migrate → seed → run) and demo
+- **README.md**: prerequisites + exact commands (compose up → migrate → seed → run) and demo
   login credentials. One documented path from clone to working demo.
 
 ## Consequences

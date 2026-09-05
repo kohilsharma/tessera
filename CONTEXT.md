@@ -389,5 +389,5 @@ serving to a hosted API default after a system-RAM measurement on the demo machi
 embeddings (@ vector(1024)), pin the ingestion architecture (GDELT GKG firehose), add
 role features (flashcards / Admin tuning / investor consensus), and revise the build order.
 They **supersede** parts of ADR-0002 (→0019), ADR-0008 (→0017), ADR-0011 (→0020), ADR-0016
-(→0022). `AGENTS.md` binds agents to v3 + these ADRs. The old `ai-news-intelligence-spec.md`
+(→0022). The old `ai-news-intelligence-spec.md`
 is a superseded draft — do not build from it.

@@ -1,19 +1,15 @@
 # Tessera Architecture
 
-This is the viva-facing architecture record for the shipped Phase 3.6 system. The diagrams are
-standalone Archify artifacts; each JSON file is the checked source for the adjacent HTML viewer.
+The architecture record for the shipped system, with every claim linked to the line of code that
+makes it true. The four diagrams are standalone HTML — open them straight from disk, no build step
+and no server.
 
 ## Diagrams
 
-- [Reader request lifecycle](request-lifecycle.html) ([source](request-lifecycle.sequence.json))
-- [Scheduled async pipeline](async-pipeline.html) ([source](async-pipeline.workflow.json))
-- [Evidence-centred data model](data-model.html) ([source](data-model.architecture.json))
-- [Caching layers](caching-layers.html) ([source](caching-layers.architecture.json))
-
-All four artifacts passed Archify showcase delivery: 9/9 checks, 0 errors and 0 warnings. The
-latest automated browser checks passed containment and capture at 1440x900, 1600x1000, 1920x1080
-and 2048x1320 in light and dark modes. `visualReview` remains `pending`: that field is reserved
-for a human or image-capable perceptual review.
+- [Reader request lifecycle](request-lifecycle.html)
+- [Scheduled async pipeline](async-pipeline.html)
+- [Evidence-centred data model](data-model.html)
+- [Caching layers](caching-layers.html)
 
 ## Request lifecycle
 
@@ -101,9 +97,9 @@ There are three distinct cache mechanisms:
    means "this Ticker has no quote", while provider failure is not cached
    ([backend/src/market/index.ts:44](../../backend/src/market/index.ts:44)). Market Read prose has
    its own content-hash Redis key ([backend/src/market/marketRead.ts:99](../../backend/src/market/marketRead.ts:99)).
-3. BullMQ already uses Redis as its queue transport. Phase 3.6 identifies the measured
-   `comparableStories()` dashboard path as the next Redis cache candidate; that is a performance
-   extension, not a second source of truth.
+3. The Investor dashboard's `comparableStories()` register is a Redis read cache over a Postgres
+   query, with a short TTL and an explicit invalidation. Postgres stays the source of truth: with
+   Redis unavailable the route simply reads it directly.
 
 The same boundary carries rate limits for auth and expensive endpoints through Redis when configured
 ([backend/src/middleware/rateLimit.ts:7](../../backend/src/middleware/rateLimit.ts:7)). Structured

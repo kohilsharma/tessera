@@ -45,9 +45,10 @@ Story.
 
 The three roles get different endpoints and different data, not different permissions over one
 screen. Students get guided reading, cited flashcards on a spaced-repetition schedule, and their
-own IntelligenceBriefs. Investors get consensus and contradiction across sources, sector filtering,
+own IntelligenceBriefs. Investors get consensus and contradiction across sources, publisher-leaning
+spectrums with a blindspot signal, market indicators computed in-house against resolved tickers,
 and uncertainty stated rather than smoothed over. Admin is an operator role, not a Brief owner:
-connectors, the two review queues, generation failures, and versioned prompt tuning.
+connectors, the review queues, generation failures, user management, and versioned prompt tuning.
 
 ## Getting it running
 
@@ -59,55 +60,34 @@ Postgres and Redis run in Compose. The API and the frontend run natively, which 
 (ADR-0015).
 
 ```bash
-docker compose up -d
-```
+docker compose up -d                       # Postgres on 5433, Redis on 6380
 
-That gives you Postgres on **5433** and Redis on **6380**. Both are offset from the usual ports on
-purpose, so they don't fight with anything already running on your machine.
-
-Backend next:
-
-```bash
 cd backend
 npm install
-cp .env.example .env
+cp .env.example .env                       # then put a real value in JWT_SECRET
 npm run migrate
 npm run seed
-npm run dev            # http://localhost:4000
-```
+npm run dev                                # http://localhost:4000
 
-Two things about that block. `npm run migrate` is what creates the `vector` extension, so it has to
-happen before anything touches an embedding. And you have to put a real value in `JWT_SECRET`
-before `npm run dev` will sign anything. There is no fallback secret on purpose; `openssl rand -hex
-32` will do.
-
-Then the frontend, in another terminal:
-
-```bash
-cd frontend
+cd ../frontend
 npm install
-npm run dev            # http://localhost:5173
+npm run dev                                # http://localhost:5173
 ```
+
+The ports are offset from the usual 5432/6379 on purpose, so they don't fight with anything already
+running on your machine. `npm run migrate` is what creates the `vector` extension, so it has to
+happen before anything touches an embedding. And there is no fallback `JWT_SECRET` on purpose —
+`openssl rand -hex 32` will do.
 
 Sign in at `/login`. Seeding makes one user per role, all on the same password (`tessera-demo`,
-unless you set `SEED_PASSWORD`):
-
-| Email | Role |
-|---|---|
-| `student@tessera.local` | Student |
-| `investor@tessera.local` | Investor |
-| `admin@tessera.local` | Admin |
-
-The seed also creates five retained graph-fixture reports and runs entity resolution, so `/graph`
-has cited nodes and edges on a clean deploy without waiting for live GDELT ingestion. Those rows
-are unclustered `manual_fixture` Articles; starting the worker adds live firehose coverage.
+unless you set `SEED_PASSWORD`): `student@tessera.local`, `investor@tessera.local`,
+`admin@tessera.local`.
 
 **Seeding is the only way an Admin ever exists.** `POST /auth/register` will only make you a
 Student or an Investor, because Admin is assigned rather than self-served. Skip `npm run seed` and
-`/dashboard/admin` is a page nobody on the system can open.
-
-`SETUP.md` has the rest: every environment variable, the embedding and synthesis providers, and the
-things that go wrong.
+`/dashboard/admin` is a page nobody on the system can open. The seed is idempotent, so re-run it
+after any migration; it also plants five graph-fixture reports and runs entity resolution, so
+`/graph` has cited nodes and edges on a clean deploy without waiting for live ingestion.
 
 ### The worker
 
@@ -122,20 +102,32 @@ It drains three queues on a schedule: ingestion on the quarter hour, clustering 
 resolution at :20. The Admin console's Run buttons put work on those same queues rather than doing
 anything themselves, so there is only ever one execution path, and what you demo is what actually
 runs. Run history is read out of Postgres and not the queue, which means the Admin console still
-renders fine with the worker stopped. Pressing a button then just queues the work for whenever it
+renders fine with the worker stopped — pressing a button then just queues the work for whenever it
 comes back up.
 
 Worth knowing before you sit and watch it: everything ingestion produces lands as an **Unclustered
 Article**, which is invisible to browse and search, and it stays that way until clustering picks it
-up. Plenty of firehose rows never leave that state, by design. A first hour of ingestion can easily
-cluster nothing at all, and that isn't a bug.
+up. Only articles carrying text are eligible, and a Story still needs two Publishers, so plenty of
+firehose rows never leave that state by design. A first hour of ingestion can easily cluster
+nothing at all, and that isn't a bug. A tick works the fleet one connector at a time and the GKG
+firehose alone is ~700 rows per window, so expect about a minute of work per tick.
 
-### If you have no API keys
+### Providers, and running without any keys
 
-It's meant to work without any. With no embedding key you get a network-free mock provider. With no
+It's meant to work with none. With no embedding key you get a network-free mock provider; with no
 synthesis key you get a deterministic mock writing the analysis, and new Stories come out named
 `[mock] <headline>`, which is the demo being honest that no model named them. If a hosted provider
 is configured but unreachable, search drops back to lexical-only results instead of erroring.
+
+Hosted providers need their model id set explicitly (`EMBEDDING_MODEL`, `SYNTHESIS_MODEL`), so model
+ids stay deployment configuration rather than becoming defaults in the code. `.env.example`
+documents the rest, including the thresholds. Evidence text does leave the process for the hosted
+embedding and synthesis providers — both are free tiers chosen on access and cost, and ADR-0033 is
+explicit that this is not a no-training contract.
+
+If you point synthesis at a reasoning model, give it room: it spends most of a completion budget
+thinking before it answers, so `SYNTHESIS_MAX_TOKENS` (default 4000) and `SYNTHESIS_TIMEOUT_MS`
+(default 180000) exist to be raised rather than discovered.
 
 One trap: **switching embedding providers means re-embedding everything.** The two vector spaces
 have nothing to do with each other, and mixing them returns nonsense quietly rather than failing.
@@ -149,15 +141,13 @@ cd backend && npm run migrate && npm run seed
 
 ## Where things are
 
-`/stories` is the corpus and `/stories/:id` is one Story with its cited analysis and coverage
-timeline. `/search` is hybrid search, Postgres full-text and pgvector cosine fused by reciprocal
-rank, and `/search/timeline` is the same results read as one lane per Story. `/graph` draws the
+`/stories` is the corpus and `/stories/:id` is one Story with its cited analysis, coverage spectrum
+and timeline. `/search` is hybrid search, Postgres full-text and pgvector cosine fused by
+reciprocal rank, and `/timeline` reads a search as one lane per Story. `/graph` draws the
 co-occurrence graph, bounded so it stays legible, and `/graph/entities/:id` is one name's
 neighbourhood with the reporting sitting under every link. `/briefs` is where the owned artifacts
 live, `/study` is the flashcards, `/dashboard/:role` covers the three dashboards, and `/status` is
 a live health check if you want to confirm the API is actually up.
-
-Layout:
 
 ```
 backend/
@@ -166,27 +156,30 @@ backend/
   src/generation/    runGeneration         freeze evidence, then cited claims
   src/graph/         runEntityResolution, loadGraphView
   src/timeline/      buildTimeline         takes a set of Articles, never a query
+  src/market/        quotes and in-house indicators behind one provider seam
   src/worker.ts      separate process, three BullMQ queues
-frontend/            Vite + React, Cytoscape.js for the graph
-docs/adr/            29 decision records; an ADR beats the spec where they disagree
+frontend/            Vite + React, Base UI, Recharts, Cytoscape.js for the graph
+docs/adr/            37 decision records; an ADR beats the spec where they disagree
+docs/architecture/   four generated diagrams: data model, request lifecycle,
+                     async pipeline, caching layers
 ```
 
 A few of those choices are deliberately not the obvious ones. The knowledge graph is plain Postgres
 tables and recursive CTEs rather than a graph database. The queue is Redis and BullMQ rather than
-cron. Model ids always come from environment config, never a default in the code. The reasoning for
-each is in `docs/adr/`.
+cron. Model ids always come from environment config. The reasoning for each is in `docs/adr/`.
 
 ## Tests
 
 ```bash
 cd backend  && npm test
-cd frontend && npm test
-cd frontend && npm run build
+cd frontend && npm test && npm run build
 ```
 
 Backend tests drive the real Express app with `supertest` against a real Postgres, spun up per run
-by Testcontainers, so there's no test database to set up by hand. You do need Docker working.
-Redis is deliberately left out of the test stack and the single enqueue call is stubbed instead.
+by Testcontainers, so there's no test database to set up by hand. You do need Docker working. Redis
+is deliberately left out of the test stack and the single enqueue call is stubbed instead. The
+frontend suite is Vitest, jsdom and React Testing Library over the components that carry real state
+logic, asserting the four UI states with a stubbed `fetch` — no database, no running backend.
 
 There is no lint script in either package yet, so don't claim lint passes.
 
@@ -196,21 +189,18 @@ it paces itself to one request per publisher every two seconds.
 
 ## The other documents
 
-- `SETUP.md` — the full setup path, every env var, providers, what goes wrong
 - `CONTEXT.md` — the glossary. Story, Article, EvidenceSet, Lens and the rest mean exactly what
   this file says they mean, in code and in conversation
-- `PRODUCT.md` — audiences, positioning, and the things Tessera deliberately doesn't do
-- `DESIGN.md` — the Bureau design system the UI is built in
-- `AGENTS.md` — the working agreement: module seams, invariants, how to verify a change
-- `docs/adr/` — 29 architecture decisions. Where an ADR and the spec disagree, the ADR wins
-- `docs/repo-state.md` — an index into `docs/repo-state/`, the per-ticket history split by phase
-- `project-docs/` — the build specification, the course statement, and the initial report
+- `DESIGN.md` — the design system: one token contract, a palette per role, and the four states
+  every route has to answer for
+- `docs/adr/` — 37 architecture decisions. Where an ADR and anything else disagree, the ADR wins
+- `docs/architecture/` — four standalone diagrams, openable straight from the browser
 
 ## Status
 
-Phases 1 and 2 are done, Phase 3 through #58, and Phase 3.5 is in progress. Entity resolution, both
-timelines, candidate merges, the bounded graph, one Entity's neighbourhood and the repaired
-extraction pass are all in.
+Phases 1 through 3.6 are complete: ingestion, clustering, cited generation, the knowledge graph,
+both timelines, and the product rebuild that gave the three roles their own theme, the Investor
+market panel, and the Admin console its user and connector management.
 
-Typed relations on graph edges are deferred (ADR-0019), and monitoring and alerting are out of
-scope for the graded build rather than missing.
+Typed relations on graph edges are deferred (ADR-0019). Monitoring and alerting are out of scope for
+the graded build rather than missing. The evaluation harness is the one module still to come.

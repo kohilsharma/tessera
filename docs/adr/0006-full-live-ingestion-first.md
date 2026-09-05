@@ -10,9 +10,9 @@ end-to-end before startup-only plumbing. The acquisition pipeline (live RSS + GD
 layered dedup incl. SimHash/MinHash, per-publisher rights enforcement, IngestionRun
 tracking) earns no direct rubric line and sits upstream of the flagship.
 
-The reviewer (Claude) recommended "RSS + fixtures now, GDELT + SimHash later behind the
-connector interface" to protect the flagship. The developer twice chose full live ingestion
-first anyway.
+A design review recommended "RSS + fixtures now, GDELT + SimHash later behind the connector
+interface" to protect the flagship. That advice was considered twice and set aside both times in
+favour of full live ingestion first.
 
 ## Decision
 
