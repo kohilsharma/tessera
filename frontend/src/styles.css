@@ -350,14 +350,14 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 /* An entry: the record's name against its ledger of scannable facts. Both
    columns keep their gutters at every width, so nothing shifts as values
    change length. */
-.entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 34px; align-items: baseline; }
+.entry { display: grid; grid-template-columns: minmax(min(16ch, 100%), 1fr) minmax(0, auto); gap: 12px 34px; align-items: baseline; }
 /* Ten rules under ten titles would read as noise, and in a register of nothing
    but links the underline earns nothing — weight and scale already mark the
    entry's name. It returns on hover and focus, where it means "this one". */
 .entry-title { font-size: 1.1rem; line-height: 1.35; max-width: 60ch; overflow-wrap: anywhere; text-decoration: none; }
 .entry-title:hover, .entry-title:focus-visible { text-decoration: underline; }
-.entry-register { display: flex; flex-wrap: wrap; justify-self: end; margin: 0; row-gap: 12px; }
-.entry-register > div { padding: 0 17px; border-left: 1px solid var(--registration-rule); }
+.entry-register { display: flex; min-width: 0; max-width: 100%; flex-wrap: wrap; justify-self: end; margin: 0; row-gap: 12px; }
+.entry-register > div { min-width: 0; padding: 0 17px; border-left: 1px solid var(--registration-rule); }
 .entry-register > div:first-child { border-left: 0; }
 .entry-register > div:last-child { padding-right: 0; }
 .entry-register dt { margin: 0 0 5px; color: var(--quiet-ink); font: 500 .66rem/1.2 var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
@@ -373,7 +373,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    edge whether or not an image landed — and one plate treatment, not two: a
    dashed plate would spend the rule DESIGN.md reserves for Evidence outside the
    active claim, and it would have to lie about a cover still in flight. */
-.entry:has(.entry-cover) { grid-template-columns: 78px minmax(0, 1fr) auto; }
+.entry:has(.entry-cover) { grid-template-columns: 78px minmax(min(16ch, 100%), 1fr) minmax(0, auto); }
 .entry-cover { width: 78px; aspect-ratio: 3 / 2; border: 1px solid var(--registration-rule); background: var(--bench-stock); overflow: hidden; }
 .entry-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
@@ -382,7 +382,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    so the register's title and ledger keep the geometry they have everywhere else.
    Wrapping, because an operator row offers two commands and the column is as
    narrow as the row allows. */
-.entry:has(.entry-action) { grid-template-columns: minmax(0, 1fr) auto auto; }
+.entry:has(.entry-action) { grid-template-columns: minmax(min(16ch, 100%), 1fr) minmax(0, auto) minmax(0, auto); }
 .entry-action { display: flex; flex-wrap: wrap; align-content: start; gap: 8px; }
 
 /* Pagination brings its own top rule, so the register closes on that one rather

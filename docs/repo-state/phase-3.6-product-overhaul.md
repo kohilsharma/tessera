@@ -50,19 +50,20 @@ after a completed analysis, and the timeline's inert volume bars, are both alrea
 spec (§6) and belong to their own tickets.
 
 Three findings came out of the pass, plus one the closing test run turned up. Per #72's fourth
-bullet none was fixed here; each is filed as its own issue, and each is written out below too,
-because the phase file is where the next session looks first.
+bullet each was filed as its own issue and written out below, because the phase file is where the
+next session looks first. #103 is now resolved; #104–#106 remain follow-up findings.
 
-The one confirmed defect is a **layout collapse in the edge-citation drawer** (#103): every headline
-inside it renders one character per line, `a.entry-title` measuring `0px × 1829px`. The cause is not
-the drawer. `.entry` is `grid-template-columns: minmax(0, 1fr) auto` (`styles.css:223`), a row body
+The one confirmed defect was a **layout collapse in the edge-citation drawer** (#103): every headline
+inside it rendered one character per line, `a.entry-title` measuring `0px × 1829px`. The cause was not
+the drawer. `.entry` was `grid-template-columns: minmax(0, 1fr) auto` (`styles.css:223`), a row body
 renders inside that first track, and the drawer puts an `EntryList` — more `.entry` rows — into a
 281px container, where the `auto` register track takes its 243px max-content and the name track,
-floored at zero, gets nothing. So the bug is `.entry`'s missing minimum, and the next register
-nested in a row body would hit it too; the fix belongs there rather than on `.graph-evidence`. It is
-a desktop-only bug, since `@media (max-width: 560px)` collapses `.entry` to one column — which is
-why there is no 560 capture of it. The other `body=` caller, the merge-review queue
-(`adminRegisters.tsx:384`), draws `ul.claim-sides` instead and measures clean at 564px.
+floored at zero, gets nothing. The fix is now on the shared `.entry` name track and its cover/action
+variants: a 16-character minimum title track plus shrinkable, width-bounded metadata tracks preserves
+readable headlines in nested registers while the existing `@media (max-width: 560px)` one-column
+collapse remains unchanged. A source-level regression assertion pins all three rules because jsdom
+does no layout. The other `body=` caller, the merge-review
+queue (`adminRegisters.tsx:384`), draws `ul.claim-sides` instead and remains unaffected.
 
 The second is a **demo-readiness gap** (#104): a clean `npm run seed` produces an empty graph.
 `runEntityResolution()` succeeds and `loadGraphView()` then returns `entityCount: 0`, because the

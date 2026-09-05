@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -295,6 +297,15 @@ describe("An Entity's neighbourhood — Themes as a facet", () => {
 });
 
 describe("An Entity's neighbourhood — the reporting under one link", () => {
+  it("keeps nested citation headlines from collapsing their name track", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+
+    expect(styles).toMatch(/\.entry\s*\{[^}]*grid-template-columns:\s*minmax\(min\(16ch,\s*100%\),\s*1fr\)\s+minmax\(0,\s*auto\);/s);
+    expect(styles).toMatch(/\.entry:has\(\.entry-cover\)\s*\{[^}]*minmax\(min\(16ch,\s*100%\),\s*1fr\)\s+minmax\(0,\s*auto\)/s);
+    expect(styles).toMatch(/\.entry:has\(\.entry-action\)\s*\{[^}]*minmax\(min\(16ch,\s*100%\),\s*1fr\)\s+minmax\(0,\s*auto\)/s);
+    expect(styles).toMatch(/\.entry-register\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*100%;/s);
+  });
+
   it("opens the Articles a link was observed in, each linking to somewhere it can be read", async () => {
     render();
     const register = await screen.findByRole("region", { name: "Reported alongside" });
