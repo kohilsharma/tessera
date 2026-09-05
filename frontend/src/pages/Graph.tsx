@@ -126,14 +126,15 @@ export default function Graph() {
         <EmptyState>
           {view.entityCount === 0 ? (
             <p>
-              No name has been resolved into the graph yet. A name enters once {view.promotionFloor} separate
-              reports have named it, so this fills in as the last {view.retainedDays} days of the GDELT
+              No name has been resolved into the graph yet. A name enters once {view.promotionFloor} separate reports have named it;
+              common GKG demonyms are omitted from the picture. This fills in as the last {view.retainedDays} days of the GDELT
               firehose are ingested and resolved.
             </p>
           ) : (
             <p>
               {view.entityCount === 1 ? "One name has" : `${view.entityCount} names have`} been resolved, but
-              no two names have yet been reported together, so there is no link to draw and nothing to place.
+              no two names have yet been reported together, so there is no link to draw and nothing to place. Common GKG demonyms
+              are omitted from the picture.
               A name joins the picture once one report names it alongside another.
             </p>
           )}

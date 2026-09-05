@@ -1131,3 +1131,21 @@ dark containment/capture at 1440x900, 1600x1000, 1920x1080 and 2048x1320 for all
 review remains a separate human gate as required by the skill. The generated specs retain the code vocabulary and
 the document points each architectural claim to its implementation or ADR, so the artifact is
 evidence of the shipped system rather than a speculative redesign.
+
+**#105 — the bounded graph no longer lets demonyms crowd out subjects.** The resolver still promotes
+every GKG name faithfully, but the shared graph read seam now applies a small normalized stop-list
+for common demonyms that GKG consistently types as locations (American, Americans, Australian,
+British, Canadian, Canadians, Chinese, French, Iranian, Russian and Spanish). Excluded names are
+removed from the cited edge set before presence, ranking and weights are computed, so they cannot
+become a top-60 node or inflate a co-mention link. The working-set count and corpus span now describe
+the eligible set, while the promotion floor and stored graph remain unchanged. The rule is
+documented beside `ENTITY_PROMOTION_FLOOR` in `backend/src/graph/config.ts` and stated in the shared
+graph copy so the two bounds are visible: frequency decides admission, and the read seam keeps the
+picture useful.
+
+Verification: `graphView.test.ts` now proves a heavily reported `American` location is absent and
+does not contribute to an otherwise valid edge. Against the live corpus the 60-node view contains
+none of the 11 reported demonyms and now draws 47 locations, 10 organizations and 3 people over
+15,256 cited Articles. The focused graph and neighbourhood suites pass; the full backend suite is
+596 passing and 11 skipped, the full frontend suite is 292 passing, both typechecks pass, and the
+frontend production build passes.

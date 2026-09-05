@@ -36,6 +36,28 @@ function envFraction(key: string, fallback: number): number {
 // is rarely made five times.
 export const ENTITY_PROMOTION_FLOOR = envNumber("GRAPH_ENTITY_PROMOTION_FLOOR", 5, { min: 1, max: 1000 });
 
+// A second, read-side quality bound: GKG consistently types common demonyms as
+// locations, and their broad co-occurrence crowds the bounded picture without
+// identifying a person, organization or location. Keep these names in the graph's
+// normalized vocabulary so every read surface applies the same exclusion while
+// entity resolution remains faithful to the source annotations.
+export const GRAPH_EXCLUDED_NORMALIZED_NAMES = [
+  "american",
+  "americans",
+  "australian",
+  "british",
+  "canadian",
+  "canadians",
+  "chinese",
+  "french",
+  "iranian",
+  "russian",
+  "spanish",
+] as const;
+
+export const GRAPH_EXCLUDED_NAMES_SQL =
+  `ARRAY[${GRAPH_EXCLUDED_NORMALIZED_NAMES.map((name) => `'${name}'`).join(",")}]::text[]`;
+
 // ADR-0028's second bound, and the one ADR-0019 left out: 195 nodes carry 4,833 pairs
 // sharing two or more Articles, so bounded nodes do not imply a bounded picture. Each
 // Entity keeps its strongest co-occurrences and nothing else.

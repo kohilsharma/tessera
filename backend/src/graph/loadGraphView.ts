@@ -10,6 +10,7 @@ import {
   VIEW_EDGES_PER_ENTITY,
   VIEW_NODE_CAP,
   VIEW_THEME_FACETS,
+  GRAPH_EXCLUDED_NAMES_SQL,
   type PromotableKind,
 } from "./config";
 import { bothEndsBoundSql } from "./edgeBound";
@@ -17,7 +18,7 @@ import { bothEndsBoundSql } from "./edgeBound";
 // The graph's read seam (#68, #69), the one every reader surface goes through, as
 // `runEntityResolution` is the one every write goes through. One Entity's neighbourhood is
 // here rather than beside it because it is the same picture over a different selection: the
-// promotion floor, the node cap and the both-ends edge bound are applied by the statements
+// promotion floor, the read-side quality bound, the node cap and the both-ends edge bound are applied by the statements
 // below whichever surface asked, so the two cannot disagree about what is in the graph.
 //
 // Nothing here takes a caller's number. The bounds live in `config.ts` and are applied
@@ -66,7 +67,7 @@ export type GraphView = {
   // backend owns. `retainedDays` is not the graph's span — `from`/`to` below are.
   retainedDays: number;
   promotionFloor: number;
-  // The whole working set the picture was drawn from, against the picture's own length —
+  // The eligible working set the picture was drawn from, against the picture's own length —
   // so a page can say which fraction of the graph it is showing instead of implying the
   // graph is 60 names wide.
   entityCount: number;
@@ -88,13 +89,17 @@ const CITED_SQL = `
   cited AS (
     SELECT ee."entityAId", ee."entityBId", ee."articleId"
       FROM "entity_edges" ee
-     WHERE $1::text IS NULL
+      JOIN "entities" ea ON ea."id" = ee."entityAId"
+      JOIN "entities" eb ON eb."id" = ee."entityBId"
+     WHERE ($1::text IS NULL
         OR EXISTS (
              SELECT 1 FROM "gkg_annotations" ga
               WHERE ga."articleId" = ee."articleId"
                 AND ga."kind" = 'theme'
                 AND ga."surfaceName" = $1
-           )
+           ))
+       AND ea."normalizedName" <> ALL(${GRAPH_EXCLUDED_NAMES_SQL})
+       AND eb."normalizedName" <> ALL(${GRAPH_EXCLUDED_NAMES_SQL})
   )`;
 
 // Presence read from the citations rather than from `gkg_annotations`: the annotations
@@ -105,7 +110,7 @@ const CITED_SQL = `
 // An Entity nothing co-cites has no row here and so is never drawn by the global view.
 // That is the honest reading of a co-occurrence graph — an isolated dot asserts nothing
 // and opens onto nothing — and `entityCount` still states that the working set is wider
-// than the picture. A neighbourhood is the one place such a name is drawn anyway, because
+// than the picture. A neighbourhood keeps the focus when it has no eligible ties, because
 // there it is the name the reader asked for.
 const PRESENCE_SQL = `
   presence AS (
@@ -122,7 +127,8 @@ const NODES_SQL = `
   WITH ${CITED_SQL}, ${PRESENCE_SQL}
   SELECT e."id", e."kind", e."canonicalName", p."articleCount"
     FROM presence p
-    JOIN "entities" e ON e."id" = p."entityId"
+   JOIN "entities" e ON e."id" = p."entityId"
+   WHERE e."normalizedName" <> ALL(${GRAPH_EXCLUDED_NAMES_SQL})
    ORDER BY p."articleCount" DESC, e."canonicalName" ASC, e."id" ASC
    LIMIT $2`;
 
@@ -153,18 +159,23 @@ function boundedEdgesSql(alsoKeep = ""): string {
 
 const EDGES_SQL = boundedEdgesSql();
 
-// The corpus statement's facts, measured over every edge rather than over the drawn
+// The corpus statement's facts, measured over every eligible edge rather than over the drawn
 // ones: this is what the graph was built from, which is what a reader needs told, and
 // it is a different question from which of it fits on a screen. Reporting that cites no
 // edge — a window where one promoted name appeared alone — is not part of the graph and
 // so does not stretch the span it states.
 const SUBSTRATE_SQL = `
-  SELECT (SELECT COUNT(*)::int FROM "entities") AS "entityCount",
+  SELECT (SELECT COUNT(*)::int FROM "entities"
+           WHERE "normalizedName" <> ALL(${GRAPH_EXCLUDED_NAMES_SQL})) AS "entityCount",
          COUNT(DISTINCT e."articleId")::int AS "articleCount",
          MIN(a."publishedAt") AS "from",
          MAX(a."publishedAt") AS "to"
     FROM "entity_edges" e
-    JOIN "articles" a ON a."id" = e."articleId"`;
+    JOIN "entities" ea ON ea."id" = e."entityAId"
+    JOIN "entities" eb ON eb."id" = e."entityBId"
+    JOIN "articles" a ON a."id" = e."articleId"
+   WHERE ea."normalizedName" <> ALL(${GRAPH_EXCLUDED_NAMES_SQL})
+     AND eb."normalizedName" <> ALL(${GRAPH_EXCLUDED_NAMES_SQL})`;
 
 // One snapshot for all three reads. `runEntityResolution` rebuilds the whole graph inside
 // one transaction — `DELETE FROM "entity_edges"` and then the insert — and under READ
@@ -270,7 +281,8 @@ const FOCUS_SQL = `
               AND al."targetNormalizedName" = e."normalizedName"
          ), '{}') AS "aliases"
     FROM "entities" e CROSS JOIN span
-   WHERE e."id" = $2`;
+   WHERE e."id" = $2
+     AND e."normalizedName" <> ALL(${GRAPH_EXCLUDED_NAMES_SQL})`;
 
 // One hop out, strongest tie first, and the count of the whole hop beside it. `COUNT(*)
 // OVER ()` is evaluated before the LIMIT, so the page can say "20 of 34 names" from one
@@ -308,7 +320,13 @@ const NEIGHBOURS_SQL = `
 // a label map when someone has one for 2,072 values.
 const THEMES_SQL = `
   WITH own AS (
-    SELECT DISTINCT "articleId" FROM "entity_edges" WHERE "entityAId" = $1 OR "entityBId" = $1
+    SELECT DISTINCT ee."articleId"
+      FROM "entity_edges" ee
+      JOIN "entities" ea ON ea."id" = ee."entityAId"
+      JOIN "entities" eb ON eb."id" = ee."entityBId"
+     WHERE (ee."entityAId" = $1 OR ee."entityBId" = $1)
+       AND ea."normalizedName" <> ALL(${GRAPH_EXCLUDED_NAMES_SQL})
+       AND eb."normalizedName" <> ALL(${GRAPH_EXCLUDED_NAMES_SQL})
   )
   SELECT ga."surfaceName" AS "theme", COUNT(DISTINCT ga."articleId")::int AS "articleCount"
     FROM own

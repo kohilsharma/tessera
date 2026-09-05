@@ -76,8 +76,9 @@ export function GraphLedger({ retainedDays, rows = [] }: { retainedDays: number;
 // two things a reader has to be told before any of it is readable, and two pages phrasing
 // them differently would be two claims about one graph.
 export const graphRule = (promotionFloor: number) =>
-  `A name enters the graph once ${promotionFloor} separate reports have named it; a link means two names ` +
-  `were reported together, and its weight is how many reports that was.`;
+  `A name enters the graph once ${promotionFloor} separate reports have named it; common GKG demonyms ` +
+  `are omitted so they cannot crowd out reported subjects; a link means two names were reported together, ` +
+  `and its weight is how many reports that was.`;
 
 // Why the page is showing part of the graph rather than all of it, in the words the other
 // surface uses. Both halves are the caller's: what it kept ("the 60 most reported names")

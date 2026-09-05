@@ -77,6 +77,25 @@ describe("the bounded global graph", () => {
     expect(body.nodes.map((node) => node.kind)).toEqual(["person", "person", "person"]);
   });
 
+  it("omits common demonyms from the bounded picture and its co-mention counts", async () => {
+    const publisher = await createPublisher("wire.example");
+    for (let index = 0; index < ENTITY_PROMOTION_FLOOR; index += 1) {
+      const article = await createArticle(publisher.id, `demonym ${index}`);
+      await annotate(article.id, ["Ada Lovelace"]);
+      await annotate(article.id, ["American"], "location");
+    }
+    await coMention(publisher.id, ["Ada Lovelace", "Grace Hopper"], ENTITY_PROMOTION_FLOOR);
+    await runEntityResolution();
+
+    const body = await graph(await reader("student"));
+
+    expect(body.nodes.map((node) => node.canonicalName)).toEqual(["Ada Lovelace", "Grace Hopper"]);
+    expect(body.nodes.every((node) => node.canonicalName !== "American")).toBe(true);
+    expect(labelled(body)).toEqual([{ pair: "Ada Lovelace — Grace Hopper", weight: ENTITY_PROMOTION_FLOOR }]);
+    expect(body.entityCount).toBe(2);
+    expect(body.articleCount).toBe(ENTITY_PROMOTION_FLOOR);
+  });
+
   it("weights an edge by the Articles that co-mention the pair, and draws no edge to a node it did not draw", async () => {
     const publisher = await createPublisher("wire.example");
     await coMention(publisher.id, ["Ada Lovelace", "Charles Babbage"], ENTITY_PROMOTION_FLOOR + 2);
