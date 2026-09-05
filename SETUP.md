@@ -74,6 +74,10 @@ without having to build one live during a demo.
 
 The password is `tessera-demo`, or whatever you set `SEED_PASSWORD` to when you ran it.
 
+The seed also creates five retained graph-fixture reports and runs entity resolution, so `/graph`
+has cited nodes and edges on a clean deploy without waiting for live GDELT ingestion. Those rows
+are unclustered `manual_fixture` Articles; starting the worker adds live firehose coverage.
+
 **Seeding is the only way an Admin exists.** `POST /auth/register` will only ever make a Student or
 an Investor, because Admin is assigned rather than self-served (ADR-0004). Skip this step and
 `/dashboard/admin` is a page that nobody on the system can open.

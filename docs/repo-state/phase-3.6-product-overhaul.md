@@ -51,7 +51,7 @@ spec (§6) and belong to their own tickets.
 
 Three findings came out of the pass, plus one the closing test run turned up. Per #72's fourth
 bullet each was filed as its own issue and written out below, because the phase file is where the
-next session looks first. #103 is now resolved; #104–#106 remain follow-up findings.
+next session looks first. #103 and #104 are now resolved; #105–#106 remain follow-up findings.
 
 The one confirmed defect was a **layout collapse in the edge-citation drawer** (#103): every headline
 inside it rendered one character per line, `a.entry-title` measuring `0px × 1829px`. The cause was not
@@ -77,6 +77,15 @@ The third is **node quality** (#105). Of the 60 drawn names, 48 are typed `locat
 "British", "Iranian", "Canadians"…), and "Los Angeles" is typed `person`. The promotion floor's
 rationale is that a mistake is rarely made five times — which holds for typos and does not hold for
 a demonym, because GKG makes that call consistently.
+
+**#104 — clean-seed graph readiness.** The seed now carries five retained, unclustered
+`manual_fixture` Articles with six repeated entity annotations, embeds them through the existing
+seed path, and invokes `runEntityResolution()` after staging. A fresh `npm run seed` therefore
+produces cited graph nodes and edges without lowering `GRAPH_ENTITY_PROMOTION_FLOOR` or waiting on
+live GDELT. The fixture rows remain outside Stories so the graph keeps its documented firehose
+read shape; `/graph` labels their citations as not being in a Story. ADR-0037 records the decision,
+and `SETUP.md`/`README.md` now make the clean-deploy result explicit. `tests/seed.test.ts` proves a
+clean seed has nonzero entities and edges and that the full seed remains idempotent.
 
 The fourth is a **50/50 flake in the backend suite** (#106), standing at HEAD and unrelated to this
 ticket's docs: `clustering.test.ts` → "seeds and names nothing … when the synthesis config cannot

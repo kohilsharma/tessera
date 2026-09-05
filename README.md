@@ -98,6 +98,10 @@ unless you set `SEED_PASSWORD`):
 | `investor@tessera.local` | Investor |
 | `admin@tessera.local` | Admin |
 
+The seed also creates five retained graph-fixture reports and runs entity resolution, so `/graph`
+has cited nodes and edges on a clean deploy without waiting for live GDELT ingestion. Those rows
+are unclustered `manual_fixture` Articles; starting the worker adds live firehose coverage.
+
 **Seeding is the only way an Admin ever exists.** `POST /auth/register` will only make you a
 Student or an Investor, because Admin is assigned rather than self-served. Skip `npm run seed` and
 `/dashboard/admin` is a page nobody on the system can open.

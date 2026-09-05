@@ -17,10 +17,12 @@ import { stageAnnotations } from "./ingestion/runConnector";
 import { seedAnnotationsFor } from "./seedData/annotations";
 import { SEED_CONNECTORS, SEED_PUBLISHERS, SEED_STORIES } from "./seedData/corpus";
 import { seedCoverImagePng } from "./seedData/coverImage";
+import { SEED_GRAPH_ARTICLES } from "./seedData/graph";
 import { LocalDiskFileStorageProvider } from "./storage/LocalDiskFileStorageProvider";
 import { invalidateComparableStoriesCache } from "./generation/evidence";
 import { leaningFor } from "./lib/publisherLeaning";
 import { applyCuratedTickers } from "./market/tickers";
+import { runEntityResolution } from "./graph/runEntityResolution";
 
 // ADR-0015: `npm run seed` so the demo is never empty. Admin is deliberately not
 // registrable through /auth/register (it is assigned, not self-served), so this
@@ -293,6 +295,69 @@ async function seedAnnotations(): Promise<void> {
   console.log(staged === 0 ? "= GKG annotations already seeded" : `+ ${staged} GKG annotations`);
 }
 
+async function seedGraphFixtures(): Promise<void> {
+  const articles = AppDataSource.getRepository(Article);
+  let inserted = 0;
+  const pending: { id: string; text: string }[] = [];
+
+  for (const fixture of SEED_GRAPH_ARTICLES) {
+    const publisher = await AppDataSource.getRepository(Publisher).findOneByOrFail({ domain: fixture.publisherDomain });
+    let article = await articles.findOneBy({ url: fixture.url });
+    let textChanged = false;
+    if (!article) {
+      article = await articles.save({
+        publisherId: publisher.id,
+        title: fixture.title,
+        url: fixture.url,
+        analysisText: fixture.analysisText,
+        analysisTextMode: "manual_fixture" as const,
+        publishedAt: new Date(fixture.publishedAt),
+      });
+      inserted += 1;
+      textChanged = true;
+    } else if (
+      article.title !== fixture.title ||
+      article.analysisText !== fixture.analysisText ||
+      article.analysisTextMode !== "manual_fixture" ||
+      article.publishedAt.getTime() !== new Date(fixture.publishedAt).getTime() ||
+      article.publisherId !== publisher.id
+    ) {
+      await articles.update(
+        { id: article.id },
+        {
+          publisherId: publisher.id,
+          title: fixture.title,
+          analysisText: fixture.analysisText,
+          analysisTextMode: "manual_fixture" as const,
+          publishedAt: new Date(fixture.publishedAt),
+        },
+      );
+      article.title = fixture.title;
+      article.analysisText = fixture.analysisText;
+      article.analysisTextMode = "manual_fixture";
+      article.publishedAt = new Date(fixture.publishedAt);
+      article.publisherId = publisher.id;
+      textChanged = true;
+    }
+
+    if (!article) throw new Error(`Graph fixture Article was not saved: ${fixture.url}`);
+
+    const [{ missing }] = await AppDataSource.query(`SELECT "embedding" IS NULL AS missing FROM articles WHERE "id" = $1`, [article.id]);
+    if (missing || textChanged) pending.push({ id: article.id, text: `${fixture.title}\n${fixture.analysisText}` });
+
+    const parsed = fixture.annotations.map((annotation) => ({
+      kind: annotation.kind,
+      surfaceName: annotation.surfaceName,
+      charOffset: fixture.analysisText.indexOf(annotation.surfaceName),
+      locationDetail: null,
+    }));
+    await stageAnnotations(AppDataSource.manager, article.id, parsed);
+  }
+
+  await embedInto(pending, createEmbeddingProvider());
+  console.log(inserted === 0 ? "= graph demo fixtures already seeded" : `+ ${inserted} graph demo fixture Articles`);
+}
+
 async function seedEntityTickers(): Promise<void> {
   await applyCuratedTickers(AppDataSource.manager);
 }
@@ -306,9 +371,12 @@ export async function seedAll(): Promise<void> {
   await seedCorpus();
   await seedPublisherLeanings();
   await seedAnnotations();
+  await seedGraphFixtures();
   await seedEntityTickers();
   await seedConnectors();
   await seedBrief();
+  const resolution = await runEntityResolution();
+  if (resolution.status !== "succeeded") throw new Error(`Graph resolution failed: ${resolution.errorSummary ?? "unknown error"}`);
   await invalidateComparableStoriesCache();
 }
 

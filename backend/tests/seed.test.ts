@@ -13,7 +13,9 @@ import { DEFAULT_PROMPT_PARAMS, PromptTemplate } from "../src/entities/PromptTem
 import { PROMPT_VERSION } from "../src/generation/config";
 import { LocalDiskFileStorageProvider } from "../src/storage/LocalDiskFileStorageProvider";
 import { SEED_CONNECTORS, SEED_STORIES } from "../src/seedData/corpus";
+import { SEED_GRAPH_ARTICLES } from "../src/seedData/graph";
 import { seedAll } from "../src/seed";
+import { loadGraphView } from "../src/graph/loadGraphView";
 
 const SEED_BRIEF_TITLE = "AI Accelerator Supply Chain Watch";
 import { setupTestDb } from "./setupTestDb";
@@ -211,7 +213,7 @@ describe("npm run seed", () => {
     const rows = await AppDataSource.query(
       `SELECT a."id", a."analysisText", g."kind", g."surfaceName", g."charOffset", g."locationDetail"
        FROM gkg_annotations g JOIN articles a ON a."id" = g."articleId"
-       WHERE a."analysisTextMode" = 'manual_fixture'`,
+       WHERE a."analysisTextMode" = 'manual_fixture' AND a."storyId" IS NOT NULL`,
     );
     const fixtureArticles = SEED_STORIES.flatMap((story) => story.articles);
     expect(rows.length).toBeGreaterThanOrEqual(fixtureArticles.length * 4);
@@ -256,6 +258,19 @@ describe("npm run seed", () => {
        ) recurring`,
     );
     expect(shared).toBeGreaterThanOrEqual(5);
+  });
+
+  it("builds a graph from a clean seed", async () => {
+    const [{ entities, edges }] = await AppDataSource.query(
+      `SELECT (SELECT COUNT(*)::int FROM entities) AS entities,
+              (SELECT COUNT(*)::int FROM entity_edges) AS edges`,
+    );
+    expect(SEED_GRAPH_ARTICLES).toHaveLength(5);
+    expect(entities).toBeGreaterThan(0);
+    expect(edges).toBeGreaterThan(0);
+    const view = await loadGraphView();
+    expect(view.nodes.length).toBeGreaterThan(0);
+    expect(view.edges.length).toBeGreaterThan(0);
   });
 
   it("is idempotent — a re-run after a migration must not duplicate or throw", async () => {
