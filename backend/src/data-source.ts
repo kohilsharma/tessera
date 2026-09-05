@@ -62,6 +62,7 @@ import { WatchlistItem } from "./entities/WatchlistItem";
 import { AddStoryRolePanels1755771000000 } from "./migrations/1755771000000-AddStoryRolePanels";
 import { CreateWatchlistItems1755772000000 } from "./migrations/1755772000000-CreateWatchlistItems";
 import { AddUserActive1755773000000 } from "./migrations/1755773000000-AddUserActive";
+import { PreserveIngestionRunsOnConnectorDelete1755774000000 } from "./migrations/1755774000000-PreserveIngestionRunsOnConnectorDelete";
 
 const url = process.env.DATABASE_URL;
 
@@ -143,6 +144,7 @@ export const AppDataSource = new DataSource({
     AddStoryRolePanels1755771000000,
     CreateWatchlistItems1755772000000,
     AddUserActive1755773000000,
+    PreserveIngestionRunsOnConnectorDelete1755774000000,
   ],
   synchronize: false,
   logging: false,

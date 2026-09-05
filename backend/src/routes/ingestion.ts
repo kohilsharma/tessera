@@ -1,11 +1,13 @@
 import { Router } from "express";
 import { AppDataSource } from "../data-source";
-import { IngestionConnector } from "../entities/IngestionConnector";
+import { CONNECTOR_KINDS, IngestionConnector, type ConnectorKind } from "../entities/IngestionConnector";
+import { IngestionRun } from "../entities/IngestionRun";
 import { enqueueConnectorRun } from "../ingestion/queue";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
 import { isUuid } from "../lib/uuid";
+import { isPgError, PG_UNIQUE_VIOLATION } from "../lib/pgError";
 
 export const ingestionRouter = Router();
 
@@ -17,6 +19,67 @@ async function findConnector(id: string): Promise<IngestionConnector | null> {
   if (!isUuid(id)) return null;
   return AppDataSource.getRepository(IngestionConnector).findOneBy({ id });
 }
+
+function validateConnectorFields(body: Record<string, unknown>, partial: boolean): string | null {
+  const allowed = ["name", "kind", "endpoint", "feedProvidesFullText", "enabled"];
+  const unknown = Object.keys(body).find((key) => !allowed.includes(key));
+  if (unknown) return `${unknown} is not an accepted connector field`;
+  if (!partial && (typeof body.name !== "string" || typeof body.kind !== "string" || typeof body.endpoint !== "string")) {
+    return "name, kind, and endpoint are required";
+  }
+  if (body.name !== undefined && (typeof body.name !== "string" || !body.name.trim())) return "name must be a non-empty string";
+  if (body.kind !== undefined && (typeof body.kind !== "string" || !CONNECTOR_KINDS.includes(body.kind as ConnectorKind))) {
+    return `kind must be one of: ${CONNECTOR_KINDS.join(", ")}`;
+  }
+  if (body.endpoint !== undefined && (typeof body.endpoint !== "string" || !body.endpoint.trim())) return "endpoint must be a non-empty string";
+  if (body.feedProvidesFullText !== undefined && body.feedProvidesFullText !== null && typeof body.feedProvidesFullText !== "boolean") {
+    return "feedProvidesFullText must be a boolean or null";
+  }
+  if (body.enabled !== undefined && typeof body.enabled !== "boolean") return "enabled must be a boolean";
+  return null;
+}
+
+function connectorPayload(connector: IngestionConnector) {
+  return {
+    id: connector.id,
+    name: connector.name,
+    kind: connector.kind,
+    endpoint: connector.endpoint,
+    feedProvidesFullText: connector.feedProvidesFullText,
+    enabled: connector.enabled,
+  };
+}
+
+ingestionRouter.post(
+  "/ingestion/connectors",
+  ...adminOnly,
+  asyncHandler(async (req, res) => {
+    const body = req.body ?? {};
+    const error = validateConnectorFields(body, false);
+    if (error) {
+      res.status(422).json({ error });
+      return;
+    }
+    const kind = body.kind as ConnectorKind;
+    const connector = AppDataSource.getRepository(IngestionConnector).create({
+      name: (body.name as string).trim(),
+      kind,
+      endpoint: (body.endpoint as string).trim(),
+      feedProvidesFullText: kind === "rss" ? (body.feedProvidesFullText as boolean | null | undefined) ?? false : null,
+      enabled: body.enabled === undefined ? true : (body.enabled as boolean),
+    });
+    try {
+      await AppDataSource.getRepository(IngestionConnector).save(connector);
+    } catch (err) {
+      if (isPgError(err, PG_UNIQUE_VIOLATION)) {
+        res.status(422).json({ error: "Connector name is already in use" });
+        return;
+      }
+      throw err;
+    }
+    res.status(201).json(connectorPayload(connector));
+  }),
+);
 
 // #42: the trigger enqueues, and the worker executes. The scheduler feeds the
 // same queue, so there is exactly one execution path — what is demoed is what
@@ -56,8 +119,14 @@ ingestionRouter.patch(
   "/ingestion/connectors/:id",
   ...adminOnly,
   asyncHandler(async (req, res) => {
-    if (typeof req.body?.enabled !== "boolean") {
-      res.status(422).json({ error: "enabled must be a boolean" });
+    const body = req.body ?? {};
+    if (!Object.keys(body).length) {
+      res.status(422).json({ error: "Provide at least one connector field" });
+      return;
+    }
+    const error = validateConnectorFields(body, true);
+    if (error) {
+      res.status(422).json({ error });
       return;
     }
 
@@ -67,7 +136,41 @@ ingestionRouter.patch(
       return;
     }
 
-    await AppDataSource.getRepository(IngestionConnector).update({ id: connector.id }, { enabled: req.body.enabled });
-    res.json({ ...connector, enabled: req.body.enabled });
+    if (body.name !== undefined) connector.name = (body.name as string).trim();
+    if (body.kind !== undefined) connector.kind = body.kind as ConnectorKind;
+    if (body.endpoint !== undefined) connector.endpoint = (body.endpoint as string).trim();
+    if (body.feedProvidesFullText !== undefined) connector.feedProvidesFullText = body.feedProvidesFullText as boolean | null;
+    if (body.enabled !== undefined) connector.enabled = body.enabled;
+    if (connector.kind !== "rss") connector.feedProvidesFullText = null;
+    try {
+      await AppDataSource.getRepository(IngestionConnector).save(connector);
+    } catch (err) {
+      if (isPgError(err, PG_UNIQUE_VIOLATION)) {
+        res.status(422).json({ error: "Connector name is already in use" });
+        return;
+      }
+      throw err;
+    }
+    res.json(connectorPayload(connector));
+  }),
+);
+
+ingestionRouter.delete(
+  "/ingestion/connectors/:id",
+  ...adminOnly,
+  asyncHandler(async (req, res) => {
+    const connector = await findConnector(req.params.id);
+    if (!connector) {
+      res.status(404).json({ error: "Connector not found" });
+      return;
+    }
+    const runsRetained = await AppDataSource.getRepository(IngestionRun).countBy({ connectorId: connector.id });
+    await AppDataSource.getRepository(IngestionConnector).remove(connector);
+    res.json({
+      id: connector.id,
+      status: "deleted",
+      runsRetained,
+      message: runsRetained ? `Connector deleted; ${runsRetained} ingestion run${runsRetained === 1 ? "" : "s"} retained.` : "Connector deleted; no ingestion runs were recorded.",
+    });
   }),
 );

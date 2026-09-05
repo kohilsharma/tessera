@@ -999,3 +999,62 @@ Verification: 27 focused auth tests cover authorization, filters, pagination, up
 token refusal, malformed input and the absent DELETE path. Full frontend suite: 284 passing;
 frontend build and backend typecheck clean. Full backend suite: 587 passing, 11 skipped, with the
 known unrelated #106 clustering medoid tie flake failing once.
+
+**#99 — Admin connector CRUD.** Added Admin-only create, edit and delete endpoints for ingestion
+connectors with strict field, kind and duplicate-name validation. Existing enable/disable and Run
+commands remain on the same queue path, including the `202 {status:"accepted"}` acknowledgement.
+Deleting a connector now preserves its IngestionRuns with a connector-name snapshot, sets the
+foreign key to null, leaves discovered Articles untouched, and returns the retained-run count and
+message so the console can state the outcome. The Admin dashboard adds an inline create/edit form,
+row actions, confirmation before deletion, and explicit retained-history feedback.
+
+Making connectors deletable opened a hole in retention that nothing else would have caught.
+`pruneExpiredGdeltArticles` selected firehose rows by joining `discoveredByConnectorId` back to a
+GDELT *kind*, which was sound only while connectors were seed-only. The Article FK is
+`ON DELETE SET NULL` — deliberately, so losing a connector never loses the reporting it found — so
+every metadata_only row a deleted GDELT connector discovered would match no kind again and never
+expire, leaving #45's disk bound with a permanent hole as wide as every connector ever removed.
+Retention now also takes orphaned rows. The `metadata_only` clause is what keeps the curated corpus
+out, not the connector join: seeded fixtures are `manual_fixture` (ADR-0007), so a null connector on
+a metadata_only row means exactly "its connector was deleted" and nothing else.
+
+The sibling join in `discoverExtraction` was left alone deliberately, and now says so in place. The
+two rules differ in what they read: `metadata_only` describes the row, so retention still knows an
+orphan is firehose metadata, while `feedProvidesFullText` is a curation note about a feed that no
+longer exists. An orphan is exactly the "older unknown connector" the Article entity says extraction
+must leave alone, so it stays a feed excerpt rather than being crawled on a policy nobody can vouch
+for.
+
+Review turned up four things worth correcting beyond the endpoints. The migration's `down` deletes
+precisely the runs `up` exists to retain and drops the name snapshot, so it now states that, the way
+1755746000000 states its own; it also rebuilt the foreign key under an invented name, and now
+restores `ingestion_runs_connectorId_fkey`, which is what running the migration against the dev
+database confirmed Postgres had called it. `toPublicIngestionRun`'s connector-name parameter became
+unreachable once the snapshot column existed, so it is gone and the dashboard no longer loads the
+connector relation for a name it does not read. CONTEXT.md said in two places what the code no longer
+does — "Only `enabled` is the Admin's to set" and a Retention Window narrowed to rows a GKG or DOC
+connector discovered — and both entries now match. The seed still owns the connectors it seeds: it
+converges a stale endpoint back by name and re-creates a deleted one, so editing a *seeded*
+connector's standing query still means editing the seed constant, and the glossary now says so
+rather than implying the API is the last word.
+
+On the console, the register had been reporting finished commands through `PendingState` — the
+Loading treatment, animated as work arriving — so a completed action announced itself as still in
+flight. `NoticeState` is its own treatment in the agreement hue, which keeps DESIGN.md §8's rule that
+the states look different from each other. The create/edit form now draws `Field` from the form
+archetype instead of a copy of its markup, which restores the `aria-invalid` and `aria-describedby`
+wiring the copy had dropped, and the kind control names the four ingestion surfaces instead of
+showing `gdelt_gkg`. Deletion was confirming through `window.confirm`; it is now a Base UI
+AlertDialog per DESIGN.md §9, which is what lets the consequence be stated in full before the press
+rather than compressed into one line of browser chrome — and the retained-history sentence is shown
+only when runs were actually retained, which driving the real UI is what caught.
+
+Verification: full backend suite 594 passing and 11 skipped, including a retention test that deletes
+a connector and asserts its aged rows still expire while rows inside the horizon stay, and refusals
+for PATCH and DELETE by a non-admin, an anonymous DELETE, both 404s, the widened PATCH's unknown
+field, empty body and blank name, and duplicate names on create and edit. Full frontend suite 288
+passing, with four added dashboard tests the register had none of: the create form's request body,
+the prefilled edit and its PATCH, the confirmation stating what it keeps before anything is sent, and
+backing out sending nothing. Backend and frontend typecheck and the frontend build are clean. Checked
+in the running app against the seeded corpus: the form, the notice, and the confirmation were driven
+end to end, a connector created and deleted, and the dev database left as it was found.

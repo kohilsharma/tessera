@@ -18,6 +18,20 @@ export function PendingState({ children }: { children: ReactNode }) {
   );
 }
 
+// The outcome of a command that has already finished — created, updated,
+// deleted. Not PendingState: that one is the Loading treatment and says work is
+// still in flight, so wearing it to report a finished action tells the operator
+// the opposite of what happened. Same live region, because an outcome that only
+// appears visually is one a screen reader never hears; its own treatment,
+// because DESIGN.md §8 requires the states to look different from each other.
+export function NoticeState({ children }: { children: ReactNode }) {
+  return (
+    <p className="state-notice" role="status">
+      {children}
+    </p>
+  );
+}
+
 export function EmptyState({ children }: { children: ReactNode }) {
   return <div className="state-empty">{children}</div>;
 }

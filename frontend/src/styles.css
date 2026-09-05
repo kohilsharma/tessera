@@ -48,6 +48,7 @@
   --quiet-ink: var(--quiet);
   --registration-rule: var(--rule2);
   --proof-magenta-stock: var(--wash-diverge);
+  --student-context-stock: var(--wash-agree);
 }
 
 * { box-sizing: border-box; }
@@ -184,7 +185,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    is carried by colour alone — the states differ in rule weight and
    shape as well as ink, and each says in words what it is.
    ============================================================ */
-.state-pending, .state-empty, .state-error { margin: 22px 0; }
+.state-pending, .state-empty, .state-error, .state-notice { margin: 22px 0; }
 
 /* Pending: a sheet arriving on the bench — a bounded registration reveal, not a
    loop (DESIGN.md reserves motion for registration and forbids ambient
@@ -206,6 +207,39 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    than the pending state's — weight and fill distinguish them, not just ink.
    One look whether the caller passes bare text or paragraphs. */
 .state-error { border: 1px solid var(--proof-magenta); border-top: 5px solid var(--proof-magenta); background: var(--proof-magenta-stock); padding: 22px 24px; color: var(--bureau-ink); line-height: 1.55; }
+
+/* Notice: a command that finished. The house pattern for a state is a coloured
+   top rule (pending blue, refusal magenta), so an outcome takes the same shape in
+   the agreement hue rather than inventing a treatment. It does not animate: the
+   arrival keyframe belongs to work showing up, and this is work that is over. */
+.state-notice {
+  border: 1px solid var(--registration-rule); border-top: 3px solid var(--student-context);
+  background: var(--student-context-stock); padding: 22px 24px;
+  color: var(--bureau-ink); line-height: 1.55;
+}
+
+/* The destructive confirmation (#99). Deleting a connector is the one command on
+   this console that cannot be undone from the console, so it interrupts and takes
+   focus rather than being one press away — and it spends the interruption saying
+   what survives, which a browser's own confirm() has no room to do. */
+.confirm-backdrop { position: fixed; inset: 0; background: color-mix(in srgb, var(--bureau-ink) 46%, transparent); }
+.confirm-popup {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: min(46ch, calc(100vw - 32px)); border: 1px solid var(--bureau-ink);
+  border-top: 5px solid var(--proof-magenta); background: var(--stock-paper);
+  padding: 26px 28px; color: var(--bureau-ink);
+  box-shadow: 0 18px 44px -18px color-mix(in srgb, var(--bureau-ink) 55%, transparent);
+}
+.confirm-popup h2 { margin: 0 0 12px; font: 600 1.12rem/1.25 var(--font-display); }
+.confirm-popup p { max-width: none; margin: 0 0 13px; line-height: 1.55; }
+.confirm-popup p:last-of-type { margin-bottom: 0; }
+.confirm-consequence { color: var(--quiet-ink); font-size: .88rem; }
+.confirm-actions { display: flex; flex-wrap: wrap; gap: 13px 16px; margin-top: 24px; }
+.confirm-actions button { border: 1px solid var(--quiet-ink); background: var(--stock-paper); color: var(--bureau-ink); padding: 9px 15px; font-size: .78rem; font-weight: 650; cursor: pointer; transition: color 140ms ease, background-color 140ms ease; }
+.confirm-actions button:hover:not(:disabled) { background: var(--bureau-ink); color: var(--stock-paper); }
+.confirm-actions button:disabled { border-color: var(--registration-rule); background: var(--bench-stock); color: var(--quiet-ink); cursor: default; }
+.confirm-actions .confirm-destroy { border-color: var(--proof-magenta); color: var(--proof-magenta); }
+.confirm-actions .confirm-destroy:hover:not(:disabled) { background: var(--proof-magenta); color: var(--stock-paper); }
 
 .state-empty p, .state-error p { max-width: 68ch; margin: 0 0 13px; }
 .state-empty p:last-child, .state-error p:last-child { margin-bottom: 0; }

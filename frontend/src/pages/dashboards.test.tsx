@@ -571,6 +571,112 @@ describe("Admin dashboard", () => {
     expect(within(runs).getByText(/Entity resolution has not run yet/)).toBeInTheDocument();
   });
 
+  // #99: the register stopped being read-only. The form is the whole of what an
+  // operator can now say about a connector, so what it sends is the contract.
+  it("creates a connector from the register's own form", async () => {
+    mockConsole({
+      command: jsonResponse(
+        { id: "c2", name: "Guardian world", kind: "rss", endpoint: "https://guardian.example/rss", feedProvidesFullText: true, enabled: true },
+        201,
+      ),
+    });
+
+    renderWithProviders(<AdminDashboard />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Add connector" }));
+    const form = screen.getByRole("form", { name: "Create connector" });
+    await userEvent.type(within(form).getByLabelText("Name"), "Guardian world");
+    await userEvent.type(within(form).getByLabelText("Endpoint"), "https://guardian.example/rss");
+    // The RSS-only policy field appears for the kind it belongs to and no other.
+    await userEvent.click(within(form).getByLabelText(/Feed supplies full text/));
+    await userEvent.click(within(form).getByRole("button", { name: "Create connector" }));
+
+    const call = callTo("/api/v1/ingestion/connectors");
+    expect(call?.[1]).toMatchObject({ method: "POST" });
+    expect(JSON.parse(String((call?.[1] as RequestInit).body))).toMatchObject({
+      name: "Guardian world",
+      kind: "rss",
+      endpoint: "https://guardian.example/rss",
+      feedProvidesFullText: true,
+    });
+  });
+
+  it("edits an existing connector through the same form, prefilled", async () => {
+    mockConsole({
+      command: jsonResponse({
+        id: "c1",
+        name: "GDELT GKG",
+        kind: "gdelt_gkg",
+        endpoint: "http://data.gdeltproject.org/gdeltv2/lastupdate.txt",
+        feedProvidesFullText: null,
+        enabled: true,
+      }),
+    });
+
+    renderWithProviders(<AdminDashboard />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const form = screen.getByRole("form", { name: "Edit connector" });
+    // Editing starts from what the connector already is, not from an empty form.
+    expect(within(form).getByLabelText("Name")).toHaveValue("GDELT GKG");
+    // The feed policy belongs to RSS alone, so a GKG connector is not asked.
+    expect(within(form).queryByLabelText(/Feed supplies full text/)).not.toBeInTheDocument();
+
+    await userEvent.clear(within(form).getByLabelText("Endpoint"));
+    await userEvent.type(within(form).getByLabelText("Endpoint"), "http://data.gdeltproject.org/gdeltv2/moved.txt");
+    await userEvent.click(within(form).getByRole("button", { name: "Save connector" }));
+
+    const call = callTo("/api/v1/ingestion/connectors/c1");
+    expect(call?.[1]).toMatchObject({ method: "PATCH" });
+    expect(JSON.parse(String((call?.[1] as RequestInit).body))).toMatchObject({
+      endpoint: "http://data.gdeltproject.org/gdeltv2/moved.txt",
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent("GDELT GKG updated.");
+  });
+
+  // The ticket's own wording: deleting states what happens to the runs rather
+  // than silently cascading. An operator who is not told history survives has to
+  // guess, and the safe guess is to never delete anything.
+  it("states what a deletion will keep before it happens, and what it kept after", async () => {
+    mockConsole({
+      command: jsonResponse({
+        id: "c1",
+        status: "deleted",
+        runsRetained: 3,
+        message: "Connector deleted; 3 ingestion runs retained.",
+      }),
+    });
+
+    renderWithProviders(<AdminDashboard />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Delete" }));
+
+    // Nothing is sent on opening the confirmation — the press asks, it does not do.
+    const confirmation = await screen.findByRole("alertdialog");
+    expect(callTo("/api/v1/ingestion/connectors/c1")).toBeUndefined();
+    expect(within(confirmation).getByRole("heading")).toHaveTextContent("Delete GDELT GKG?");
+    expect(confirmation).toHaveTextContent(/run history is kept/i);
+    expect(confirmation).toHaveTextContent(/Articles it\s+discovered remain in the corpus/i);
+
+    await userEvent.click(within(confirmation).getByRole("button", { name: "Delete connector" }));
+
+    expect(callTo("/api/v1/ingestion/connectors/c1")?.[1]).toMatchObject({ method: "DELETE" });
+    expect(await screen.findByRole("status")).toHaveTextContent("3 ingestion runs retained");
+    expect(screen.getByText(/run history stays in the ledger below/i)).toBeInTheDocument();
+  });
+
+  it("deletes nothing when the operator backs out of the confirmation", async () => {
+    mockConsole();
+
+    renderWithProviders(<AdminDashboard />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    const confirmation = await screen.findByRole("alertdialog");
+    await userEvent.click(within(confirmation).getByRole("button", { name: "Keep it" }));
+
+    expect(callTo("/api/v1/ingestion/connectors/c1")).toBeUndefined();
+  });
+
   it("states a refused command in the connector register rather than blanking the console", async () => {
     mockConsole({ command: jsonResponse({ error: "Connector is disabled" }, 409) });
 

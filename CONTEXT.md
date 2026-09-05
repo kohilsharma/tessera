@@ -251,10 +251,11 @@ Terms are canonical: use these words in code, docs, and conversation.
 - **IngestionConnector** — *How* Tessera discovers/receives data (RSS, GDELT_DOC, etc).
   A connector is not a publisher; a GDELT connector spans many publishers. For a source that
   answers a *question* rather than streaming — the DOC API — the question is part of the
-  connector: it lives in the endpoint's query string. That is a data change rather than a code
-  change, but it is not yet an operator-facing one: the seed owns every seeded connector's
-  endpoint and converges a stale one, so changing the standing query means changing the seed
-  constant. Only `enabled` is the Admin's to set through the API. (#46)
+  connector: it lives in the endpoint's query string. An Admin creates, edits and deletes
+  connectors through the API (#99) — name, kind, endpoint, `feedProvidesFullText` and `enabled`.
+  The seed still owns the connectors *it* seeds: it converges a stale endpoint back by name and
+  re-creates one that was deleted, so editing a seeded connector's standing query still means
+  changing the seed constant. `enabled` is the one field the seed never reclaims. (#46, #99)
 
 - **Extraction** — Reading a publisher's own page for the body its feed only teased, raising
   that Article from `feed_excerpt` to `api_content`. It is a connector too (`readability`),
@@ -336,7 +337,10 @@ Terms are canonical: use these words in code, docs, and conversation.
   matched". (#46, ADR-0018)
 - **Retention Window** — The seven days beyond which a GDELT-derived Article is removed, measured
   from when the row was *stored*, so unbounded metadata producers have a ceiling on disk. Narrow
-  by design: only rows a GKG **or DOC** connector discovered that are still `metadata_only`.
+  by design: only rows a GKG **or DOC** connector discovered that are still `metadata_only` —
+  or that no longer name a connector at all, because an Admin deleted the one that found them
+  (#99). Without that second arm a deleted connector's rows would match no kind again and never
+  expire, which is a hole in the ceiling rather than a narrowing of it.
   RSS-discovered reporting, anything enriched with text, an Article a Story or a Brief has taken
   hold of, and
   the curated fixture corpus all outlive it. GKG Annotations go with the Article they were

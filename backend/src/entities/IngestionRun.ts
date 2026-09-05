@@ -13,12 +13,17 @@ export class IngestionRun {
   @PrimaryGeneratedColumn("uuid")
   id!: string;
 
-  @ManyToOne(() => IngestionConnector)
+  @ManyToOne(() => IngestionConnector, { nullable: true, onDelete: "SET NULL" })
   @JoinColumn({ name: "connectorId" })
-  connector!: IngestionConnector;
+  connector!: IngestionConnector | null;
 
-  @Column({ type: "uuid" })
-  connectorId!: string;
+  @Column({ type: "uuid", nullable: true })
+  connectorId!: string | null;
+
+  // Snapshot the name so retained history stays identifiable after an Admin
+  // removes its connector configuration.
+  @Column({ type: "varchar", nullable: true })
+  connectorName!: string | null;
 
   // `running` is written before the first fetch and updated to a terminal status
   // at the end — a row that exists before the work does, which is what makes a

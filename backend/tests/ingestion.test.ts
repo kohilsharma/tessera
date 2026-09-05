@@ -2131,6 +2131,25 @@ describe("GDELT retention", () => {
     expect(await heldIds()).toEqual([fresh.id]);
   });
 
+  // #99 made connectors deletable, and the Article FK is ON DELETE SET NULL so a
+  // removed connector never takes its reporting with it. Without the null arm in
+  // retention those rows match no kind again and never expire, which is a hole in
+  // the firehose's disk bound exactly as wide as every connector ever removed.
+  it("still ages out firehose rows whose connector an Admin deleted", async () => {
+    const connector = await createGkgConnector();
+    const orphaned = await stored(connector, expired());
+    const fresh = await stored(connector, inside());
+    await AppDataSource.getRepository(IngestionConnector).delete({ id: connector.id });
+    expect(await AppDataSource.getRepository(Article).findOneByOrFail({ id: orphaned.id })).toMatchObject({
+      discoveredByConnectorId: null,
+    });
+
+    expect(await pruneExpiredGdeltArticles()).toBe(1);
+
+    // The horizon still governs the orphans: the fresh one is inside it.
+    expect(await heldIds()).toEqual([fresh.id]);
+  });
+
   // The horizon is when the row was stored, not what it reports on: GDELT carries
   // documents whose own timestamp is old, and pruning on that would insert them,
   // delete them, and insert them again from the next window that mentions them.
@@ -2366,6 +2385,143 @@ describe("the Admin ingestion surface", () => {
       .set("Authorization", `Bearer ${token}`)
       .send({ enabled: "yes" });
     expect(invalid.status).toBe(422);
+  });
+
+  it("lets an Admin create, edit and delete a connector while retaining its run history", async () => {
+    const token = await createAdminToken("ingestion-admin-crud@example.com");
+    const created = await request(app())
+      .post("/api/v1/ingestion/connectors")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: "Managed feed", kind: "rss", endpoint: "https://managed.example/feed.xml" });
+    expect(created.status).toBe(201);
+    expect(created.body).toMatchObject({ name: "Managed feed", kind: "rss", enabled: true, feedProvidesFullText: false });
+
+    const edited = await request(app())
+      .patch(`/api/v1/ingestion/connectors/${created.body.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: "Managed feed v2", endpoint: "https://managed.example/v2.xml", feedProvidesFullText: true });
+    expect(edited.status).toBe(200);
+    expect(edited.body).toMatchObject({ name: "Managed feed v2", endpoint: "https://managed.example/v2.xml", feedProvidesFullText: true });
+
+    await AppDataSource.getRepository(IngestionRun).save({
+      connectorId: created.body.id,
+      connectorName: created.body.name,
+      status: "succeeded" as const,
+      startedAt: new Date(),
+      completedAt: new Date(),
+    });
+    const deleted = await request(app())
+      .delete(`/api/v1/ingestion/connectors/${created.body.id}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(deleted.status).toBe(200);
+    expect(deleted.body).toMatchObject({ status: "deleted", runsRetained: 1 });
+    const run = await AppDataSource.getRepository(IngestionRun).findOneByOrFail({ connectorName: created.body.name });
+    expect(run.connectorId).toBeNull();
+
+    const dashboard = await request(app()).get("/api/v1/dashboard/admin").set("Authorization", `Bearer ${token}`);
+    expect(dashboard.body.ingestionRuns).toContainEqual(expect.objectContaining({ connectorName: created.body.name }));
+  });
+
+  it("validates connector CRUD at the Admin boundary", async () => {
+    const token = await createAdminToken("ingestion-admin-crud-validation@example.com");
+    const invalid = await request(app())
+      .post("/api/v1/ingestion/connectors")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: "Bad connector", kind: "unknown", endpoint: "https://bad.example" });
+    expect(invalid.status).toBe(422);
+
+    const student = await registerAndLogin("ingestion-crud-student@example.com", "student");
+    const forbidden = await request(app())
+      .post("/api/v1/ingestion/connectors")
+      .set("Authorization", `Bearer ${student}`)
+      .send({ name: "Nope", kind: "rss", endpoint: "https://nope.example" });
+    expect(forbidden.status).toBe(403);
+  });
+
+  // PATCH is the route the ticket singles out — it accepted exactly one field
+  // before #99 widened it, so what it now refuses is the half worth pinning.
+  it("refuses an unknown field, an empty body, and a missing connector on PATCH", async () => {
+    const token = await createAdminToken("ingestion-patch-validation@example.com");
+    const connector = await createRssConnector("https://patch-validation.example/feed.xml");
+
+    const unknownField = await request(app())
+      .patch(`/api/v1/ingestion/connectors/${connector.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ enabled: false, schedule: "hourly" });
+    expect(unknownField.status).toBe(422);
+    expect(unknownField.body.error).toMatch(/schedule/);
+
+    const empty = await request(app())
+      .patch(`/api/v1/ingestion/connectors/${connector.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({});
+    expect(empty.status).toBe(422);
+
+    const blankName = await request(app())
+      .patch(`/api/v1/ingestion/connectors/${connector.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: "   " });
+    expect(blankName.status).toBe(422);
+
+    // The refusals left the connector exactly as it was.
+    const held = await AppDataSource.getRepository(IngestionConnector).findOneByOrFail({ id: connector.id });
+    expect(held).toMatchObject({ name: connector.name, enabled: connector.enabled });
+
+    const missing = await request(app())
+      .patch(`/api/v1/ingestion/connectors/00000000-0000-0000-0000-000000000000`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ enabled: false });
+    expect(missing.status).toBe(404);
+  });
+
+  it("refuses a duplicate connector name on both create and edit", async () => {
+    const token = await createAdminToken("ingestion-duplicate-name@example.com");
+    const held = await createRssConnector("https://duplicate.example/feed.xml");
+    const other = await request(app())
+      .post("/api/v1/ingestion/connectors")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: "Distinct feed", kind: "rss", endpoint: "https://distinct.example/feed.xml" });
+    expect(other.status).toBe(201);
+
+    const clashOnCreate = await request(app())
+      .post("/api/v1/ingestion/connectors")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: held.name, kind: "rss", endpoint: "https://clash.example/feed.xml" });
+    expect(clashOnCreate.status).toBe(422);
+    expect(clashOnCreate.body.error).toMatch(/already in use/);
+
+    const clashOnEdit = await request(app())
+      .patch(`/api/v1/ingestion/connectors/${other.body.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: held.name });
+    expect(clashOnEdit.status).toBe(422);
+  });
+
+  it("refuses PATCH and DELETE to a non-admin, and DELETE of a connector that is not there", async () => {
+    const admin = await createAdminToken("ingestion-delete-admin@example.com");
+    const connector = await createRssConnector("https://delete-auth.example/feed.xml");
+    const student = await registerAndLogin("ingestion-delete-student@example.com", "student");
+
+    const patchRefused = await request(app())
+      .patch(`/api/v1/ingestion/connectors/${connector.id}`)
+      .set("Authorization", `Bearer ${student}`)
+      .send({ enabled: false });
+    expect(patchRefused.status).toBe(403);
+
+    const deleteRefused = await request(app())
+      .delete(`/api/v1/ingestion/connectors/${connector.id}`)
+      .set("Authorization", `Bearer ${student}`);
+    expect(deleteRefused.status).toBe(403);
+    // Refused means untouched, not merely unanswered.
+    expect(await AppDataSource.getRepository(IngestionConnector).countBy({ id: connector.id })).toBe(1);
+
+    const anonymous = await request(app()).delete(`/api/v1/ingestion/connectors/${connector.id}`);
+    expect(anonymous.status).toBe(401);
+
+    const missing = await request(app())
+      .delete(`/api/v1/ingestion/connectors/00000000-0000-0000-0000-000000000000`)
+      .set("Authorization", `Bearer ${admin}`);
+    expect(missing.status).toBe(404);
   });
 
   it("carries IngestionRun history on the Admin dashboard payload, newest first", async () => {

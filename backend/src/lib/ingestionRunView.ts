@@ -6,18 +6,19 @@ import { IngestionRun } from "../entities/IngestionRun";
 // to mirror. Sole caller since #42 — the run endpoint answers with an
 // acknowledgement now, because the run has not happened when it replies.
 //
-// The connector's name is passed in rather than read off `run.connector`, so a
-// caller that already holds the connector need not load the relation again.
+// The name comes off the run's own snapshot column (#99), not the connector
+// relation: an Admin can delete a connector now, and the history it produced
+// outlives it by design. That also means no caller has to load the relation.
 //
 // `cursor` is deliberately not served. It is where the connector got to in its
 // source's own terms, kept for the scheduler's benefit (#45); nothing on the
 // operator surface reads it, and an unread field on the wire is one the client
 // has to decide how to ignore.
-export function toPublicIngestionRun(run: IngestionRun, connectorName: string) {
+export function toPublicIngestionRun(run: IngestionRun) {
   return {
     id: run.id,
     connectorId: run.connectorId,
-    connectorName,
+    connectorName: run.connectorName ?? "Deleted connector",
     status: run.status,
     startedAt: run.startedAt,
     completedAt: run.completedAt,

@@ -1,9 +1,15 @@
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  createIngestionConnector,
+  deleteIngestionConnector,
   getAdminDashboard,
   runIngestionConnector,
   setConnectorEnabled,
+  updateIngestionConnector,
   USER_ROLES,
+  type ConnectorKind,
+  type ConnectorSummary,
   type TermsClass,
 } from "../api/client";
 import DashboardShell from "./DashboardShell";
@@ -14,7 +20,9 @@ import {
   DashboardRegister,
   RegisterRow,
 } from "../components/dashboardArchetype";
-import { EmptyState, EntryList, ErrorState, PendingState } from "../components/uiStates";
+import { EmptyState, EntryList, ErrorState, NoticeState, PendingState } from "../components/uiStates";
+import { Field } from "../components/formArchetype";
+import { AlertDialog } from "@base-ui-components/react/alert-dialog";
 import { Link } from "react-router-dom";
 import { Leaning, LeaningAttribution } from "../components/primitives";
 import {
@@ -37,6 +45,123 @@ const TERMS_CLASS_LABEL: Record<TermsClass, string> = {
   licensed: "Licensed",
 };
 
+// Mirrors CONNECTOR_KINDS in backend/src/entities/IngestionConnector.ts. Named
+// the way CONTEXT.md and ADR-0018 name the four ingestion surfaces, because
+// `gdelt_gkg` is a column value rather than something an operator says.
+const CONNECTOR_KIND_LABEL: Record<ConnectorKind, string> = {
+  gdelt_gkg: "GDELT GKG firehose",
+  gdelt_doc: "GDELT DOC API",
+  rss: "RSS feed",
+  readability: "Readability extraction",
+};
+const CONNECTOR_KINDS = Object.keys(CONNECTOR_KIND_LABEL) as ConnectorKind[];
+type ConnectorDraft = { id?: string; name: string; kind: ConnectorKind; endpoint: string; feedProvidesFullText: boolean | null };
+
+function connectorDraft(connector?: ConnectorSummary): ConnectorDraft {
+  return {
+    id: connector?.id,
+    name: connector?.name ?? "",
+    kind: connector?.kind ?? "rss",
+    endpoint: connector?.endpoint ?? "",
+    feedProvidesFullText: connector?.feedProvidesFullText ?? false,
+  };
+}
+
+function ConnectorEditor({
+  draft,
+  pending,
+  error,
+  onChange,
+  onCancel,
+  onSubmit,
+}: {
+  draft: ConnectorDraft;
+  pending: boolean;
+  error: string | null;
+  onChange: (next: ConnectorDraft) => void;
+  onCancel: () => void;
+  onSubmit: () => void;
+}) {
+  // `Field` rather than a hand-rolled label-and-input: it is what every other form
+  // on the product draws, and it wires aria-invalid and aria-describedby to the
+  // one line under the control, which a copy of the markup silently drops.
+  return (
+    <form className="form-panel" aria-label={draft.id ? "Edit connector" : "Create connector"} onSubmit={(event) => { event.preventDefault(); onSubmit(); }}>
+      {error && <ErrorState>{error}</ErrorState>}
+      <Field id="connector-name" label="Name" hint="How this connector is listed here. Two connectors cannot share one.">
+        {(field) => <input {...field} value={draft.name} disabled={pending} onChange={(event) => onChange({ ...draft, name: event.target.value })} required />}
+      </Field>
+      <Field id="connector-kind" label="Kind" hint="Which ingestion surface this connector reads (ADR-0018).">
+        {(field) => (
+          <select {...field} value={draft.kind} disabled={pending} onChange={(event) => onChange({ ...draft, kind: event.target.value as ConnectorKind })}>
+            {CONNECTOR_KINDS.map((kind) => <option key={kind} value={kind}>{CONNECTOR_KIND_LABEL[kind]}</option>)}
+          </select>
+        )}
+      </Field>
+      <Field
+        id="connector-endpoint"
+        label="Endpoint"
+        hint={draft.kind === "readability" ? "Readability discovers nothing, so this names the pass rather than an address." : "The address this connector reads."}
+      >
+        {(field) => <input {...field} value={draft.endpoint} disabled={pending} onChange={(event) => onChange({ ...draft, endpoint: event.target.value })} required />}
+      </Field>
+      {/* Only RSS carries a feed policy; the column is null for every other kind,
+          so the control exists exactly where the value is meaningful. */}
+      {draft.kind === "rss" && (
+        <label className="filter-field">
+          <input type="checkbox" checked={draft.feedProvidesFullText === true} disabled={pending} onChange={(event) => onChange({ ...draft, feedProvidesFullText: event.target.checked })} />
+          Feed supplies full text
+        </label>
+      )}
+      <div className="record-actions">
+        <button type="submit" disabled={pending}>{pending ? "Saving…" : draft.id ? "Save connector" : "Create connector"}</button>
+        <button type="button" disabled={pending} onClick={onCancel}>Cancel</button>
+      </div>
+    </form>
+  );
+}
+
+// Deleting a connector is the only command on this console with no undo, so it
+// interrupts and holds focus (Base UI, per DESIGN.md §9) rather than riding on
+// the browser's confirm(), which cannot say what survives in more than one line.
+function ConfirmConnectorDelete({
+  connector,
+  pending,
+  onCancel,
+  onConfirm,
+}: {
+  connector: ConnectorSummary | null;
+  pending: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <AlertDialog.Root open={connector !== null} onOpenChange={(open) => { if (!open) onCancel(); }}>
+      <AlertDialog.Portal>
+        <AlertDialog.Backdrop className="confirm-backdrop" />
+        <AlertDialog.Popup className="confirm-popup">
+          <AlertDialog.Title render={<h2 />}>Delete {connector?.name}?</AlertDialog.Title>
+          <AlertDialog.Description render={<p />}>
+            Its configuration is removed and it stops being scheduled.
+          </AlertDialog.Description>
+          {/* The ticket's own requirement: say what happens to the runs instead of
+              cascading quietly. Both halves are stated before the press, not after. */}
+          <p className="confirm-consequence">
+            Its ingestion run history is kept and stays readable under this name, and the Articles it
+            discovered remain in the corpus.
+          </p>
+          <div className="confirm-actions">
+            <button type="button" className="confirm-destroy" disabled={pending} onClick={onConfirm}>
+              {pending ? "Deleting…" : "Delete connector"}
+            </button>
+            <button type="button" disabled={pending} onClick={onCancel}>Keep it</button>
+          </div>
+        </AlertDialog.Popup>
+      </AlertDialog.Portal>
+    </AlertDialog.Root>
+  );
+}
+
 // The Admin surface (#36, #39, #49, #50, #52, #57, #66, #67): ten operator registers, in
 // four shapes, so they are told apart before they are read — standing totals as plates,
 // the connector fleet and the two review queues as registers an operator acts on,
@@ -48,6 +173,12 @@ const TERMS_CLASS_LABEL: Record<TermsClass, string> = {
 export default function AdminDashboard() {
   const query = useQuery({ queryKey: ["dashboard", "admin"], queryFn: getAdminDashboard });
   const queryClient = useQueryClient();
+  const [editor, setEditor] = useState<ConnectorDraft | null>(null);
+  // The outcome carries whether it was a deletion rather than being recovered by
+  // reading the server's sentence: the message is prose the API owns and may
+  // reword, and a rendering decision should not depend on its first two words.
+  const [connectorNotice, setConnectorNotice] = useState<{ text: string; runsRetained: number } | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<ConnectorSummary | null>(null);
 
   // Both mutations change what this same payload says, so both refetch it — the
   // run counts, the new IngestionRun, and the publishers it may have created all
@@ -58,7 +189,19 @@ export default function AdminDashboard() {
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => setConnectorEnabled(id, enabled),
     onSuccess: invalidate,
   });
-  const commandError = run.error?.message ?? toggle.error?.message ?? null;
+  const create = useMutation({
+    mutationFn: createIngestionConnector,
+    onSuccess: (connector) => { invalidate(); setEditor(null); setConnectorNotice({ text: `${connector.name} created.`, runsRetained: 0 }); },
+  });
+  const update = useMutation({
+    mutationFn: ({ id, input }: { id: string; input: ConnectorDraft }) => updateIngestionConnector(id, input),
+    onSuccess: (connector) => { invalidate(); setEditor(null); setConnectorNotice({ text: `${connector.name} updated.`, runsRetained: 0 }); },
+  });
+  const remove = useMutation({
+    mutationFn: deleteIngestionConnector,
+    onSuccess: (result) => { invalidate(); setPendingDelete(null); setConnectorNotice({ text: result.message, runsRetained: result.runsRetained }); },
+  });
+  const commandError = run.error?.message ?? toggle.error?.message ?? create.error?.message ?? update.error?.message ?? remove.error?.message ?? null;
 
   // Firing either connector command clears the other's refusal first: a mutation keeps
   // its error until it is reset, so a failed Run would otherwise stay stated above the
@@ -67,6 +210,9 @@ export default function AdminDashboard() {
   function command(fire: () => void): void {
     run.reset();
     toggle.reset();
+    create.reset();
+    update.reset();
+    remove.reset();
     fire();
   }
 
@@ -94,7 +240,26 @@ export default function AdminDashboard() {
             <DashboardRegister
               heading="Ingestion connectors"
               folio={`${data.connectors.filter((connector) => connector.enabled).length} of ${data.connectors.length} enabled`}
+              command={<button type="button" onClick={() => { setConnectorNotice(null); setEditor(connectorDraft()); }}>Add connector</button>}
             >
+              {connectorNotice && <NoticeState>{connectorNotice.text}</NoticeState>}
+              {editor && (
+                <ConnectorEditor
+                  draft={editor}
+                  pending={create.isPending || update.isPending}
+                  error={create.error?.message ?? update.error?.message ?? null}
+                  onChange={setEditor}
+                  onCancel={() => { create.reset(); update.reset(); setEditor(null); }}
+                  onSubmit={() => {
+                    setConnectorNotice(null);
+                    if (editor.id) {
+                      const { id, ...input } = editor;
+                      update.mutate({ id, input });
+                    }
+                    else create.mutate(editor);
+                  }}
+                />
+              )}
               {/* A refused command is this register's failure, not the page's:
                   the payload loaded fine, so DashboardShell's error treatment
                   would be a lie. Same treatment, stated where it happened. */}
@@ -124,7 +289,7 @@ export default function AdminDashboard() {
                       name={connector.name}
                       note={connector.endpoint}
                       meta={[
-                        { term: "Kind", value: connector.kind },
+                        { term: "Kind", value: CONNECTOR_KIND_LABEL[connector.kind] },
                         { term: "Status", value: connector.enabled ? "Enabled" : "Disabled" },
                       ]}
                       action={
@@ -147,12 +312,33 @@ export default function AdminDashboard() {
                           >
                             {connector.enabled ? "Disable" : "Enable"}
                           </button>
+                          <button type="button" disabled={remove.isPending && remove.variables === connector.id} onClick={() => { setConnectorNotice(null); setEditor(connectorDraft(connector)); }}>
+                            Edit
+                          </button>
+                          <button type="button" disabled={remove.isPending && remove.variables === connector.id} onClick={() => {
+                            setConnectorNotice(null);
+                            command(() => setPendingDelete(connector));
+                          }}>
+                            Delete
+                          </button>
                         </>
                       }
                     />
                   ))}
                 </EntryList>
               )}
+              {/* Only when there is history to have kept: a connector that never ran
+                  has none, and saying otherwise would be the same kind of guess the
+                  outcome message exists to remove. */}
+              {(connectorNotice?.runsRetained ?? 0) > 0 && (
+                <p className="record-prose">Its run history stays in the ledger below, under the name it had.</p>
+              )}
+              <ConfirmConnectorDelete
+                connector={pendingDelete}
+                pending={remove.isPending}
+                onCancel={() => setPendingDelete(null)}
+                onConfirm={() => pendingDelete && remove.mutate(pendingDelete.id)}
+              />
             </DashboardRegister>
 
             {/* ADR-0024: read from Postgres, not the queue — so this register is

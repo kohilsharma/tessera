@@ -176,6 +176,7 @@ export type ConnectorSummary = {
   name: string;
   kind: ConnectorKind;
   endpoint: string;
+  feedProvidesFullText: boolean | null;
   enabled: boolean;
 };
 // #40: mirrors backend/src/entities/Publisher.ts. CONTEXT.md "Terms Class" — the
@@ -766,6 +767,28 @@ export function runIngestionConnector(connectorId: string): Promise<IngestionRun
 
 export function setConnectorEnabled(connectorId: string, enabled: boolean): Promise<ConnectorSummary> {
   return sendJson("PATCH", `/api/v1/ingestion/connectors/${connectorId}`, { enabled }, "Could not update this connector");
+}
+
+export type ConnectorInput = {
+  name: string;
+  kind: ConnectorKind;
+  endpoint: string;
+  feedProvidesFullText?: boolean | null;
+  enabled?: boolean;
+};
+
+export function createIngestionConnector(input: ConnectorInput): Promise<ConnectorSummary> {
+  return sendJson("POST", "/api/v1/ingestion/connectors", input, "Could not create this connector");
+}
+
+export function updateIngestionConnector(connectorId: string, input: Partial<ConnectorInput>): Promise<ConnectorSummary> {
+  return sendJson("PATCH", `/api/v1/ingestion/connectors/${connectorId}`, input, "Could not update this connector");
+}
+
+export type ConnectorDeleteResult = { id: string; status: "deleted"; runsRetained: number; message: string };
+
+export function deleteIngestionConnector(connectorId: string): Promise<ConnectorDeleteResult> {
+  return sendJson("DELETE", `/api/v1/ingestion/connectors/${connectorId}`, undefined, "Could not delete this connector");
 }
 
 // #49: the Admin clustering trigger, an enqueue for the same reason the ingestion

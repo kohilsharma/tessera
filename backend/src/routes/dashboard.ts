@@ -138,7 +138,7 @@ dashboardRouter.get(
     for (const row of rows) userCounts[row.role] = Number(row.count);
 
     const connectors = await AppDataSource.getRepository(IngestionConnector).find({
-      select: { id: true, name: true, kind: true, endpoint: true, enabled: true },
+      select: { id: true, name: true, kind: true, endpoint: true, feedProvidesFullText: true, enabled: true },
       order: { name: "ASC" },
     });
 
@@ -147,7 +147,6 @@ dashboardRouter.get(
     // capped — an operator diagnosing a feed reads the last few runs, and an
     // unbounded history would grow the Admin payload without bound.
     const ingestionRuns = await AppDataSource.getRepository(IngestionRun).find({
-      relations: { connector: true },
       order: { startedAt: "DESC" },
       take: RECENT_INGESTION_RUNS,
     });
@@ -185,7 +184,7 @@ dashboardRouter.get(
       role: "admin",
       userCounts,
       connectors,
-      ingestionRuns: ingestionRuns.map((run) => toPublicIngestionRun(run, run.connector.name)),
+      ingestionRuns: ingestionRuns.map((run) => toPublicIngestionRun(run)),
       clusteringRuns,
       entityResolutionRuns,
       promptClaimCountRange: { min: MIN_SURVIVING_CLAIMS, max: MAX_REQUESTED_CLAIMS },

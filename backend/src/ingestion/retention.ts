@@ -42,12 +42,17 @@ export async function pruneExpiredGdeltArticles(): Promise<number> {
     .andWhere(`"analysisTextMode" = :mode`, {
       mode: "metadata_only" satisfies AnalysisTextMode,
     })
-    // A seeded fixture Article has no discovering connector at all (ADR-0007), so
-    // `IN` excludes the curated corpus without a clause of its own. The kinds are
-    // bound rather than inlined so tsc still checks them against the union.
-    .andWhere(`"discoveredByConnectorId" IN (SELECT id FROM ingestion_connectors WHERE kind IN (:...kinds))`, {
-      kinds: EXPIRING_KINDS,
-    })
+    // The `metadata_only` clause above is what excludes the curated corpus, which
+    // seeds as `manual_fixture` (ADR-0007) — so a null connector here is not a
+    // fixture. It is a GDELT row whose connector an Admin deleted (#99): the
+    // Article survives by ON DELETE SET NULL, and without the null arm it would
+    // never match a kind again, leaving the firehose's disk bound with a hole
+    // exactly as wide as every connector ever removed. The kinds are bound rather
+    // than inlined so tsc still checks them against the union.
+    .andWhere(
+      `("discoveredByConnectorId" IS NULL OR "discoveredByConnectorId" IN (SELECT id FROM ingestion_connectors WHERE kind IN (:...kinds)))`,
+      { kinds: EXPIRING_KINDS },
+    )
     // Both references below are ON DELETE CASCADE and this runs unattended every
     // 15 minutes, so without these two clauses retention would one day silently
     // take evidence out of a Story or an Article out of someone's Brief. Nothing

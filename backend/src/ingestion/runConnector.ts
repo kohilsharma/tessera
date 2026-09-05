@@ -924,6 +924,13 @@ async function discoverExtraction(deps: RunConnectorDeps): Promise<Discovery> {
     .select(["article.id", "article.title", "article.url", "article.publishedAt", "article.analysisText"])
     .where(`article."extractionAttemptedAt" IS NULL`)
     .andWhere(`article."analysisTextMode" = :mode`, { mode: "feed_excerpt" satisfies AnalysisTextMode })
+    // Retention grew a null arm when #99 made connectors deletable; this join
+    // deliberately did not. The rules differ in what they read: `metadata_only`
+    // describes the row itself, so retention still knows an orphan is firehose
+    // metadata, while `feedProvidesFullText` is a curation note about a feed that
+    // no longer exists. An orphan is exactly the "older unknown connector" the
+    // Article entity says extraction must leave alone, so it stays a feed excerpt
+    // rather than being crawled on a policy nobody can still vouch for.
     .andWhere(
       `article."discoveredByConnectorId" IN (
         SELECT id FROM ingestion_connectors
@@ -1129,6 +1136,7 @@ export async function runConnector(
   const runs = AppDataSource.getRepository(IngestionRun);
   const run = await runs.save({
     connectorId: connector.id,
+    connectorName: connector.name,
     status: "running" as const,
     startedAt: new Date(),
   });
