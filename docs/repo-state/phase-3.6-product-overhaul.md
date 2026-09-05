@@ -651,7 +651,9 @@ tests across 18 files, and 10 new backend assertions at the leaning seam plus ro
 seed coverage including all three CHECK constraints. The full backend suite is flaky on this
 machine under concurrency and was so before this ticket: the clean tree at `305630e` fails three
 tests across two files under the same command, this branch one, and every one of them passes in
-isolation.
+isolation. *[Correction, #107: the medoid test was one of these, and "passes in isolation" was a
+misdiagnosis — it fails in isolation too, just not every time. The medoid tie-break read a random
+UUID; the diagnosis of concurrency was wrong.]*
 
 **#86 — Coverage spectrum and blindspots.** Story reads now carry a `coverageSpectrum` computed from
 accepted Story membership, counting Articles (not Publishers) across the three bands and retaining
@@ -770,7 +772,10 @@ its tunable TTL, the cached-unknown/uncached-outage split, the loud misconfigura
 validation — `tests/providers.test.ts` and `tests/cache.test.ts` green, and `tsc --noEmit` down to the
 one pre-existing `hardening.test.ts` error. The full backend suite is 549 passing with one failure in
 `clustering.test.ts` that passes in isolation — the concurrency flake #85 already recorded on this
-machine, unrelated to this seam, which touches no clustering path. No frontend in this ticket, so no
+machine, unrelated to this seam, which touches no clustering path. *[Correction, #107: that "passes
+in isolation" reading was wrong — the test fails in isolation too, just not every time, because the
+medoid tie-break decided on a random UUID. It was never concurrency.]*
+No frontend in this ticket, so no
 `impeccable` pass; the market panel is #89.
 
 **#88 — Technical indicators, computed in-house.** `backend/src/market/indicators.ts` holds three
@@ -1165,3 +1170,29 @@ to be unique.
 Verification: the single test passed on five consecutive runs (it failed roughly every other run
 before); the full backend suite is 596 passing and 11 skipped, and `tsc -p tsconfig.build.json
 --noEmit` passes. No production behaviour changed — test fixture and a comment only.
+
+**#107 — a Story's name is no longer decided by a random UUID tie-break.** #106 fixed the test
+fixture and left the code alone, on the reading that "either member of a symmetric group is a
+correct fallback" and "the slug only has to be unique". Both halves of that reading were wrong:
+the medoid supplies the Story's fallback title (ADR-0026) *and* its slug stem via `storySlug`, so a
+re-run over the same corpus could rename a Story and move its URL — and on a two-member group the
+UUID tie-break decided every time, because both members' similarity totals are their single cosine
+to each other and so are identical by construction.
+
+The tie-break in `medoidOf` now runs over stable data: earlier `publishedAt`, then the lower title.
+Both are already used for ordering elsewhere (candidates are read `publishedAt DESC`), and both
+survive a fresh insert, which a UUID does not. Two members that share both are indistinguishable by
+stable data, and either yields the same title — the id no longer appears in the decision at all.
+The "arbitrary but stable" comment #106 left on the function is replaced by the reason the
+tie-break must not read the id.
+
+The test that was misread as a concurrency flake for three tickets (#85's "passes in isolation"
+claim, corrected above in place) now asserts the property directly: a new test seeds a symmetric
+pair with identical vectors, runs clustering, then **re-inserts the corpus** — fresh UUIDs, same
+stable data — and runs again. The same reporting must produce the same medoid title and the same
+slug stem on both runs; re-inserting, rather than just undoing the memberships, is what makes it
+the scenario the id tie-break cannot survive.
+
+Verification: `tests/clustering.test.ts` 46 passing including the new repeated-run test; `tsc
+--noEmit` clean; the full backend suite is 597 passing and 11 skipped. No frontend, no ADR — this
+corrects the behaviour ADR-0026 already specifies rather than changing any decision.

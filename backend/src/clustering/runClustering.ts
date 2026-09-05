@@ -225,10 +225,12 @@ async function assignToStory(
 
 // Scores each member by its summed cosine similarity to the other members. On
 // an even, symmetric group — two members above all — every member scores the
-// same, so the tie falls through to the lower id: an arbitrary but stable
-// pick. Neither member is more central than the other, so any title that
-// comes out of it is a correct fallback. Tests must not assert one specific
-// member's title on a symmetric group (#106).
+// same, and the tie-break alone decides. It must therefore run over stable
+// data, never over the id (#107): a fresh corpus gets fresh UUIDs, so an
+// id-keyed tie-break re-picks the medoid, and with it the Story's fallback
+// title and slug, on every run over the same reporting. Earlier reporting
+// wins, then the lower title; the two are indistinguishable only when they
+// share both, in which case either yields the same title anyway.
 function medoidOf(group: Candidate[]): Candidate {
   let best = group[0];
   let bestTotal = -Infinity;
@@ -237,12 +239,22 @@ function medoidOf(group: Candidate[]): Candidate {
       (sum, other) => (other === member ? sum : sum + cosineSimilarity(member.vector, other.vector)),
       0,
     );
-    if (total > bestTotal || (total === bestTotal && member.id < best.id)) {
+    if (total > bestTotal) {
+      best = member;
+      bestTotal = total;
+    } else if (total === bestTotal && breaksTieOverStableData(member, best)) {
       best = member;
       bestTotal = total;
     }
   }
   return best;
+}
+
+function breaksTieOverStableData(member: Candidate, best: Candidate): boolean {
+  if (member.publishedAt.getTime() !== best.publishedAt.getTime()) {
+    return member.publishedAt.getTime() < best.publishedAt.getTime();
+  }
+  return member.title < best.title;
 }
 
 class GroupNotCorroborated extends Error {}

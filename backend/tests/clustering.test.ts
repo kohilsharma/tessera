@@ -562,6 +562,42 @@ describe("runClustering", () => {
     expect((await articles.findOneByOrFail({ id: unrelated.id })).storyId).toBeNull();
   });
 
+  // #107: a symmetric pair scores identically by construction, so the medoid — and
+  // with it the fallback title and the slug — is decided by the tie-break alone.
+  // Each attempt re-inserts the corpus, so the Articles carry fresh UUIDs — the
+  // one thing an id-keyed tie-break cannot survive, and the scenario the issue
+  // names: two runs over the same reporting.
+  it("picks the same medoid for a symmetric pair on every run over the same corpus", async () => {
+    const first = await createPublisher("stable-one.example");
+    const second = await createPublisher("stable-two.example");
+    const titles: string[] = [];
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      // Identical vectors: both members' similarity totals are equal, so neither is
+      // more central. The tie-break falls to the earlier report.
+      await AppDataSource.query(`DELETE FROM "articles"`);
+      await createArticle({
+        publisherId: first.id,
+        title: "Early report",
+        vector: axisVector(0),
+        publishedAt: hoursAgo(4),
+      });
+      await createArticle({
+        publisherId: second.id,
+        title: "Later report",
+        vector: axisVector(0),
+        publishedAt: hoursAgo(2),
+      });
+
+      await cluster(new StubEmbedder({}));
+      const story = await AppDataSource.getRepository(Story).findOneByOrFail({});
+      titles.push(story.title);
+      expect(story.slug).toContain("early-report");
+      await AppDataSource.query(`DELETE FROM "stories"`);
+    }
+
+    expect(titles).toEqual(["Early report", "Early report"]);
+  });
+
   it("does not put non-mutually-matching Articles in the same new Story", async () => {
     const first = await createPublisher("one.example");
     const second = await createPublisher("two.example");
@@ -1675,7 +1711,7 @@ describe("the clustering worker job", () => {
       publishedAt: hoursAgo(1),
     });
     // A third member equidistant on the other side, so the named Article is the
-    // genuine medoid. With two members the title is a coin flip on ids (#106).
+    // genuine medoid rather than a tie-break pick (#106).
     await createArticle({
       publisherId: third.id,
       title: "Ceasefire talks set to resume",
