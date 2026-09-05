@@ -208,7 +208,8 @@ Terms are canonical: use these words in code, docs, and conversation.
   what joins reporting to markets: a Story shows a market panel when its resolved organizations
   carry Tickers, and shows nothing when they do not. The mapping is a small curated list, and it is
   keyed on the names the firehose actually emits rather than on corporate identities — reporting
-  says "Google", never "Alphabet Inc", and a map written the other way round matches nothing.
+  says "Google" seventy times for every "Alphabet Inc", so a map written the other way round finds
+  almost nothing.
 
 - **Quote** — one Ticker's current price and what the day did to it, as a market data provider
   reports it. It always carries the name of the provider that produced it, so a simulated price
