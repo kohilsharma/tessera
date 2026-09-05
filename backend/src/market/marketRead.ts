@@ -25,6 +25,17 @@ export type MarketReadInput = {
   }[];
 };
 
+// The completion budget. See SYNTHESIS_MAX_TOKENS in generation/config.ts: the read is
+// short, but a reasoning model's working is billed against the same completion, so a
+// ceiling sized for the answer alone never reaches it.
+const MARKET_READ_MAX_TOKENS = Number(process.env.MARKET_READ_MAX_TOKENS ?? 2_000);
+
+// Either the read, or the rule that refused it. Both are answers the Investor surface
+// can render; neither is an error.
+export type MarketReadOutcome = MarketRead | { refused: MarketReadRefusal };
+export type MarketReadRefusal =
+  "unparseable_output" | "schema_violation" | "claim_without_citation" | "unknown_evidence_id" | "prohibited_investor_language";
+
 export type MarketRead = {
   read: string;
   citations: string[];
@@ -38,7 +49,7 @@ export type MarketRead = {
 
 export type MarketReadValidation =
   | { ok: true; read: string; citations: string[] }
-  | { ok: false; code: "unparseable_output" | "schema_violation" | "claim_without_citation" | "unknown_evidence_id" | "prohibited_investor_language" };
+  | { ok: false; code: MarketReadRefusal };
 
 function normaliseCitation(value: string): string {
   return value.trim().replace(/^\[|\]$/g, "").trim().toUpperCase();
@@ -102,7 +113,7 @@ export async function generateMarketRead(
   providerName: string,
   model: string,
   evidenceSetId: string | null = null,
-): Promise<MarketRead> {
+): Promise<MarketReadOutcome> {
   if (input.reporting.length === 0 || input.markets.length === 0) throw new Error("A market read needs reporting and market data");
   const contentHash = hashInput(input, providerName, model);
   const key = `tessera:market-read:v1:${contentHash}`;
@@ -114,10 +125,15 @@ export async function generateMarketRead(
     system: "You write evidence-grounded market intelligence without financial advice.",
     prompt: promptFor(input),
     json: true,
-    maxTokens: 500,
+    // A short read, but the budget has to cover the reasoning ahead of it — see
+    // SYNTHESIS_MAX_TOKENS. At 500 a thinking model never reached its own JSON.
+    maxTokens: MARKET_READ_MAX_TOKENS,
   });
   const validation = validateMarketRead(raw, new Map(input.reporting.map((row) => [row.evidenceId, row.articleId])));
-  if (!validation.ok) throw new Error(`Market read rejected: ${validation.code}`);
+  // A refusal is an answer, not a fault: the guard did its job, and the caller needs to
+  // be told which rule stopped the read rather than being handed a 500 that says the
+  // server broke. Nothing is cached — a refusal must not become the stored answer.
+  if (!validation.ok) return { refused: validation.code };
   const result: MarketRead = {
     ...validation,
     contentHash,

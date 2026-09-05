@@ -4,6 +4,7 @@ import type { GenerationLens } from "../entities/GenerationRun";
 import type { PromptParams } from "../entities/PromptTemplate";
 import type { SelectedEvidence } from "./evidence";
 import { withoutCitationBrackets } from "./evidence";
+import { SYNTHESIS_MAX_TOKENS } from "./config";
 
 // ADR-0027: nothing this prompt says is load-bearing. Everything that makes a cheap
 // model's answer safe to display is enforced in validate.ts, below this — which is why
@@ -137,7 +138,7 @@ export function analysisRequest(
     system: SYSTEM,
     prompt: buildAnalysisPrompt(evidence, lens, dataMode, params),
     json: true,
-    maxTokens: 1200,
+    maxTokens: SYNTHESIS_MAX_TOKENS,
   };
 }
 
@@ -169,5 +170,5 @@ export function repairRequest(
     "",
     "Answer again, correcting exactly those problems and keeping to the contract above.",
   ].join("\n");
-  return { task: "synthesis" as const, system: SYSTEM, prompt, json: true, maxTokens: 1200 };
+  return { task: "synthesis" as const, system: SYSTEM, prompt, json: true, maxTokens: SYNTHESIS_MAX_TOKENS };
 }

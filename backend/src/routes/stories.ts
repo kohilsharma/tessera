@@ -150,6 +150,10 @@ storiesRouter.post(
     const provider = createSynthesisProvider();
     const identity = synthesisProviderIdentity();
     const marketRead = await generateMarketRead(provider, input, identity.provider, identity.model, evidenceSet.id);
+    if ("refused" in marketRead) {
+      res.status(422).json({ error: "This market read was refused before it could be shown", errorCode: marketRead.refused });
+      return;
+    }
     res.json({ marketRead });
   }),
 );

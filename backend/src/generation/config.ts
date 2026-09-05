@@ -63,6 +63,13 @@ export const PROMPT_VERSION = "2026-09-03";
 // can never ask for fewer claims than a publishable run needs.
 export const MAX_REQUESTED_CLAIMS = 8;
 
+// The completion budget for one synthesis call. 1200 was right for a model that answers
+// directly; a reasoning model spends most of a budget that size on its <thought> block
+// and then truncates the JSON mid-object, which arrives as `unparseable_output` — a
+// failure that looks like a bad prompt and is really a short ceiling. The thinking is
+// billed against the same completion, so the headroom has to cover both.
+export const SYNTHESIS_MAX_TOKENS = Number(process.env.SYNTHESIS_MAX_TOKENS ?? 4_000);
+
 // How much tuned free text a PromptTemplate may carry per field. A clause, not an
 // essay: these sit among the contract's own instructions, and the evidence has to fit
 // the same context window.
@@ -72,7 +79,7 @@ export const TUNED_TEXT_MAX_LENGTH = 240;
 // Generation is synchronous, so this is how long a reader's request can hang before
 // it is answered with a stated failure, and three attempts at 60 seconds each would
 // make that promise a lie.
-export const SYNTHESIS_TIMEOUT_MS = 60_000;
+export const SYNTHESIS_TIMEOUT_MS = Number(process.env.SYNTHESIS_TIMEOUT_MS ?? 180_000);
 
 // ADR-0027: the Lens is derived from the caller's role, not chosen by them — a
 // Student and an Investor asking about the same Story is the whole of how ADR-0004's

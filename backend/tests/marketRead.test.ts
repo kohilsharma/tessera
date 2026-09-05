@@ -47,9 +47,25 @@ describe("market read", () => {
     const first = await generateMarketRead(provider, input, "mock", "mock");
     const second = await generateMarketRead(provider, input, "mock", "mock");
     expect(first).toEqual(second);
+    if ("refused" in first) throw new Error(`expected a read, got ${first.refused}`);
     expect(first.read).toContain("licence change");
     expect(first.citations).toEqual(["A1", "A2"]);
     expect(calls).toBe(1);
     expect([...redis.values.keys()][0]).toMatch(/^tessera:market-read:v1:/);
+  });
+
+  it("refuses rather than throws, and never caches the refusal", async () => {
+    const redis = fakeRedis();
+    setCacheClientForTests(redis);
+    const provider: SynthesisProvider = {
+      async complete() {
+        return "I cannot answer that.";
+      },
+    };
+
+    const outcome = await generateMarketRead(provider, input, "mock", "mock");
+
+    expect(outcome).toEqual({ refused: "unparseable_output" });
+    expect([...redis.values.keys()]).toHaveLength(0);
   });
 });

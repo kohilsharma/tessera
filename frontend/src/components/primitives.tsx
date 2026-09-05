@@ -146,7 +146,7 @@ export function CoverageSpectrum({ spectrum }: { spectrum: CoverageSpectrum }) {
         {spectrum.unrated > 0 && <span>Unrated <strong>{spectrum.unrated}</strong></span>}
       </div>
       {spectrum.blindspot && <p className={styles.blindspot} role="alert">Blindspot: overwhelmingly {spectrum.blindspot}-leaning coverage among rated Articles.</p>}
-      {spectrum.unrated > 0 && <p className={styles.coverageNote}>{spectrum.unrated} Article{spectrum.unrated === 1 ? "" : "s"} have no published leaning.</p>}
+      {spectrum.unrated > 0 && <p className={styles.coverageNote}>{spectrum.unrated} Article{spectrum.unrated === 1 ? " has" : "s have"} no published leaning.</p>}
       <p className={styles.coverageAttribution}>
         Leanings reproduced from{" "}
         <a href="https://www.allsides.com/media-bias/media-bias-ratings" target="_blank" rel="noreferrer">
