@@ -7,6 +7,7 @@ import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
 import { isPgError, PG_UNIQUE_VIOLATION } from "../lib/pgError";
 import { normalizeTicker } from "../market/MarketProvider";
+import { isUuid } from "../lib/uuid";
 
 export const watchlistRouter = Router();
 watchlistRouter.use("/watchlist", requireAuth, requireRole("investor"));
@@ -52,6 +53,10 @@ watchlistRouter.post("/watchlist", asyncHandler(async (req, res) => {
 }));
 
 watchlistRouter.delete("/watchlist/:id", asyncHandler(async (req, res) => {
+  if (!isUuid(req.params.id)) {
+    res.status(404).json({ error: "Watchlist item not found" });
+    return;
+  }
   const repo = AppDataSource.getRepository(WatchlistItem);
   const item = await repo.findOne({ where: { id: req.params.id, ownerId: req.user!.id } });
   if (!item) {

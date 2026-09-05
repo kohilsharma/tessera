@@ -1196,3 +1196,46 @@ the scenario the id tie-break cannot survive.
 Verification: `tests/clustering.test.ts` 46 passing including the new repeated-run test; `tsc
 --noEmit` clean; the full backend suite is 597 passing and 11 skipped. No frontend, no ADR — this
 corrects the behaviour ADR-0026 already specifies rather than changing any decision.
+
+**Two-axis review of the phase, and what it found.** `/code-review` against `cbbec4a` (the plan
+commit, so the whole phase is the diff) ran a Standards pass and a Spec pass in parallel. Both
+independently found the same two defects, which is the reason they are named first here.
+
+`lib/modelJson.ts` arrived in `9a8098b` calling itself "the one place that turns a model's answer
+into a JSON object", and three callers adopted it — `generation/validate.ts`,
+`clustering/naming.ts`, `market/marketRead.ts`. The two flashcard writers did not:
+`flashcards/search.ts` and `flashcards/questions.ts` both still matched the outermost braces, which
+is the bug the module documents. A reasoning model that restates the schema in its prose and fences
+the real answer below it lost every card to the fallback question. Both now parse through the seam.
+
+`POST /flashcards/search` was outside the generation rate limiter. The limiter is mounted by exact
+path, so `POST /api/v1/flashcards` never covered it — and the search deck is the costlier of the
+two, spending an embedding call plus a synthesis call per request, and is the primary entry point
+under ADR-0034. It is limited now, and `tests/hardening.test.ts` covers all four expensive paths
+rather than two.
+
+Three more from the Standards pass. The 500 handler carried `void err;` — the observability ticket
+kept the status and dropped the only record of the cause; it now logs `request.failed` with the
+message and stack, and a test pins it. `SelectedEvidence` rows were being spelled out by hand in
+three places (`selectEvidence`, the market read route, the search deck); the two that pick their own
+Articles now call one `evidenceFromArticles` in `generation/evidence.ts`, so the evidence row is
+built inside the generation module rather than beside it — the market read route lost 12 lines of
+hand-rolled freezing. `DELETE /watchlist/:id` had no `isUuid` guard and answered 500 where every
+sibling route answers 404. `parseAdminUserList` re-implemented page validation that `listQuery.ts`
+already had, and `lib/cache.ts` defaulted its TTL from one caller's env key; both now read from one
+place, and `cacheSet` takes the TTL it is given.
+
+Frontend: the Brief picker in `StoryDetail.tsx` fanned out every page of Briefs in parallel to fill
+a dropdown, against DESIGN.md §8 — it reads one page of 50 and says so when there are more. The
+same file used a raw `<select>` beside a Base UI `SelectField`; one vocabulary now (ADR-0030).
+
+Left deliberately: the `--share` meter in `primitives.tsx` and the timeline volume bars, which the
+Standards pass read as ADR-0030's rejected hand-rolled bar charts. They are a 6px row indicator and
+an interactive radiogroup, not charts — Recharts draws the charts (`marketPanel`,
+`CoverageSpectrum`), and an SVG per register row would be measurably worse. Left open: spec §13's
+screenshots of every route in all three themes. `docs/verification/phase-3.6/` holds only #78's
+sign-in sequence, Newsroom→Terminal, so Studio is unphotographed and the bureau-rollout set is not
+yet replaced. That is a live-deploy capture, not a code change.
+
+Verification: backend 600 passing, 11 skipped; `tsc --noEmit` clean both packages; frontend 292
+passing and `npm run build` clean.

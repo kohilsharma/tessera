@@ -39,7 +39,10 @@ const DEFAULT_PAGE_SIZE = 10;
 const MAX_PAGE_SIZE = 50;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
-function parsePositiveInt(value: unknown, fallback: number, errors: string[], field: string): number {
+// Exported for the one list that is not a `parseListQuery` list — the admin user
+// register sorts nowhere and pages from its own default — so that page-number
+// validation is written once even where the rest of the contract does not apply.
+export function parsePositiveInt(value: unknown, fallback: number, errors: string[], field: string): number {
   if (value === undefined) return fallback;
   const n = Number(value);
   if (!Number.isInteger(n) || n < 1) {

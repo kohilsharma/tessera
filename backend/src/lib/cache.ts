@@ -2,7 +2,6 @@ import Redis from "ioredis";
 
 export type CacheClient = Pick<Redis, "get" | "set" | "del">;
 
-const DEFAULT_TTL_SECONDS = 30;
 let client: Redis | null = null;
 let override: CacheClient | null | undefined;
 let listenerAttached = false;
@@ -32,10 +31,6 @@ export function ttlFromEnv(key: string, fallback: number): number {
   return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : fallback;
 }
 
-function ttlSeconds(): number {
-  return ttlFromEnv("COMPARABLE_STORIES_CACHE_TTL_SECONDS", DEFAULT_TTL_SECONDS);
-}
-
 export async function cacheGet<T>(key: string): Promise<T | null> {
   const redis = redisClient();
   if (!redis) return null;
@@ -47,7 +42,9 @@ export async function cacheGet<T>(key: string): Promise<T | null> {
   }
 }
 
-export async function cacheSet<T>(key: string, value: T, ttl = ttlSeconds()): Promise<void> {
+// The TTL is the caller's, always: how long a surface may serve a stale answer is a
+// fact about that surface, and a default here would make it a fact about Redis.
+export async function cacheSet<T>(key: string, value: T, ttl: number): Promise<void> {
   const redis = redisClient();
   if (!redis) return;
   try {

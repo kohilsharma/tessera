@@ -9,7 +9,7 @@ import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
 import { isPgError, PG_UNIQUE_VIOLATION } from "../lib/pgError";
 import { isUuid } from "../lib/uuid";
-import { toEnvelope } from "../lib/listQuery";
+import { parsePositiveInt, toEnvelope } from "../lib/listQuery";
 
 export const authRouter = Router();
 
@@ -40,12 +40,11 @@ const ADMIN_USER_PAGE_SIZE = 20;
 const ADMIN_USER_PAGE_MAX = 50;
 
 function parseAdminUserList(query: Record<string, unknown>) {
-  const rawPage = query.page === undefined ? 1 : Number(query.page);
-  if (!Number.isInteger(rawPage) || rawPage < 1) return { error: "page must be a positive integer" };
-  const page = rawPage;
-  const requestedSize = Number(query.pageSize ?? ADMIN_USER_PAGE_SIZE);
-  if (!Number.isInteger(requestedSize) || requestedSize < 1 || requestedSize > ADMIN_USER_PAGE_MAX) return { error: `pageSize must be a positive integer at most ${ADMIN_USER_PAGE_MAX}` };
-  const pageSize = requestedSize;
+  const errors: string[] = [];
+  const page = parsePositiveInt(query.page, 1, errors, "page");
+  const pageSize = parsePositiveInt(query.pageSize, ADMIN_USER_PAGE_SIZE, errors, "pageSize");
+  if (pageSize > ADMIN_USER_PAGE_MAX) errors.push(`pageSize must be at most ${ADMIN_USER_PAGE_MAX}`);
+  if (errors.length > 0) return { error: errors.join("; ") };
   const role = typeof query.role === "string" && query.role ? query.role : undefined;
   const active = query.active === undefined || query.active === "" ? undefined : query.active === "true" ? true : query.active === "false" ? false : null;
   const q = typeof query.q === "string" ? query.q.trim() : "";

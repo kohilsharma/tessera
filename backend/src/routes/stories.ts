@@ -18,7 +18,7 @@ import { buildTimeline, toTimelineEvents } from "../timeline/buildTimeline";
 import { buildCoverageSpectrum, type CoverageSpectrum } from "../lib/coverageSpectrum";
 import { loadStoryMarket } from "../market/storyMarket";
 import { generateMarketRead } from "../market/marketRead";
-import { contentHashOf, excerptOf, freezeEvidence } from "../generation/evidence";
+import { evidenceFromArticles, freezeEvidence } from "../generation/evidence";
 import { createSynthesisProvider, synthesisProviderIdentity } from "../synthesis";
 
 export const storiesRouter = Router();
@@ -94,6 +94,10 @@ storiesRouter.get(
   }),
 );
 
+// Shorter than the frozen row's `excerptOf` snapshot: a market read prompt carries
+// indicators beside the reporting, and the reporting half is context for them.
+const MARKET_READ_EXCERPT_CHARS = 900;
+
 storiesRouter.post(
   "/stories/:id/market-read",
   requireAuth,
@@ -123,14 +127,15 @@ storiesRouter.post(
       res.status(422).json({ error: "This Story has no accepted reporting to read" });
       return;
     }
+    const selected = evidenceFromArticles(articles, "centroid_rank");
     const input = {
       storyId: story.id,
-      reporting: articles.map((article, index) => ({
-        evidenceId: `A${index + 1}`,
-        articleId: article.id,
-        publisherName: article.publisher.name,
-        title: article.title,
-        excerpt: (article.analysisText ?? article.title).slice(0, 900),
+      reporting: selected.map((row) => ({
+        evidenceId: row.evidenceId,
+        articleId: row.articleId,
+        publisherName: row.publisherName,
+        title: row.title,
+        excerpt: row.analysisText.slice(0, MARKET_READ_EXCERPT_CHARS),
       })),
       markets: market.market.map(({ entity, quote, indicators }) => ({
         ticker: entity.ticker,
@@ -141,15 +146,7 @@ storiesRouter.post(
         ...indicators,
       })),
     };
-    const evidenceSet = await freezeEvidence(story.id, articles.map((article, index) => ({
-      articleId: article.id, evidenceId: `A${index + 1}`, title: article.title, url: article.url,
-      publishedAt: article.publishedAt, analysisText: article.analysisText ?? article.title,
-      analysisTextMode: article.analysisTextMode, publisherId: article.publisherId,
-      publisherName: article.publisher.name, publisherDomain: article.publisher.domain,
-      termsClass: article.publisher.termsClass, sourceRank: index + 1,
-      articleContentHash: contentHashOf(article.analysisText ?? article.title), selectionReason: "centroid_rank" as const,
-      excerpt: excerptOf(article.analysisText ?? article.title),
-    })));
+    const evidenceSet = await freezeEvidence(story.id, selected);
     const provider = createSynthesisProvider();
     const identity = synthesisProviderIdentity();
     const marketRead = await generateMarketRead(provider, input, identity.provider, identity.model, evidenceSet.id);

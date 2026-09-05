@@ -2,7 +2,7 @@ import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { rateLimit } from "../src/middleware/rateLimit";
-import { createApp } from "../src/app";
+import { createApp, errorHandler } from "../src/app";
 import { logger } from "../src/lib/logger";
 import { setupTestDb } from "./setupTestDb";
 
@@ -39,7 +39,12 @@ describe("rate limiting", () => {
     expect((await request(app).get("/api/v1/health")).status).toBe(200);
   });
 
-  it.each(["/api/v1/stories/not-a-uuid/analysis", "/api/v1/flashcards"])(
+  it.each([
+    "/api/v1/stories/not-a-uuid/analysis",
+    "/api/v1/stories/not-a-uuid/market-read",
+    "/api/v1/flashcards",
+    "/api/v1/flashcards/search",
+  ])(
     "limits the expensive generation endpoint %s",
     async (path) => {
       process.env.GENERATION_RATE_LIMIT_MAX = "1";
@@ -62,5 +67,23 @@ describe("request observability", () => {
     if (!event) throw new Error("request.completed event was not logged");
     expect(event).toMatchObject({ requestId: "request-test-1", method: "GET", resultStatus: 200 });
     expect(event.durationMs).toEqual(expect.any(Number));
+  });
+
+  it("logs the exception behind a 500 rather than only its status", async () => {
+    const error = vi.spyOn(logger, "error").mockImplementation(() => logger);
+    // The app's own handler over a route that throws — mounted here rather than in
+    // `createApp`, since error middleware only catches what is registered above it.
+    const app = express();
+    app.get("/boom", () => {
+      throw new Error("nothing behind this door");
+    });
+    app.use(errorHandler);
+    const response = await request(app).get("/boom");
+
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({ error: "Internal server error" });
+    const failure = error.mock.calls.map(([fields]) => fields as Record<string, unknown>).find((entry) => entry.event === "request.failed");
+    if (!failure) throw new Error("request.failed event was not logged");
+    expect(failure).toMatchObject({ path: "/boom", error: "nothing behind this door" });
   });
 });

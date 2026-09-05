@@ -1,5 +1,6 @@
 import type { ClaimType } from "../entities/AnalysisClaim";
 import type { SynthesisProvider } from "../synthesis";
+import { parseModelObject } from "../lib/modelJson";
 
 // The one model call #58 makes, and the only part of a card a model writes: the
 // question in front of an already-validated claim.
@@ -57,17 +58,9 @@ function promptFor(claims: QuestionableClaim[]): string {
 
 function parseQuestions(answer: string): Map<number, string> {
   const questions = new Map<number, string>();
-  // Cheap models fence their JSON even when asked for an object, so take the
-  // outermost braces rather than trusting the whole response to parse.
-  const object = answer.match(/\{[\s\S]*\}/)?.[0];
-  if (!object) return questions;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(object);
-  } catch {
-    return questions;
-  }
-  const rows = (parsed as { questions?: unknown })?.questions;
+  const parsed = parseModelObject(answer);
+  if (!parsed) return questions;
+  const rows = parsed.questions;
   if (!Array.isArray(rows)) return questions;
   for (const row of rows) {
     const { number, question } = (row ?? {}) as { number?: unknown; question?: unknown };

@@ -56,6 +56,10 @@ function StudentStoryPanel({
   );
 }
 
+// One page, newest first: a picker is not an index, and /briefs is where every Brief
+// is reachable. The count below the field says so when there are more.
+const BRIEF_PICKER_PAGE_SIZE = 50;
+
 function AnalysisSaveControl({
   generationRunId,
   label,
@@ -69,17 +73,7 @@ function AnalysisSaveControl({
   const [targetBriefId, setTargetBriefId] = useState("");
   const briefs = useQuery({
     queryKey: ["briefs", "analysis-save-picker"],
-    queryFn: async () => {
-      const first = await getBriefs({ page: 1, pageSize: 50, sort: "updatedAt:desc" });
-      if (!Array.isArray(first.items)) return [];
-      if (!Number.isInteger(first.totalPages) || first.totalPages <= 1) return first.items;
-      const rest = await Promise.all(
-        Array.from({ length: first.totalPages - 1 }, (_, index) =>
-          getBriefs({ page: index + 2, pageSize: 50, sort: "updatedAt:desc" }),
-        ),
-      );
-      return [first, ...rest].flatMap((page) => page.items);
-    },
+    queryFn: () => getBriefs({ page: 1, pageSize: BRIEF_PICKER_PAGE_SIZE, sort: "updatedAt:desc" }),
   });
   const save = useMutation({
     mutationFn: () =>
@@ -88,7 +82,8 @@ function AnalysisSaveControl({
         : saveAnalysisToBrief(generationRunId),
     onSuccess: (brief) => navigate(`/briefs/${brief.id}`),
   });
-  const options: BriefSummary[] = Array.isArray(briefs.data) ? briefs.data : [];
+  const options: BriefSummary[] = briefs.data?.items ?? [];
+  const total = briefs.data?.total ?? 0;
 
   return (
     <>
@@ -113,6 +108,9 @@ function AnalysisSaveControl({
             </option>
           ))}
       </SelectField>
+      {total > options.length && (
+        <p className="record-prose">Showing your {options.length} most recently updated Briefs of {total}.</p>
+      )}
       <button type="button" className="record-command" onClick={() => save.mutate()} disabled={save.isPending}>
         <Plus aria-hidden size={18} /> {save.isPending ? "Saving…" : targetBriefId ? "Save to Brief" : emptyLabel}
       </button>
@@ -134,7 +132,7 @@ function AdminStoryPanel({ story, storyId, onRefresh }: { story: NonNullable<Sto
         <div><dt>Analysis prompt</dt><dd>{story.latestAnalysis ? `${story.latestAnalysis.promptVersion} · ${story.latestAnalysis.lens}` : "No analysis run yet"}</dd></div>
       </dl>
       <div className="record-actions">
-        <label className="filter-field">Merge another Story <select value={mergedStoryId} onChange={(event) => setMergedStoryId(event.target.value)}><option value="">Choose a Story</option>{candidates.data?.items.filter((candidate) => candidate.id !== storyId).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.title}</option>)}</select></label>
+        <SelectField label="Merge another Story" value={mergedStoryId} onChange={(event) => setMergedStoryId(event.target.value)}><option value="">Choose a Story</option>{candidates.data?.items.filter((candidate) => candidate.id !== storyId).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.title}</option>)}</SelectField>
         <button type="button" className="record-command" onClick={() => merge.mutate()} disabled={!mergedStoryId || merge.isPending}><GitMerge aria-hidden size={18} /> {merge.isPending ? "Merging…" : "Merge"}</button>
       </div>
       {candidates.data && <p className="record-prose">Showing {candidates.data.items.length} of {candidates.data.total} Stories available to merge.</p>}

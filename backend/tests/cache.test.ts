@@ -34,7 +34,7 @@ describe("Redis cache seam", () => {
     setCacheClientForTests(broken);
 
     await expect(cacheGet("key")).resolves.toBeNull();
-    await expect(cacheSet("key", { answer: 42 })).resolves.toBeUndefined();
+    await expect(cacheSet("key", { answer: 42 }, 30)).resolves.toBeUndefined();
     await expect(cacheDelete("key")).resolves.toBeUndefined();
   });
 

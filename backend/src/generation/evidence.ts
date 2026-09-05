@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
 import type { EntityManager } from "typeorm";
 import { AppDataSource } from "../data-source";
-import { weakestAnalysisTextMode, type AnalysisTextMode } from "../entities/Article";
+import { weakestAnalysisTextMode, type AnalysisTextMode, type Article } from "../entities/Article";
+import type { Publisher } from "../entities/Publisher";
 import { EvidenceSet } from "../entities/EvidenceSet";
 import { EvidenceSetArticle, type SelectionReason } from "../entities/EvidenceSetArticle";
 import type { TermsClass } from "../entities/Publisher";
 import { STORY_CATEGORIES, type StoryCategory } from "../entities/Story";
 import { acceptedCentroid, acceptedMembership } from "../lib/storyMembership";
-import { cacheDelete, cacheGet, cacheSet } from "../lib/cache";
+import { cacheDelete, cacheGet, cacheSet, ttlFromEnv } from "../lib/cache";
 import {
   EXCERPT_CHARS,
   MAX_ARTICLES_PER_PUBLISHER,
@@ -230,6 +231,37 @@ export async function selectEvidence(storyId: string): Promise<SelectedEvidence[
   }));
 }
 
+// A row per Article, in the order given, for a caller that chose its own reporting by
+// some rule other than the centroid pass — the Investor market read over a Story's
+// accepted members (ADR-0036), a search deck over hybrid-search hits (ADR-0034).
+// Freezing is still `freezeEvidence`; this is only the row it freezes, so what a row
+// contains is written here and not once per caller.
+export function evidenceFromArticles(
+  articles: (Article & { publisher: Publisher })[],
+  selectionReason: SelectionReason,
+): SelectedEvidence[] {
+  return articles.map((article, index) => {
+    const analysisText = article.analysisText ?? article.title;
+    return {
+      articleId: article.id,
+      title: article.title,
+      url: article.url,
+      publishedAt: article.publishedAt,
+      analysisText,
+      analysisTextMode: article.analysisTextMode,
+      publisherId: article.publisherId,
+      publisherName: article.publisher.name,
+      publisherDomain: article.publisher.domain,
+      termsClass: article.publisher.termsClass,
+      sourceRank: index + 1,
+      evidenceId: `A${index + 1}`,
+      articleContentHash: contentHashOf(analysisText),
+      selectionReason,
+      excerpt: excerptOf(analysisText),
+    };
+  });
+}
+
 export function distinctPublisherCount(selected: SelectedEvidence[]): number {
   return new Set(selected.map((row) => row.publisherId)).size;
 }
@@ -238,6 +270,7 @@ export function distinctPublisherCount(selected: SelectedEvidence[]): number {
 // landing page, not an index — /stories is where a reader goes for all of them.
 const COMPARABLE_STORY_LIMIT = 10;
 const COMPARABLE_STORIES_CACHE_KEY = "tessera:comparable-stories:v1";
+const COMPARABLE_STORIES_CACHE_TTL_SECONDS = 30;
 
 export type ComparableStory = {
   id: string;
@@ -312,6 +345,7 @@ export async function comparableStories(): Promise<ComparableStory[]> {
   await cacheSet(
     COMPARABLE_STORIES_CACHE_KEY,
     comparable.map(({ lastSeenAt, ...story }) => ({ ...story, lastSeenAt: lastSeenAt.toISOString() })),
+    ttlFromEnv("COMPARABLE_STORIES_CACHE_TTL_SECONDS", COMPARABLE_STORIES_CACHE_TTL_SECONDS),
   );
   return comparable;
 }

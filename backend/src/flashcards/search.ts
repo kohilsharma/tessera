@@ -3,11 +3,12 @@ import { Article } from "../entities/Article";
 import { In } from "typeorm";
 import { createHash } from "node:crypto";
 import type { SynthesisProvider } from "../synthesis";
-import { contentHashOf, excerptOf, freezeEvidenceWith, type SelectedEvidence } from "../generation/evidence";
+import { evidenceFromArticles, freezeEvidenceWith } from "../generation/evidence";
 import { Flashcard } from "../entities/Flashcard";
 import { FlashcardCitation } from "../entities/FlashcardCitation";
 import { hybridSearchArticleIds } from "../lib/hybridSearch";
 import { createEmbeddingProvider } from "../embeddings";
+import { parseModelObject } from "../lib/modelJson";
 
 export const CARD_COUNTS = [5, 10, 20] as const;
 export const ANSWER_LENGTHS = ["one_word", "one_line", "full"] as const;
@@ -20,19 +21,24 @@ function trimAnswer(text: string, length: AnswerLength): string {
 }
 
 function parseCards(raw: string, ids: string[], answers: string[], length: AnswerLength) {
-  let rows: unknown[] = [];
-  try {
-    const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] ?? "{}");
-    rows = Array.isArray(parsed.cards) ? parsed.cards : [];
-  } catch { /* fall back below */ }
-  return ids.map((id, i) => {
+  const parsed = parseModelObject(raw);
+  const rows: unknown[] = Array.isArray(parsed?.cards) ? (parsed.cards as unknown[]) : [];
+  return ids.flatMap((id, i) => {
     const card = (rows[i] ?? {}) as { question?: unknown; answer?: unknown; citations?: unknown };
     const citations = Array.isArray(card.citations) ? [...new Set(card.citations.map(String).filter((citation) => ids.includes(citation)))] : [];
-    return {
-      question: typeof card.question === "string" && card.question.trim() ? card.question.trim() : `What does source ${id} report?`,
-      answer: trimAnswer(typeof card.answer === "string" && card.answer.trim() ? card.answer.trim() : answers[i], length),
+    const question = typeof card.question === "string" ? card.question.trim() : "";
+    const answer = typeof card.answer === "string" ? card.answer.trim() : "";
+    // A card the model wrote but cited nothing for is dropped, not pinned to the row it
+    // happened to sit beside: `generation/validate.ts` refuses an uncited claim, and
+    // inventing the citation here would be the same claim through another door. The
+    // untouched row is a different thing — its question, answer and citation are all
+    // ours, and all three name the one evidence row.
+    if (!citations.length && (question || answer)) return [];
+    return [{
+      question: question || `What does source ${id} report?`,
+      answer: trimAnswer(answer || answers[i], length),
       citations: citations.length ? citations : [id],
-    };
+    }];
   });
 }
 
@@ -48,15 +54,7 @@ export async function generateSearchDeck(
   const byId = new Map(found.map((article) => [article.id, article]));
   const articles = hits.map((hit) => byId.get(hit.id)).filter((article): article is Article => article != null);
   if (!articles.length) return [];
-  const selected: SelectedEvidence[] = articles.map((article, index) => {
-    const text = article.analysisText ?? article.title;
-    return ({
-    articleId: article.id, title: article.title, url: article.url, publishedAt: article.publishedAt,
-    analysisText: text, analysisTextMode: article.analysisTextMode,
-    publisherId: article.publisherId, publisherName: article.publisher.name, publisherDomain: article.publisher.domain,
-    termsClass: article.publisher.termsClass, sourceRank: index + 1, evidenceId: `A${index + 1}`,
-    articleContentHash: contentHashOf(text), selectionReason: "centroid_rank", excerpt: excerptOf(text),
-  }); });
+  const selected = evidenceFromArticles(articles, "centroid_rank");
   const answers = selected.map((row) => row.excerpt);
   const prompt = selected.map((row) => `[${row.evidenceId}] ${row.title}: ${row.excerpt}`).join("\n") + `\nAnswer length: ${answerLength}`;
   const contentHash = createHash("sha256").update(prompt).update(`\0${count}\0${answerLength}`).digest("hex");

@@ -20,9 +20,17 @@ import { watchlistRouter } from "./routes/watchlist";
 
 // Last resort for anything an async handler rejects with (a DB fault, a bug):
 // one 500 with nothing internal leaked, instead of an unhandled rejection.
-const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
+export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
   res.locals.errorCode = "internal_error";
-  void err;
+  // The request log records that a 500 happened; only the exception says why. Logged
+  // here rather than returned: the cause belongs in the operator's log, not the body.
+  log("error", "request.failed", {
+    requestId: req.id,
+    method: req.method,
+    path: req.originalUrl,
+    error: err instanceof Error ? err.message : String(err),
+    stack: err instanceof Error ? err.stack : undefined,
+  });
   res.status(500).json({ error: "Internal server error" });
 };
 
@@ -81,6 +89,9 @@ export function createApp() {
   app.use("/api/v1", graphRouter);
   app.post("/api/v1/stories/:id/analysis", generationLimiter);
   app.post("/api/v1/flashcards", generationLimiter);
+  // An embedding call plus a synthesis call per request, and the primary entry point
+  // per ADR-0034 — exact-path matching means it needs saying separately.
+  app.post("/api/v1/flashcards/search", generationLimiter);
   app.use("/api/v1", generationRouter);
   app.use("/api/v1", promptsRouter);
   app.use("/api/v1", flashcardsRouter);
