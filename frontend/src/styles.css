@@ -921,7 +921,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    60-node force layout to settle inside and short enough that the register naming those
    60 names is visible from it. No shadow — DESIGN.md keeps the offset shadow for
    registration, and nothing is being registered here. */
+.graph-plot-frame { position: relative; }
 .graph-plot { height: clamp(340px, 60vh, 600px); margin-top: 18px; border: 1px solid var(--registration-rule); background: var(--stock-paper); }
+.graph-controls { position: absolute; top: 30px; right: 12px; z-index: 2; display: grid; gap: 6px; }
+.graph-controls button { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--quiet-ink); background: var(--stock-paper); color: var(--bureau-ink); cursor: pointer; transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease; }
+.graph-controls button:hover, .graph-controls button:focus-visible { border-color: var(--bureau-ink); background: var(--bureau-ink); color: var(--stock-paper); }
+.graph-tooltip { position: absolute; z-index: 3; max-width: min(280px, calc(100% - 24px)); padding: 8px 10px; border: 1px solid var(--bureau-ink); background: var(--stock-paper); color: var(--bureau-ink); font: 500 .72rem/1.35 var(--font-ui); pointer-events: none; }
 
 /* The reporting behind one link (#69), opened inside the register row of the name on its
    other end. Opened under a neutral rule, so the drawer reads as evidence *for that row*

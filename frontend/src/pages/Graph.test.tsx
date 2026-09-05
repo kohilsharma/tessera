@@ -17,7 +17,9 @@ import { jsonResponse, renderWithProviders } from "../test/renderWithProviders";
 // only behaviour, and calling it is the only way to check where a node opens (#69).
 const destroy = vi.fn();
 const on = vi.fn();
-vi.mock("cytoscape", () => ({ default: vi.fn(() => ({ destroy, on })) }));
+const zoom = vi.fn(() => 1);
+const fit = vi.fn();
+vi.mock("cytoscape", () => ({ default: vi.fn(() => ({ destroy, on, zoom, fit })) }));
 
 const node = (id: string, canonicalName: string, kind: GraphView["nodes"][number]["kind"], articleCount: number) => ({
   id,
@@ -233,5 +235,36 @@ describe("Knowledge graph — the picture and its reading in words", () => {
     act(() => handler({ target: { id: () => "e2" } }));
 
     expect(await screen.findByText("Neighbourhood reached")).toBeInTheDocument();
+  });
+
+  it("opens an edge's evidence in the matching neighbourhood", async () => {
+    render({}, { probe: { path: "/graph/entities/:entityId", element: <p>Neighbourhood reached</p> } });
+    await screen.findByRole("img");
+
+    const [, , handler] = on.mock.calls.filter(([event, selector]) => event === "tap" && selector === "edge").at(-1) as [
+      string,
+      string,
+      (e: unknown) => void,
+    ];
+    act(() => handler({ target: { data: () => ({ source: "e1", target: "e2" }) } }));
+
+    expect(await screen.findByText("Neighbourhood reached")).toBeInTheDocument();
+  });
+
+  it("offers labelled viewport controls", async () => {
+    render();
+
+    expect(await screen.findByRole("group", { name: "Graph controls" })).toBeInTheDocument();
+    const controls = screen.getByRole("group", { name: "Graph controls" });
+    expect(within(controls).getByRole("button", { name: "Zoom in" })).toHaveAttribute("title", "Zoom in");
+    expect(within(controls).getByRole("button", { name: "Zoom out" })).toHaveAttribute("title", "Zoom out");
+    expect(within(controls).getByRole("button", { name: "Fit graph" })).toHaveAttribute("title", "Fit graph");
+
+    await userEvent.click(within(controls).getByRole("button", { name: "Zoom in" }));
+    await userEvent.click(within(controls).getByRole("button", { name: "Zoom out" }));
+    await userEvent.click(within(controls).getByRole("button", { name: "Fit graph" }));
+    expect(zoom).toHaveBeenCalledWith(1.2);
+    expect(zoom).toHaveBeenCalledWith(0.8);
+    expect(fit).toHaveBeenCalledWith(undefined, 28);
   });
 });

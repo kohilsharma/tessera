@@ -157,6 +157,7 @@ export default function Graph() {
             view={view}
             label={`A force-directed graph of ${view.nodes.length} names joined by ${view.edges.length} co-mention links. Every name it draws is listed in words below it, and opens that name's own neighbourhood.`}
             onOpen={(entityId) => navigate(`/graph/entities/${entityId}`)}
+            onOpenEdge={(entityAId, entityBId) => navigate(`/graph/entities/${entityAId}?link=${entityBId}`)}
           />
           {/* The same graph in words: every name the picture draws, in the order the view
               ranked them, with the two measurements the picture encodes as size and width.

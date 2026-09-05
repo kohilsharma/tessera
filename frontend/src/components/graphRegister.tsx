@@ -1,6 +1,7 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import cytoscape from "cytoscape";
 import type { Css, ElementDefinition, StylesheetJson } from "cytoscape";
+import { ArrowsOut, MagnifyingGlassMinus, MagnifyingGlassPlus } from "@phosphor-icons/react";
 import { ENTITY_KINDS, ENTITY_KIND_LABELS, type EntityKind, type GraphEdge, type GraphNode } from "../api/client";
 import { peakOf } from "./scale";
 
@@ -159,8 +160,7 @@ export function toGraphElements(view: GraphPicture, focusId?: string): ElementDe
   ];
 }
 
-// Bureau on a canvas: square nodes for organizations because corners are square here, labels
-// in the page's own face, and the ink spent on identifying a kind and nothing else.
+// The graph uses shape, ink and labels together so kind remains readable without colour.
 //
 // The focus is marked by border weight and type size rather than by ink, so it survives
 // greyscale — and it is never the only statement of which name this is: the page's masthead
@@ -204,10 +204,27 @@ function stylesheet(): StylesheetJson {
         "curve-style": "straight",
       },
     },
+    {
+      selector: ".graph-dimmed",
+      style: { opacity: 0.16 },
+    },
+    {
+      selector: "node.graph-neighbor",
+      style: { opacity: 0.9 },
+    },
+    {
+      selector: "node.graph-hovered",
+      style: { "border-width": 3, "text-background-opacity": 1 },
+    },
+    {
+      selector: "edge.graph-hovered",
+      style: { width: "mapData(share, 0, 1, 2, 7)", opacity: 1 },
+    },
   ];
 }
 
-// The picture. A reader pans and zooms it, tapping a name opens that name's neighbourhood
+// The picture. A reader pans and zooms it, hovering explains the relationship in front of them,
+// and tapping a name opens that name's neighbourhood
 // (#69) — the same destination the register row beneath it links to, because a canvas is
 // unreachable by keyboard and unreadable by a screen reader — and, where the page has
 // somewhere to put it, tapping a line opens the reporting that line was drawn from.
@@ -233,6 +250,8 @@ export function GraphPlot({
   onOpenEdge?: (entityAId: string, entityBId: string) => void;
 }) {
   const plot = useRef<HTMLDivElement>(null);
+  const graph = useRef<cytoscape.Core | null>(null);
+  const [tooltip, setTooltip] = useState<{ text: string; x: number; y: number } | null>(null);
   // The latest handlers, read at tap time: in the dependency list they would tear down and
   // re-run the force layout on every render that redefines a callback, and a graph that
   // re-settles while it is being read is a graph being read twice.
@@ -248,21 +267,91 @@ export function GraphPlot({
       elements: toGraphElements(view, focusId),
       style: stylesheet(),
       // `cose` is Cytoscape's own force layout — no plugin, and ADR-0019 asked for a
-      // force-directed reading. Unanimated: DESIGN.md keeps motion for evidence
-      // registration.
-      layout: { name: "cose", animate: false, padding: 28, nodeRepulsion: () => 12000, idealEdgeLength: () => 90 },
+      // force-directed reading. The arrival is animated once so the relationships settle into
+      // view; reduced motion keeps the same final arrangement without the movement.
+      layout: {
+        name: "cose",
+        animate: !(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false),
+        animationDuration: 320,
+        animationEasing: "cubic-bezier",
+        padding: 28,
+        nodeRepulsion: () => 12000,
+        idealEdgeLength: () => 90,
+      },
       autoungrabify: true,
       autounselectify: true,
     });
+    graph.current = cy;
+    const nodeById = new Map(view.nodes.map((node) => [node.id, node]));
+    const edgeById = new Map(view.edges.map((edge) => [`${edge.entityAId}~${edge.entityBId}`, edge]));
     cy.on("tap", "node", (event) => open.current(event.target.id()));
     cy.on("tap", "edge", (event) => {
       const { source, target } = event.target.data() as { source: string; target: string };
       openEdge.current?.(source, target);
     });
-    return () => cy.destroy();
+
+    const clearHover = () => {
+      cy.elements().removeClass("graph-hovered graph-neighbor graph-dimmed");
+      setTooltip(null);
+    };
+    const showTooltip = (event: cytoscape.EventObject, text: string) => {
+      const position = event.renderedPosition ?? event.position ?? { x: 0, y: 0 };
+      // Cytoscape reports coordinates inside the plot, while the tooltip is positioned
+      // against the frame. Include the plot's 18px top margin before the cursor gap.
+      setTooltip({ text, x: position.x + 12, y: position.y + 30 });
+    };
+    cy.on("mouseover", "node", (event) => {
+      const target = event.target;
+      cy.elements().addClass("graph-dimmed");
+      target.removeClass("graph-dimmed").addClass("graph-hovered");
+      target.neighborhood().removeClass("graph-dimmed").addClass("graph-neighbor");
+      const data = target.data() as { id: string };
+      const node = nodeById.get(data.id);
+      if (node) showTooltip(event, `${ENTITY_KIND_LABELS[node.kind]} entity: ${node.canonicalName} · ${reports(node.articleCount)}`);
+    });
+    cy.on("mouseover", "edge", (event) => {
+      const target = event.target;
+      cy.elements().addClass("graph-dimmed");
+      target.removeClass("graph-dimmed").addClass("graph-hovered");
+      target.connectedNodes().removeClass("graph-dimmed").addClass("graph-neighbor");
+      const data = target.data() as { id: string; source: string; target: string };
+      const edge = edgeById.get(data.id);
+      if (edge) {
+        const source = nodeById.get(data.source)?.canonicalName ?? data.source;
+        const targetName = nodeById.get(data.target)?.canonicalName ?? data.target;
+        showTooltip(event, `Co-mention link: ${source} + ${targetName} · ${reports(edge.weight)}`);
+      }
+    });
+    cy.on("mouseout", "node, edge", clearHover);
+
+    return () => {
+      graph.current = null;
+      cy.destroy();
+      setTooltip(null);
+    };
   }, [view, focusId]);
 
-  return <div className="graph-plot" ref={plot} role="img" aria-label={label} />;
+  return (
+    <div className="graph-plot-frame">
+      <div className="graph-plot" ref={plot} role="img" aria-label={label} />
+      <div className="graph-controls" role="group" aria-label="Graph controls">
+        <button type="button" aria-label="Zoom in" title="Zoom in" onClick={() => graph.current?.zoom(graph.current.zoom() + 0.2)}>
+          <MagnifyingGlassPlus aria-hidden="true" size={20} />
+        </button>
+        <button type="button" aria-label="Zoom out" title="Zoom out" onClick={() => graph.current?.zoom(graph.current.zoom() - 0.2)}>
+          <MagnifyingGlassMinus aria-hidden="true" size={20} />
+        </button>
+        <button type="button" aria-label="Fit graph" title="Fit graph" onClick={() => graph.current?.fit(undefined, 28)}>
+          <ArrowsOut aria-hidden="true" size={20} />
+        </button>
+      </div>
+      {tooltip && (
+        <div className="graph-tooltip" role="tooltip" style={{ left: tooltip.x, top: tooltip.y }}>
+          {tooltip.text}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Ink, shape and word for each kind, stated once for the whole picture — and only for the

@@ -972,3 +972,16 @@ list with `.dash-register-head`/`-folio` precisely so a lane and a dashboard reg
 treatment. Splitting the new rules out would either divide one component across two files or drag
 that sharing apart, which is a migration of the legacy sheet and not this ticket. No ticket tracks
 that migration yet; it wants one.
+
+**#97 — Make the knowledge graph interactive.** The shared Cytoscape renderer now animates its
+force-directed layout on arrival with the design-system easing, respecting `prefers-reduced-motion`,
+and exposes visible Phosphor zoom-in, zoom-out and fit controls. Hovering a node dims unrelated names
+and links, emphasizes its neighbours, and shows a tooltip naming the Entity kind, name and cited
+report count; hovering an edge does the same for the co-mention pair and its weight. Node taps still
+open a name's neighbourhood, and edge taps now open the matching evidence drawer through that same
+neighbourhood route. The bounded names register remains the keyboard and screen-reader path below
+the `role="img"` canvas.
+
+Verification: focused graph tests (19 passing across the renderer and page), full frontend suite
+(284 passing), frontend build clean. Full backend suite reached 583 passing and 11 skipped with the
+known unrelated #106 clustering medoid-tie flake failing once; no backend files changed.
