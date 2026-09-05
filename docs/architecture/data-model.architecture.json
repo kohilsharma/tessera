@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Tessera Evidence-Centred Data Model",
+    "quality_profile": "showcase",
+    "viewBox": [1220, 720],
+    "views": [
+      { "id": "reporting", "label": "Reporting core", "focus": ["publisher", "article", "story", "membership"], "note": "Articles become visible only through accepted Story membership." },
+      { "id": "generation", "label": "Frozen analysis", "focus": ["evidence", "run", "claim", "brief"], "note": "Claims cite Article snapshots in an immutable EvidenceSet." },
+      { "id": "graph", "label": "Graph projection", "focus": ["annotation", "entity", "edge"], "note": "EntityEdges are Article-cited co-occurrences." }
+    ]
+  },
+  "components": [
+    { "id": "publisher", "type": "database", "label": "Publisher", "sublabel": "terms + leaning", "pos": [40, 80], "size": [190, 78] },
+    { "id": "article", "type": "database", "label": "Article", "sublabel": "canonical URL + text mode", "pos": [320, 80], "size": [190, 78] },
+    { "id": "story", "type": "database", "label": "Story", "sublabel": "cluster + centroid", "pos": [600, 80], "size": [190, 78] },
+    { "id": "membership", "type": "database", "label": "StoryAssignment", "sublabel": "accepted / pending", "pos": [880, 80], "size": [190, 78] },
+    { "id": "evidence", "type": "database", "label": "EvidenceSet", "sublabel": "immutable A1... snapshots", "pos": [40, 300], "size": [190, 78] },
+    { "id": "run", "type": "database", "label": "GenerationRun", "sublabel": "prompt + model + result", "pos": [320, 300], "size": [190, 78] },
+    { "id": "claim", "type": "database", "label": "AnalysisClaim", "sublabel": "citation required", "pos": [600, 300], "size": [190, 78] },
+    { "id": "brief", "type": "database", "label": "IntelligenceBrief", "sublabel": "user-owned frozen run", "pos": [880, 300], "size": [190, 78] },
+    { "id": "annotation", "type": "database", "label": "GKG Annotation", "sublabel": "surface names + themes", "pos": [40, 520], "size": [190, 78] },
+    { "id": "entity", "type": "database", "label": "Entity", "sublabel": "promoted canonical name", "pos": [320, 520], "size": [190, 78] },
+    { "id": "edge", "type": "database", "label": "EntityEdge", "sublabel": "co-occurrence + source Article", "pos": [600, 520], "size": [190, 78] }
+  ],
+  "connections": [
+    { "id": "publisher-article", "from": "publisher", "to": "article", "label": "publishes" },
+    { "id": "article-story", "from": "article", "to": "story", "label": "clustered into" },
+    { "id": "story-membership", "from": "story", "to": "membership", "label": "accepts" },
+    { "id": "evidence-run", "from": "evidence", "to": "run", "label": "inputs" },
+    { "id": "run-claim", "from": "run", "to": "claim", "label": "produces" },
+    { "id": "run-brief", "from": "run", "to": "brief", "label": "freezes", "fromSide": "bottom", "toSide": "bottom", "via": [[415, 420], [975, 420]], "labelAt": [695, 434] },
+    { "id": "annotation-entity", "from": "annotation", "to": "entity", "label": "resolves" },
+    { "id": "entity-edge", "from": "entity", "to": "edge", "label": "co-occurs" }
+  ]
+}

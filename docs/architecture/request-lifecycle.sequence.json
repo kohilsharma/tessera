@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Tessera Reader Request Lifecycle",
+    "quality_profile": "showcase",
+    "viewBox": [920, 480],
+    "views": [
+      { "id": "read-path", "label": "Read path", "focus": ["reader", "web", "api", "db"], "note": "A reader request crosses the single frontend fetch layer and accepted-membership read seam." },
+      { "id": "search-path", "label": "Search and timeline", "focus": ["api", "db", "timeline"], "note": "Search and timeline are computed views over accepted Story membership." }
+    ]
+  },
+  "participants": [
+    { "id": "reader", "type": "external", "label": "Reader", "sublabel": "browser session" },
+    { "id": "web", "type": "frontend", "label": "React App", "sublabel": "route + fetch layer" },
+    { "id": "api", "type": "backend", "label": "Express API", "sublabel": "route handler" },
+    { "id": "auth", "type": "security", "label": "JWT + RBAC", "sublabel": "role guard" },
+    { "id": "db", "type": "database", "label": "PostgreSQL", "sublabel": "source of truth" },
+    { "id": "timeline", "type": "backend", "label": "Read seams", "sublabel": "membership + timeline" }
+  ],
+  "segments": [
+    { "from": 150, "to": 260, "label": "Synchronous read" },
+    { "from": 280, "to": 420, "label": "Bounded computation" }
+  ],
+  "messages": [
+    { "id": "open", "from": "reader", "to": "web", "y": 165, "label": "open route" },
+    { "id": "fetch", "from": "web", "to": "api", "y": 190, "label": "GET /stories or /search", "variant": "emphasis" },
+    { "id": "verify", "from": "api", "to": "auth", "y": 215, "label": "verify JWT + role", "variant": "security" },
+    { "id": "claims", "from": "auth", "to": "api", "y": 248, "label": "claims accepted", "variant": "return" },
+    { "id": "query", "from": "api", "to": "db", "y": 282, "label": "join accepted membership", "variant": "emphasis" },
+    { "id": "view", "from": "db", "to": "timeline", "y": 310, "label": "rows -> computed view" },
+    { "id": "response", "from": "timeline", "to": "api", "y": 338, "label": "bounded JSON", "variant": "return" },
+    { "id": "json", "from": "api", "to": "web", "y": 366, "label": "200 JSON", "variant": "return" },
+    { "id": "render", "from": "web", "to": "reader", "y": 390, "label": "render records", "variant": "return" }
+  ],
+  "activations": [
+    { "participant": "web", "from": 185, "to": 398, "type": "frontend" },
+    { "participant": "api", "from": 188, "to": 370, "type": "backend" },
+    { "participant": "auth", "from": 210, "to": 244, "type": "security" },
+    { "participant": "db", "from": 278, "to": 318, "type": "database" },
+    { "participant": "timeline", "from": 306, "to": 398, "type": "backend" }
+  ]
+}

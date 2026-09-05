@@ -1,0 +1,61 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Tessera Scheduled Async Pipeline",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "schedules", "label": "Three schedules", "focus": ["scheduler", "ingest", "cluster", "resolve"], "note": "The native worker drains ingestion, clustering and graph queues on separate schedules." },
+      { "id": "ingest", "label": "Ingestion seam", "focus": ["scheduler", "ingest", "canonical", "postgres"], "note": "All connectors enter runConnector and canonical URL identity prevents duplicate Articles." },
+      { "id": "analysis", "label": "Analysis pipeline", "focus": ["cluster", "generation", "resolve", "postgres"], "note": "Clustering, generation and entity resolution persist durable run history." }
+    ]
+  },
+  "lanes": [
+    { "id": "control", "label": "Control plane" },
+    { "id": "ingestion", "label": "Ingestion" },
+    { "id": "analysis", "label": "Clustering + generation" },
+    { "id": "graph", "label": "Knowledge graph" }
+  ],
+  "phases": [
+    { "id": "schedule", "label": "Schedule", "fromCol": 0, "toCol": 1, "variant": "emphasis" },
+    { "id": "execute", "label": "Execute seam", "fromCol": 2, "toCol": 4 },
+    { "id": "record", "label": "Record result", "fromCol": 5, "toCol": 5, "variant": "dashed" }
+  ],
+  "groups": [
+    { "id": "ingestion-loop", "label": "Quarter-hour ingestion", "lane": "ingestion", "fromCol": 1, "toCol": 4, "variant": "emphasis" },
+    { "id": "analysis-loop", "label": "05 clustering", "lane": "analysis", "fromCol": 2, "toCol": 4 },
+    { "id": "graph-loop", "label": "20 graph resolution", "lane": "graph", "fromCol": 2, "toCol": 4 }
+  ],
+  "mainPath": ["scheduler", "queue", "ingest", "canonical", "postgres", "runs"],
+  "semanticChecks": {
+    "allowedRoots": ["scheduler"],
+    "allowedTerminals": ["runs", "postgres", "generation"],
+    "requiredPaths": [
+      { "from": "scheduler", "to": "runs" },
+      { "from": "scheduler", "to": "postgres" }
+    ]
+  },
+  "nodes": [
+    { "id": "scheduler", "lane": "control", "col": 0, "type": "backend", "label": "Scheduler", "sublabel": "native process", "width": 150 },
+    { "id": "queue", "lane": "control", "col": 1, "type": "messagebus", "label": "BullMQ queues", "sublabel": "Redis transport", "width": 150 },
+    { "id": "ingest", "lane": "ingestion", "col": 2, "type": "backend", "label": "runConnector", "sublabel": "RSS / GKG / DOC", "width": 150 },
+    { "id": "canonical", "lane": "ingestion", "col": 3, "type": "backend", "label": "Canonical URL", "sublabel": "idempotent identity" },
+    { "id": "postgres", "lane": "ingestion", "col": 4, "type": "database", "label": "PostgreSQL", "sublabel": "durable state", "width": 150 },
+    { "id": "cluster", "lane": "analysis", "col": 2, "type": "backend", "label": "runClustering", "sublabel": "embed -> Story", "width": 150 },
+    { "id": "generation", "lane": "analysis", "col": 3, "type": "backend", "label": "runGeneration", "sublabel": "EvidenceSet + claims", "width": 150 },
+    { "id": "resolve", "lane": "graph", "col": 3, "type": "backend", "label": "Entity resolution", "sublabel": "promote + merge + edges", "width": 150 },
+    { "id": "runs", "lane": "control", "col": 5, "type": "database", "label": "Run history", "sublabel": "read from Postgres" }
+  ],
+  "edges": [
+    { "id": "schedule-queue", "from": "scheduler", "to": "queue", "label": "enqueue on :00 / :05 / :20", "variant": "emphasis" },
+    { "id": "schedule-cluster", "from": "scheduler", "to": "cluster", "label": "05 schedule", "variant": "dashed" },
+    { "id": "schedule-resolve", "from": "scheduler", "to": "resolve", "label": "20 schedule", "variant": "dashed" },
+    { "id": "queue-ingest", "from": "queue", "to": "ingest", "label": "deliver ingestion job" },
+    { "id": "ingest-canonical", "from": "ingest", "to": "canonical", "label": "normalize URL" },
+    { "id": "canonical-postgres", "from": "canonical", "to": "postgres", "label": "insert or enrich" },
+    { "id": "cluster-generation", "from": "cluster", "to": "generation", "label": "Story members" },
+    { "id": "resolve-postgres", "from": "resolve", "to": "postgres", "label": "read annotations + persist graph" },
+    { "id": "ingest-runs", "from": "ingest", "to": "runs", "label": "persist IngestionRun", "variant": "dashed", "role": "return" },
+    { "id": "postgres-runs", "from": "postgres", "to": "runs", "label": "persist run history", "variant": "dashed", "role": "return" }
+  ]
+}

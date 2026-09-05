@@ -1105,3 +1105,19 @@ Verification: added dashboard copy assertions for the new headings and independe
 explanation; the focused dashboard suite passes (48 tests), the full frontend suite passes
 (291 tests), frontend build/typecheck pass, and the backend suite remains green (594 passed,
 11 skipped) with no backend changes.
+
+**#102 — the architecture document and diagrams.** Added `docs/architecture/README.md` as the
+viva-facing architecture record, with source-linked explanations of the request lifecycle, the
+three-schedule worker pipeline, the evidence-centred relational model, the cache boundaries, and
+the reasons behind BullMQ, Postgres-backed graph reads, frozen EvidenceSets, provider adapters and
+hybrid RRF search. Four standalone Archify sources and HTML viewers accompany it: a sequence for
+the synchronous reader request, a workflow for ingestion/clustering/graph jobs, and architecture
+maps for persistence and caching. The diagrams deliberately keep the async command detail in its
+own workflow so the request sequence fits the standalone desktop viewer.
+
+Archify validation and delivery passed for all four artifacts at the `showcase` quality profile:
+9/9 checks, zero composition errors and zero warnings. Automated browser evidence passed light and
+dark containment/capture at 1440x900, 1600x1000, 1920x1080 and 2048x1320 for all four; perceptual
+review remains a separate human gate as required by the skill. The generated specs retain the code vocabulary and
+the document points each architectural claim to its implementation or ADR, so the artifact is
+evidence of the shipped system rather than a speculative redesign.

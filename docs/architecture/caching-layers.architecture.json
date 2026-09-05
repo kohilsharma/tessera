@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Tessera Caching Layers",
+    "quality_profile": "showcase",
+    "viewBox": [1220, 720],
+    "views": [
+      { "id": "model-cache", "label": "Model reuse", "focus": ["request", "coalesce", "postgres", "provider"], "note": "Concurrent identical work coalesces, then completed calls reuse a content hash." },
+      { "id": "market-cache", "label": "Market quotes", "focus": ["request", "hash", "redis", "tiingo"], "note": "Quote responses and daily series are cached in Redis; provider failures are not cached." },
+      { "id": "queue-cache", "label": "Queue transport", "focus": ["worker", "bullmq"], "note": "Redis is already the BullMQ transport; the same cache is the measured extension point." }
+    ]
+  },
+  "components": [
+    { "id": "request", "type": "backend", "label": "Request seam", "sublabel": "generation / market read", "pos": [40, 100], "size": [190, 78] },
+    { "id": "coalesce", "type": "backend", "label": "In-flight coalescing", "sublabel": "one promise per key", "pos": [320, 100], "size": [190, 78] },
+    { "id": "postgres", "type": "database", "label": "PostgreSQL", "sublabel": "generation runs", "pos": [600, 100], "size": [170, 78] },
+    { "id": "provider", "type": "cloud", "label": "Model provider", "sublabel": "OpenAI-compatible / Mock", "pos": [860, 100], "size": [190, 78] },
+    { "id": "hash", "type": "backend", "label": "Ticker cache key", "sublabel": "normalized symbol", "pos": [40, 320], "size": [190, 78] },
+    { "id": "redis", "type": "database", "label": "Redis", "sublabel": "BullMQ + cache", "pos": [320, 320], "size": [170, 78] },
+    { "id": "tiingo", "type": "external", "label": "Tiingo adapter", "sublabel": "market provider seam", "pos": [600, 320], "size": [190, 78] },
+    { "id": "worker", "type": "backend", "label": "Worker", "sublabel": "durable async jobs", "pos": [320, 540], "size": [190, 78] },
+    { "id": "bullmq", "type": "messagebus", "label": "BullMQ", "sublabel": "queue namespace", "pos": [600, 540], "size": [170, 78] }
+  ],
+  "connections": [
+    { "id": "request-coalesce", "from": "request", "to": "coalesce", "variant": "emphasis" },
+    { "id": "coalesce-postgres", "from": "coalesce", "to": "postgres", "label": "reuse lookup" },
+    { "id": "postgres-provider", "from": "postgres", "to": "provider", "label": "miss -> call", "variant": "dashed" },
+    { "id": "request-hash", "from": "request", "to": "hash", "label": "market read", "labelDy": 24 },
+    { "id": "hash-redis", "from": "hash", "to": "redis", "label": "quote / series lookup", "labelDy": -33 },
+    { "id": "redis-tiingo", "from": "redis", "to": "tiingo", "label": "miss -> fetch + TTL", "variant": "dashed" },
+    { "id": "worker-bullmq", "from": "worker", "to": "bullmq", "label": "drain" }
+  ]
+}
