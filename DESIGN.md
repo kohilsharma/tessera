@@ -65,7 +65,7 @@ directions: edit them and the suite fails until the stylesheet follows.
 | Student | Studio | light |
 | Investor | Terminal | dark |
 | Admin | Newsroom | light |
-| *nobody — login, register, `/status`* | Newsroom | light |
+| *nobody — the landing page, login, register, `/status`* | Newsroom | light |
 
 The role sets `data-theme` on `<html>` and is **not** user-overridable. Light/dark is the separate
 axis the reader controls: it follows `prefers-color-scheme` by default, with a per-account override

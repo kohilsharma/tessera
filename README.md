@@ -141,7 +141,8 @@ cd backend && npm run migrate && npm run seed
 
 ## Where things are
 
-`/stories` is the corpus and `/stories/:id` is one Story with its cited analysis, coverage spectrum
+`/` is the signed-out front door, and everything below it needs an account. `/stories` is the
+corpus and `/stories/:id` is one Story with its cited analysis, coverage spectrum
 and timeline. `/search` is hybrid search, Postgres full-text and pgvector cosine fused by
 reciprocal rank, and `/timeline` reads a search as one lane per Story. `/graph` draws the
 co-occurrence graph, bounded so it stays legible, and `/graph/entities/:id` is one name's
@@ -203,4 +204,9 @@ both timelines, and the product rebuild that gave the three roles their own them
 market panel, and the Admin console its user and connector management.
 
 Typed relations on graph edges are deferred (ADR-0019). Monitoring and alerting are out of scope for
-the graded build rather than missing. The evaluation harness is the one module still to come.
+the graded build rather than missing.
+
+The evaluation harness is the one module still to come. ADR-0011 has its scope: clustering
+precision and recall scored against the hand-authored fixtures — they are labelled, which is what
+makes those numbers quotable at all — plus the generation validation pass rate, degradable to a
+one-shot script over the same corpus.

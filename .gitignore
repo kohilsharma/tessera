@@ -78,6 +78,5 @@ docs/architecture/*.json
 docs/verification/
 project-docs/
 
-# Personal recording script and the unfinished eval harness.
+# Personal recording script.
 docs/demo-runbook.md
-backend/src/eval.ts

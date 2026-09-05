@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import AppShell from "./components/AppShell";
 import Masthead from "./components/Masthead";
+import Landing from "./pages/Landing";
 import HealthStatus from "./pages/HealthStatus";
 import Register from "./pages/Register";
 import Login from "./pages/Login";
@@ -39,6 +40,7 @@ function App() {
   return (
     <Routes>
       <Route element={<Masthead />}>
+        <Route path="/" element={<Landing />} />
         <Route path="/status" element={<HealthStatus />} />
         <Route path="/register" element={<Register />} />
         <Route path="/login" element={<Login />} />
@@ -50,7 +52,6 @@ function App() {
           </RequireAuth>
         }
       >
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/account" element={<Account />} />
         <Route path="/dashboard" element={<DashboardRedirect />} />
         <Route path="/dashboard/:role" element={<RoleDashboard />} />

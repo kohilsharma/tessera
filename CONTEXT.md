@@ -206,7 +206,9 @@ Terms are canonical: use these words in code, docs, and conversation.
 
 - **Ticker** — the market symbol a canonical Entity resolves to, set only for organizations. It is
   what joins reporting to markets: a Story shows a market panel when its resolved organizations
-  carry Tickers, and shows nothing when they do not.
+  carry Tickers, and shows nothing when they do not. The mapping is a small curated list, and it is
+  keyed on the names the firehose actually emits rather than on corporate identities — reporting
+  says "Google", never "Alphabet Inc", and a map written the other way round matches nothing.
 
 - **Quote** — one Ticker's current price and what the day did to it, as a market data provider
   reports it. It always carries the name of the provider that produced it, so a simulated price
@@ -216,8 +218,10 @@ Terms are canonical: use these words in code, docs, and conversation.
 
 - **Market Read** — a generated paragraph describing what the reporting and the computed indicators
   each show. It states no causal link between them and never advises: the same
-  `prohibited_investor_language` validation that governs analysis governs this. Contrast: an
-  *indicator* is arithmetic we compute; a Read is a model call about it.
+  `prohibited_investor_language` validation that governs analysis governs this. A Read that fails
+  validation is **refused**, and a refusal is an answer rather than a fault: the caller is told which
+  rule stopped it, and nothing is cached. Contrast: an *indicator* is arithmetic we compute; a Read
+  is a model call about it.
 
 - **Watchlist** — an Investor-owned set of Tickers and sectors they follow. The one piece of
   per-user state on the Investor side, and what makes their dashboard their own rather than a

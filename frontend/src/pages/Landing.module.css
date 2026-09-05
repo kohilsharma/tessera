@@ -1,0 +1,148 @@
+/* Newsroom is the signed-out theme (DESIGN.md §3), so every value here is a token and
+   the page inherits whatever palette the root carries. The composition is the board:
+   one fixed column grid, tabular figures, one accent held for the row that matters. */
+
+.page { max-width: 68rem; margin: 0 auto; padding: 0 0 var(--s-9); }
+
+/* --- hero ------------------------------------------------------------- */
+
+.hero { padding: var(--s-9) 0 var(--s-8); border-bottom: 1px solid var(--rule); }
+
+.headline {
+  margin: 0;
+  max-width: 24ch;
+  font: var(--w-display) clamp(2.5rem, 7vw, var(--t-display))/1.04 var(--font-display);
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  text-wrap: balance;
+}
+/* The one emphasis on the page, and it is the verb the product turns on. */
+.headline em { font-style: italic; color: var(--agree-text); }
+
+.lede {
+  margin: var(--s-6) 0 0;
+  max-width: 68ch;
+  color: var(--quiet);
+  font: var(--t-body)/1.65 var(--font-ui);
+}
+
+.actions { display: flex; flex-wrap: wrap; gap: var(--s-3); margin-top: var(--s-7); }
+
+.primary, .secondary {
+  display: inline-flex; align-items: center; gap: var(--s-2);
+  min-height: 44px; padding: 0 var(--s-5);
+  border-radius: var(--radius);
+  font: 600 var(--t-small)/1 var(--font-ui);
+  text-decoration: none;
+  transition: background-color .18s cubic-bezier(.2,.8,.3,1), color .18s, border-color .18s;
+}
+.primary { background: var(--ink); color: var(--paper); border: 1px solid var(--ink); }
+.primary:hover { background: var(--agree); border-color: var(--agree); color: var(--on-accent); }
+.secondary { border: 1px solid var(--rule2); color: var(--ink); }
+.secondary:hover { border-color: var(--ink); background: var(--paper2); }
+.primary svg { transition: transform .18s cubic-bezier(.2,.8,.3,1); }
+.primary:hover svg { transform: translateX(3px); }
+
+/* --- the board -------------------------------------------------------- */
+
+.board { padding: var(--s-8) 0; }
+.boardHead h2 { margin: 0; font: var(--t-heading)/1.2 var(--font-display); color: var(--ink); }
+.boardHead p { margin: var(--s-2) 0 0; max-width: 60ch; color: var(--quiet); font: var(--t-small)/1.6 var(--font-ui); }
+
+.rows { list-style: none; margin: var(--s-6) 0 0; padding: 0; border-top: 1px solid var(--rule); }
+
+.row {
+  display: grid;
+  grid-template-columns: 3.25rem 7.5rem minmax(0, 1fr) minmax(0, 15rem);
+  align-items: baseline;
+  gap: var(--s-4);
+  padding: var(--s-5) var(--s-3);
+  border-bottom: 1px solid var(--rule);
+}
+/* The row the whole product turns on is the one that is held, and it says so in ink,
+   weight and an icon as well as colour — colour never carries it alone (DESIGN.md §2). */
+.row[data-held] { background: var(--wash-agree); }
+
+.index { font: var(--t-meta)/1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--quiet); }
+.stage { font: 700 var(--t-body)/1.3 var(--font-ui); color: var(--ink); }
+.detail { color: var(--ink); font: var(--t-small)/1.5 var(--font-ui); }
+.detail small { display: block; margin-top: var(--s-1); color: var(--quiet); font: var(--t-meta)/1.5 var(--font-mono); }
+
+.status {
+  display: inline-flex; align-items: center; gap: var(--s-2);
+  justify-self: start;
+  color: var(--quiet);
+  font: var(--t-meta)/1.4 var(--font-mono);
+  text-transform: lowercase;
+}
+.row[data-held] .status { color: var(--agree-text); font-weight: 600; }
+
+/* --- claim shapes ----------------------------------------------------- */
+
+.shapes { padding: var(--s-8) 0; border-top: 1px solid var(--rule); }
+.shapes h2 { margin: 0 0 var(--s-6); font: var(--t-heading)/1.2 var(--font-display); color: var(--ink); }
+.shapes ul { list-style: none; display: grid; gap: var(--s-5); grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); margin: 0; padding: 0; }
+.shapes li { padding-top: var(--s-4); border-top: 2px solid var(--rule2); }
+.shapes li[data-tone="agree"] { border-top-color: var(--agree); }
+.shapes li[data-tone="diverge"] { border-top-color: var(--diverge); }
+.shapes li[data-tone="imply"] { border-top-color: var(--imply); }
+.shapes li[data-tone="agree"] svg { color: var(--agree); }
+.shapes li[data-tone="diverge"] svg { color: var(--diverge); }
+.shapes li[data-tone="imply"] svg { color: var(--imply); }
+.shapes h3 { margin: var(--s-3) 0 var(--s-2); font: 700 var(--t-body)/1.2 var(--font-ui); color: var(--ink); }
+.shapes p { margin: 0; color: var(--quiet); font: var(--t-small)/1.6 var(--font-ui); }
+
+.sample { margin: var(--s-8) 0 0; color: var(--quiet); font: var(--t-small)/1.7 var(--font-ui); }
+.chips { display: inline-flex; gap: var(--s-2); margin-left: var(--s-2); vertical-align: middle; }
+
+/* --- roles ------------------------------------------------------------ */
+
+.roles { padding: var(--s-8) 0; border-top: 1px solid var(--rule); }
+.roles h2 { margin: 0; font: var(--t-heading)/1.2 var(--font-display); color: var(--ink); }
+.rolesLede { margin: var(--s-2) 0 var(--s-6); max-width: 62ch; color: var(--quiet); font: var(--t-small)/1.6 var(--font-ui); }
+.roles dl { margin: 0; display: grid; gap: 0; }
+.roles dl > div { display: grid; grid-template-columns: 9rem minmax(0, 1fr); gap: var(--s-4); padding: var(--s-4) var(--s-3); border-bottom: 1px solid var(--rule); }
+.roles dl > div:first-child { border-top: 1px solid var(--rule); }
+.roles dt { font: 700 var(--t-body)/1.4 var(--font-ui); color: var(--ink); }
+.roles dd { margin: 0; color: var(--quiet); font: var(--t-small)/1.6 var(--font-ui); }
+
+/* --- the invariant ---------------------------------------------------- */
+
+.invariant {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s-4);
+  align-items: start;
+  margin-top: var(--s-8);
+  padding: var(--s-6);
+  background: var(--paper2);
+  border: 1px solid var(--rule2);
+  border-radius: var(--radius);
+}
+.invariant svg { color: var(--agree); }
+.invariant p { margin: 0; max-width: 70ch; color: var(--quiet); font: var(--t-small)/1.7 var(--font-ui); }
+.invariant strong { color: var(--ink); }
+
+.foot {
+  display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--s-3);
+  margin-top: var(--s-8); padding-top: var(--s-5);
+  border-top: 1px solid var(--rule);
+  color: var(--quiet); font: var(--t-meta)/1.5 var(--font-mono);
+}
+.foot a { color: var(--quiet); text-underline-offset: 3px; }
+.foot a:hover { color: var(--ink); }
+
+@media (max-width: 720px) {
+  .hero { padding: var(--s-7) 0 var(--s-6); }
+  /* The board keeps its order and loses its columns: stage over detail over status,
+     with the number tucked beside the stage where a narrow row can still be scanned. */
+  .row { grid-template-columns: 3rem minmax(0, 1fr); gap: var(--s-2) var(--s-3); padding: var(--s-4) var(--s-2); }
+  .index { grid-row: 1; }
+  .stage { grid-row: 1; }
+  .detail, .status { grid-column: 2; }
+  .roles dl > div { grid-template-columns: minmax(0, 1fr); gap: var(--s-1); }
+  .invariant { grid-template-columns: minmax(0, 1fr); padding: var(--s-5); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .primary, .secondary, .primary svg { transition: none; }
+  .primary:hover svg { transform: none; }
+}
