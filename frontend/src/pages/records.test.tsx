@@ -480,7 +480,7 @@ describe("Story detail — the analysis", () => {
     renderWithProviders(<StoryDetail />, { route: "/stories/s1", path: "/stories/:id" });
 
     await userEvent.click(await screen.findByRole("button", { name: "Request analysis" }));
-    await userEvent.click(await screen.findByRole("button", { name: "Save to a new Brief" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Save analysis" }));
 
     // The run itself is what is saved — not the Story, and not the claims copied out
     // of it (ADR-0027).
@@ -508,7 +508,7 @@ describe("Story detail — the analysis", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Request analysis" }));
     await userEvent.click(screen.getByRole("combobox", { name: "Save analysis to" }));
     await userEvent.click(await screen.findByText(/Supply chain watch/));
-    await userEvent.click(screen.getByRole("button", { name: "Save to Brief" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save analysis" }));
 
     await waitFor(() => expect(posted).toEqual([{ url: "/api/v1/briefs/b2", body: JSON.stringify({ generationRunId: analysis.id }) }]));
   });
@@ -527,7 +527,7 @@ describe("Story detail — the analysis", () => {
     expect(await screen.findByText(analysis.claims[0].text)).toBeInTheDocument();
     // ADR-0004: an Admin owns no artefacts, so a command the API would 403 is not one
     // the console should offer.
-    expect(screen.queryByRole("button", { name: "Save to a new Brief" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save analysis" })).not.toBeInTheDocument();
   });
 });
 

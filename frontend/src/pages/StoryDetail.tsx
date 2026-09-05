@@ -112,7 +112,7 @@ function AnalysisSaveControl({
         <p className="record-prose">Showing your {options.length} most recently updated Briefs of {total}.</p>
       )}
       <button type="button" className="record-command" onClick={() => save.mutate()} disabled={save.isPending}>
-        <Plus aria-hidden size={18} /> {save.isPending ? "Saving…" : targetBriefId ? "Save to Brief" : emptyLabel}
+        <Plus aria-hidden size={18} /> {save.isPending ? "Saving…" : "Save analysis"}
       </button>
       {save.isError && <ErrorState>Could not save this analysis: {(save.error as Error).message}</ErrorState>}
     </>
@@ -341,7 +341,7 @@ export default function StoryDetail() {
                   command that would 403. */}
               {me.data && ["student", "investor"].includes(me.data.role) && (
                 <div className="record-actions">
-                  <AnalysisSaveControl generationRunId={produced.id} label="Save analysis to" emptyLabel="Save to a new Brief" />
+                  <AnalysisSaveControl generationRunId={produced.id} label="Save analysis to" emptyLabel="A new Brief" />
                 </div>
               )}
             </>
