@@ -32,15 +32,15 @@ function WatchlistRegister({ items, total, onRemove, removing, error }: { items:
   );
 }
 
-// The Investor surface (#36): the corpus rolled up by sector, as a register of
+// The Investor surface (#36): the corpus rolled up by sector, as a list of
 // categories against their coverage. The bar beside each count is relative to
 // the widest-covered sector, so the column reads as a comparison — the numbers
 // themselves are stated, and are what the reader takes away.
 //
-// Its second register is the route into the Investor Lens (#56): the Stories that hold
+// Its second list is the route into the Investor Lens (#56): the Stories that hold
 // citable reporting from two or more Publishers, which are the ones an analysis of how
 // the coverage agrees and disagrees can be written about at all. A sector rollup says
-// what is covered; this says what can be compared, which is what this role came for.
+// what is covered; this says what is ready to analyse, which is what this role came for.
 // Publishers, not newsrooms: the wire-copy collapse happens when an EvidenceSet is
 // frozen, so a Story that turns out to be one report under two mastheads is listed here
 // and refused on opening, with the reason stated on the record.
@@ -63,7 +63,7 @@ export default function InvestorDashboard() {
             role="investor"
             folio="Investor dashboard"
             title="Sector watch"
-            dek="Coverage across the corpus by sector, and the Stories more than one Publisher has reported. Counts are live, not a forecast."
+            dek="Coverage by sector, plus Stories reported by more than one Publisher. Counts are live, not forecasts."
           >
             <WatchlistRegister items={data.watchlist ?? []} total={data.watchlistTotal ?? data.watchlist?.length ?? 0} onRemove={(id) => remove.mutate(id)} removing={remove.isPending} error={(remove.error ?? add.error) as Error | null} />
             <DashboardRegister heading="Sectors" folio={`${data.sectors.length} covered`}>
@@ -94,14 +94,16 @@ export default function InvestorDashboard() {
             </DashboardRegister>
 
             <DashboardRegister
-              heading="Comparable coverage"
+              heading="Ready to analyse"
               folio={`${data.comparableStories.length} most recent`}
             >
+              <p className="record-prose">
+                Stories with genuinely independent reporting from two or more Publishers after wire-copy collapse appear here.
+              </p>
               {data.comparableStories.length === 0 ? (
                 <EmptyState>
                   <p>
-                    No Story yet carries citable reporting from two Publishers, so there is nothing to
-                    compare. Clustering fills this as coverage arrives.
+                    No Stories are ready to analyse yet. Clustering adds them as independent reporting arrives.
                   </p>
                 </EmptyState>
               ) : (

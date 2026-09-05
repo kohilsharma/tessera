@@ -44,12 +44,12 @@ function StudentStoryPanel({
   const cards = useMutation({ mutationFn: () => makeFlashcards(analysis!.id) });
   return (
     <RolePanel role="Student">
-      <div className={styles.roleHeading}><div><h3>Study this Story</h3><p>{story.studentPanel?.collectionCount ?? 0} collection{story.studentPanel?.collectionCount === 1 ? "" : "s"} owned</p></div><Cards aria-hidden size={24} weight="duotone" /></div>
+      <div className={styles.roleHeading}><div><h3>Study this Story</h3><p>{story.studentPanel?.collectionCount ?? 0} Brief{story.studentPanel?.collectionCount === 1 ? "" : "s"} saved</p></div><Cards aria-hidden size={24} weight="duotone" /></div>
       {analysis?.status === "completed" ? (
         <div className="record-actions">
           <button type="button" className="record-command" onClick={() => cards.mutate()} disabled={cards.isPending}><Cards aria-hidden size={18} /> {cards.isPending ? "Making cards…" : "Make flashcards"}</button>
         </div>
-      ) : <p className="record-prose">Request an analysis below to make cited flashcards or add this Story to a collection.</p>}
+      ) : <p className="record-prose">Request an analysis below to make cited Flashcards or save this Story in a Brief.</p>}
       {cards.isError && <ErrorState>Could not make flashcards: {(cards.error as Error).message}</ErrorState>}
       {cards.isSuccess && <p role="status">Cards added to your deck.</p>}
     </RolePanel>
@@ -256,7 +256,7 @@ export default function StoryDetail() {
         <CoverageSpectrum spectrum={story.coverageSpectrum} />
       </RecordSection>
 
-      {me.data?.role === "student" && <RecordSection heading="Your study desk"><StudentStoryPanel story={story} analysis={produced} /></RecordSection>}
+      {me.data?.role === "student" && <RecordSection heading="Your desk"><StudentStoryPanel story={story} analysis={produced} /></RecordSection>}
       {me.data?.role === "admin" && story.adminPanel && <RecordSection heading="Operator panel"><AdminStoryPanel story={story.adminPanel} storyId={story.id} onRefresh={() => query.refetch()} /></RecordSection>}
 
       {me.data?.role === "investor" && (

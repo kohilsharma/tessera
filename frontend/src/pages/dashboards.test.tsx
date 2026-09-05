@@ -10,10 +10,10 @@ import { jsonResponse, listEnvelope, renderWithProviders } from "../test/renderW
 // The dashboards' first test file. jsdom does no layout and no cascade, so what
 // the Bureau rollout (#36) did to these pages is a browser check, not a test —
 // what is testable is the content contract the registers now carry: the rows
-// each role's register lists, and the refusal a role that isn't yours gets.
+// each role's list, and the refusal a role that isn't yours gets.
 
 describe("Student dashboard", () => {
-  it("registers each study collection as a row opening its Brief", async () => {
+  it("lists each Brief as a row opening its record", async () => {
     vi.mocked(fetch).mockResolvedValue(
       jsonResponse({
         role: "student",
@@ -24,6 +24,9 @@ describe("Student dashboard", () => {
 
     renderWithProviders(<StudentDashboard />);
 
+    expect(await screen.findByRole("heading", { level: 1, name: "Your desk" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Flashcards" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "My Briefs" })).toBeInTheDocument();
     const collectionLink = await screen.findByRole("link", { name: "Grid resilience" });
     const row = collectionLink.closest("li")!;
     expect(collectionLink).toHaveAttribute("href", "/briefs/b1");
@@ -32,7 +35,7 @@ describe("Student dashboard", () => {
     expect(screen.getByText("8")).toBeInTheDocument();
   });
 
-  it("offers a way to start one when there are no collections", async () => {
+  it("offers a way to start one when there are no Briefs", async () => {
     vi.mocked(fetch).mockResolvedValue(
       jsonResponse({
         role: "student",
@@ -43,7 +46,7 @@ describe("Student dashboard", () => {
 
     renderWithProviders(<StudentDashboard />);
 
-    expect(await screen.findByText(/No study collections yet/)).toBeInTheDocument();
+    expect(await screen.findByText(/No Briefs yet/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Start one" })).toHaveAttribute("href", "/briefs/new");
   });
 });
@@ -95,6 +98,7 @@ describe("Investor dashboard", () => {
 
     renderWithProviders(<InvestorDashboard />);
 
+    expect(await screen.findByRole("heading", { level: 2, name: "Ready to analyse" })).toBeInTheDocument();
     const row = await screen.findByRole("link", { name: "Interconnector timetable slips" });
     expect(row).toHaveAttribute("href", "/stories/s1");
     const entry = row.closest("li")!;
@@ -104,12 +108,13 @@ describe("Investor dashboard", () => {
     expect(within(entry).queryByText("Articles")).not.toBeInTheDocument();
   });
 
-  it("says why there is nothing to compare rather than showing an empty register", async () => {
+  it("explains why no Story is ready to analyse rather than showing a vague empty list", async () => {
     vi.mocked(fetch).mockResolvedValue(jsonResponse(investorPayload()));
 
     renderWithProviders(<InvestorDashboard />);
 
-    expect(await screen.findByText(/nothing to compare/)).toBeInTheDocument();
+    expect(await screen.findByText(/independent reporting from two or more Publishers/)).toBeInTheDocument();
+    expect(screen.getByText(/wire-copy collapse/)).toBeInTheDocument();
   });
 });
 

@@ -399,7 +399,7 @@ export default function AdminDashboard() {
               claimCountRange={data.promptClaimCountRange}
             />
 
-            <DashboardRegister heading="Publishers" folio={`${data.publishers.length} registered`}>
+            <DashboardRegister heading="Publishers" folio={`${data.publishers.length} listed`}>
               {data.publishers.length === 0 ? (
                 <EmptyState>
                   <p>

@@ -177,12 +177,12 @@ Terms are canonical: use these words in code, docs, and conversation.
 
 - **Timeline** — A **computed** read view of Articles ordered over time, with the analytical
   events that happened to them — an *EvidenceSet* freeze, a completed *GenerationRun* — on the
-  same axis. Reached two ways: as a register on a Story, and as its own route over any search.
+  same axis. Reached two ways: as a section on a Story, and as its own route over any search.
   Over a search it groups the matching Articles into one lane per Story, so parallel events
   read as parallel. The one overlay is **volume**, reporting per period. Tone is **not** an
   axis, ADR-0020's "for free" notwithstanding: `articles.tone` is GDELT's, and it reaches a
   clustered Story only by cross-connector *Enrichment*, which measured zero on 2026-09-01 — so
-  the register states that in a line rather than drawing an empty axis. Showing evolution only
+  the section states that in a line rather than drawing an empty axis. Showing evolution only
   — NOT change-detection/alerting. _Avoid_: "generated timeline". *Generation* in Tessera means
   the cited-synthesis pipeline; a timeline is assembled from rows that already exist, costs
   nothing per view, and no model writes any part of it. (ADR-0020, ADR-0028)
@@ -236,11 +236,12 @@ Terms are canonical: use these words in code, docs, and conversation.
 
 ## Roles
 
-- **Student** — Consumer role focused on learning/context. Distinct permissions & dashboard
-  (study collections, guided reading, citation export, **flashcard generation**).
+- **Student** — Consumer role focused on learning/context. Distinct permissions & dashboard,
+  **Your desk**, with My Briefs, Flashcards, guided reading, and citation export.
 - **Investor** — Consumer role focused on business implications. *Distinct* permissions &
-  dashboard (watchlist/sectors, **cross-source consensus/contradiction** on a company/sector,
-  implication briefs) — deliberately NOT "Student + one lens". (ADR-0021)
+  dashboard (watchlist/sectors, **Ready to analyse** Stories with cross-source
+  consensus/contradiction on a company/sector, implication Briefs) — deliberately NOT
+  "Student + one lens". (ADR-0021)
 - **Admin** — Operator role: manages connectors, reviews clustering, reviews **entity-resolution
   merges**, **tunes PromptTemplates** for everyone, inspects generations. Never implicitly owns
   a user's Brief.

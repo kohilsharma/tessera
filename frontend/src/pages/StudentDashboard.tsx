@@ -10,8 +10,8 @@ import {
 } from "../components/dashboardArchetype";
 import { EmptyState, EntryList } from "../components/uiStates";
 
-// The Student surface (#36): the study collections themselves, as a register.
-// A collection is an owned Brief (backend/src/routes/dashboard.ts), so each row
+// The Student surface (#36): the Briefs and Flashcards a Student owns.
+// Each row
 // opens the Brief it is — the count this page used to print was a number you
 // could do nothing with.
 export default function StudentDashboard() {
@@ -23,10 +23,10 @@ export default function StudentDashboard() {
         <DashboardPage
           role="student"
           folio="Student dashboard"
-          title="Study desk"
-          dek="Your due reviews, study collections, and the corpus they are built from."
+          title="Your desk"
+          dek="Review Flashcards, revisit saved Briefs, and study from cited reporting."
         >
-          <DashboardRegister heading="Flashcard reviews" folio={`${data.flashcards.dueCount} due`}>
+          <DashboardRegister heading="Flashcards" folio={`${data.flashcards.dueCount} due`}>
             <EntryList>
               <RegisterRow
                 name={
@@ -53,12 +53,12 @@ export default function StudentDashboard() {
           </DashboardRegister>
 
           <DashboardRegister
-            heading="Study collections"
-            folio={`${data.studyCollections.length} registered`}
+            heading="My Briefs"
+            folio={`${data.studyCollections.length} saved`}
           >
             {data.studyCollections.length === 0 ? (
               <EmptyState>
-                <p>No study collections yet — a collection is a Brief you own.</p>
+                <p>No Briefs yet. Create one to keep your own cited reading.</p>
                 <p>
                   <Link to="/briefs/new">Start one</Link>, or{" "}
                   <Link to="/stories">browse the corpus</Link> first.

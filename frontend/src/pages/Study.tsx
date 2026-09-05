@@ -168,7 +168,7 @@ export default function Study() {
         retrying={me.isFetching}
       />
     );
-  if (me.data.role !== "student") return <RefusedState role="Students">Flashcards are available only on the Student study desk.</RefusedState>;
+  if (me.data.role !== "student") return <RefusedState role="Students">Flashcards are available only to Students.</RefusedState>;
 
   if (query.isPending) return <PendingState>Loading your flashcards…</PendingState>;
   if (query.isError)
@@ -189,7 +189,7 @@ export default function Study() {
     <main className="stated-page study-page">
       <header className="study-header">
         <div>
-          <p className="study-kicker"><Cards aria-hidden size={18} /> Student study desk</p>
+          <p className="study-kicker"><Cards aria-hidden size={18} /> Your desk</p>
           <h1>Flashcards</h1>
           <p className="record-prose">Recall first, then check the cited answer. Your grade decides when each card returns.</p>
         </div>

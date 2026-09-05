@@ -1088,3 +1088,20 @@ page for both queues — page turn, refetch URL, a row page 1 did not hold — a
 made from page 2 whose refetch answers one row shorter, asserting the register lands on
 page 1 of 1 rather than an empty page 2. No backend change, so the backend suite was not
 rerun.
+
+**#101 — the naming and copy pass.** Replaced the retired Bureau vocabulary in the visible
+product: the Student dashboard now says **Your desk**, **Flashcards**, and **My Briefs**;
+the Investor dashboard calls its qualified Stories **Ready to analyse**; and the Student
+Story panel uses the same **Your desk** and Brief language. The Investor list now explains
+that it contains Stories with genuinely independent reporting from two or more Publishers
+after wire-copy collapse, so the heading describes the purpose and the empty state explains
+what is missing. Other machine-written phrasing was tightened in the nearby dashboard copy,
+including the no-Briefs and no-ready-Stories states. Internal component and CSS vocabulary
+(`register`, `folio`, `plate`) remains implementation-only and was not renamed because this
+ticket changes no behavior or architecture. `CONTEXT.md` now names the same role surfaces
+and Ready-to-analyse criterion as the UI.
+
+Verification: added dashboard copy assertions for the new headings and independent-reporting
+explanation; the focused dashboard suite passes (48 tests), the full frontend suite passes
+(291 tests), frontend build/typecheck pass, and the backend suite remains green (594 passed,
+11 skipped) with no backend changes.
