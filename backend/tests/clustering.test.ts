@@ -1661,6 +1661,7 @@ describe("the clustering worker job", () => {
   it("seeds and names nothing, rather than failing, when the synthesis config cannot build a provider", async () => {
     const first = await createPublisher("broken-one.example");
     const second = await createPublisher("broken-two.example");
+    const third = await createPublisher("broken-three.example");
     const medoid = await createArticle({
       publisherId: first.id,
       title: "Regional ceasefire talks resume",
@@ -1672,6 +1673,14 @@ describe("the clustering worker job", () => {
       title: "Talks resume, mediators say",
       vector: axisVector(0, -0.2),
       publishedAt: hoursAgo(1),
+    });
+    // A third member equidistant on the other side, so the named Article is the
+    // genuine medoid. With two members the title is a coin flip on ids (#106).
+    await createArticle({
+      publisherId: third.id,
+      title: "Ceasefire talks set to resume",
+      vector: axisVector(0, 0.2),
+      publishedAt: hoursAgo(2),
     });
 
     // A provider that cannot be constructed at all: openai selected, no approved origin.
@@ -1693,6 +1702,6 @@ describe("the clustering worker job", () => {
     // The membership the pass computed stands; only the title falls back.
     const story = await AppDataSource.getRepository(Story).findOneByOrFail({});
     expect(story.title).toBe(medoid.title);
-    expect(await AppDataSource.getRepository(Article).countBy({ storyId: story.id })).toBe(2);
+    expect(await AppDataSource.getRepository(Article).countBy({ storyId: story.id })).toBe(3);
   });
 });

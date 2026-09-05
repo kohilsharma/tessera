@@ -223,6 +223,12 @@ async function assignToStory(
   });
 }
 
+// Scores each member by its summed cosine similarity to the other members. On
+// an even, symmetric group — two members above all — every member scores the
+// same, so the tie falls through to the lower id: an arbitrary but stable
+// pick. Neither member is more central than the other, so any title that
+// comes out of it is a correct fallback. Tests must not assert one specific
+// member's title on a symmetric group (#106).
 function medoidOf(group: Candidate[]): Candidate {
   let best = group[0];
   let bestTotal = -Infinity;

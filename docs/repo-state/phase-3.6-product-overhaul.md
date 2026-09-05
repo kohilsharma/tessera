@@ -51,7 +51,7 @@ spec (§6) and belong to their own tickets.
 
 Three findings came out of the pass, plus one the closing test run turned up. Per #72's fourth
 bullet each was filed as its own issue and written out below, because the phase file is where the
-next session looks first. #103 and #104 are now resolved; #105–#106 remain follow-up findings.
+next session looks first. #103, #104, #105 and #106 are now resolved.
 
 The one confirmed defect was a **layout collapse in the edge-citation drawer** (#103): every headline
 inside it rendered one character per line, `a.entry-title` measuring `0px × 1829px`. The cause was not
@@ -1149,3 +1149,19 @@ none of the 11 reported demonyms and now draws 47 locations, 10 organizations an
 15,256 cited Articles. The focused graph and neighbourhood suites pass; the full backend suite is
 596 passing and 11 skipped, the full frontend suite is 292 passing, both typechecks pass, and the
 frontend production build passes.
+
+**#106 — the medoid tie no longer flips the broken-provider test.** The flake was in the fixture,
+not the code: `medoidOf` scores each member by its summed cosine similarity to the others, so on a
+two-member group both score identically and the tie falls to `member.id < best.id` — a coin flip on
+random UUIDs that the test then asserted one specific side of. The fixture now seeds a third Article
+at `axisVector(0, 0.2)`, equidistant on the other side of the intended medoid (the same ±0.2 shape
+the concurrent-enrichment test already uses), so the named Article is the genuine medoid:
+2·cos(0.2) against cos(0.2)+cos(0.4) for both outers. The membership count assertion follows it to
+3. `medoidOf`'s tie-break behaviour is now documented at the function — arbitrary but stable, and
+either member of a symmetric group is a correct fallback — so the next test does not ask the tie a
+question it cannot answer. The Story slug still rides the same tie, harmlessly, since it only has
+to be unique.
+
+Verification: the single test passed on five consecutive runs (it failed roughly every other run
+before); the full backend suite is 596 passing and 11 skipped, and `tsc -p tsconfig.build.json
+--noEmit` passes. No production behaviour changed — test fixture and a comment only.
