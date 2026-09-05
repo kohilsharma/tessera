@@ -42,7 +42,7 @@ export default function Search() {
       // The other reading of the same query (#65), carrying the query with it: a reader
       // who has searched switches how they read it rather than typing it again.
       action={
-        <Link className="index-switch" to={`/search/timeline${list.queryString ? `?${list.queryString}` : ""}`}>
+        <Link className="index-switch" to={`/timeline${list.queryString ? `?${list.queryString}` : ""}`}>
           Read as a timeline
         </Link>
       }

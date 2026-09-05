@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useLocation } from "react-router-dom";
 import SearchTimeline from "./SearchTimeline";
+import { TimelineMoved } from "../App";
 import type { SearchTimelineResult } from "../api/client";
 import { jsonResponse, renderWithProviders } from "../test/renderWithProviders";
 
@@ -10,6 +12,11 @@ import { jsonResponse, renderWithProviders } from "../test/renderWithProviders";
 // to. jsdom judges no bar heights, so what is asserted is what the bars *say* — the
 // accessible name every volume row carries — plus the lanes, their order, and the switch
 // back to the ranked reading of the same query.
+//
+// #96 promoted it to its own destination and made the bars the way in rather than a
+// picture of the way in. jsdom still judges no heights, so what is asserted there is the
+// bars' semantics — one radio group per row, one radio per period, each naming its own
+// span and count — and what selecting one does to the lanes underneath.
 
 const publisher = { id: "p1", name: "Meridian Wire", domain: "meridianwire.example" };
 
@@ -48,23 +55,45 @@ const timeline: SearchTimelineResult = {
   total: 3,
 };
 
-function render(overrides: Partial<SearchTimelineResult> = {}, route = "/search/timeline?q=fabrication") {
+function render(overrides: Partial<SearchTimelineResult> = {}, route = "/timeline?q=fabrication") {
   vi.mocked(fetch).mockResolvedValue(jsonResponse({ ...timeline, ...overrides }));
   return renderWithProviders(<SearchTimeline />, { route });
 }
 
-describe("Search timeline — UI states", () => {
-  it("prompts for a term before it lays anything on an axis", () => {
-    renderWithProviders(<SearchTimeline />, { route: "/search/timeline" });
+// #96 moved the page's address. The old one is kept, and what is worth a check is not that
+// it forwards — react-router does that — but that the query survives the trip, since
+// `Navigate` drops the search string unless it is put back by hand.
+describe("Search timeline — the address it used to have", () => {
+  const Landed = () => <p>landed at {useLocation().search}</p>;
 
-    expect(screen.getByText(/Enter a search term/)).toBeInTheDocument();
+  it("forwards the old path to the new one, carrying the query", () => {
+    renderWithProviders(<TimelineMoved />, {
+      route: "/search/timeline?q=fabrication&category=technology",
+      path: "/search/timeline",
+      probe: { path: "/timeline", element: <Landed /> },
+    });
+
+    expect(screen.getByText("landed at ?q=fabrication&category=technology")).toBeInTheDocument();
+  });
+});
+
+describe("Search timeline — UI states", () => {
+  // The landing state of a top-level destination (#96): a reader who arrives from the nav
+  // has typed nothing, so it has to say what the page draws, where the term goes, and
+  // where to find one — not merely that something is missing.
+  it("says what a timeline is and how to draw one before it has a term", () => {
+    renderWithProviders(<SearchTimeline />, { route: "/timeline" });
+
+    expect(screen.getByText(/one lane per Story/)).toBeInTheDocument();
+    expect(screen.getByText(/Search/, { selector: "strong" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Browse the Stories" })).toHaveAttribute("href", "/stories");
     expect(fetch).not.toHaveBeenCalled();
   });
 
   it("states the wait while the timeline is being assembled", () => {
     vi.mocked(fetch).mockReturnValue(new Promise(() => {}));
 
-    renderWithProviders(<SearchTimeline />, { route: "/search/timeline?q=fabrication" });
+    renderWithProviders(<SearchTimeline />, { route: "/timeline?q=fabrication" });
 
     expect(screen.getByRole("status")).toHaveTextContent("Laying the matches on a timeline…");
   });
@@ -72,7 +101,7 @@ describe("Search timeline — UI states", () => {
   // The two empty screens are different facts, and the page says so: nothing matched the
   // query is not the same as the request failed.
   it("names the term that matched nothing, and offers to widen the filters", async () => {
-    render({ from: null, to: null, points: [], volume: [], lanes: [], total: 0 }, "/search/timeline?q=zeppelin&category=health");
+    render({ from: null, to: null, points: [], volume: [], lanes: [], total: 0 }, "/timeline?q=zeppelin&category=health");
 
     expect(await screen.findByText(/No reporting matches/)).toHaveTextContent("zeppelin");
     await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
@@ -87,7 +116,7 @@ describe("Search timeline — UI states", () => {
       .mockResolvedValueOnce(jsonResponse({ error: "Search is unavailable" }, 500))
       .mockResolvedValueOnce(jsonResponse(timeline));
 
-    renderWithProviders(<SearchTimeline />, { route: "/search/timeline?q=fabrication" });
+    renderWithProviders(<SearchTimeline />, { route: "/timeline?q=fabrication" });
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Could not build this timeline: Search is unavailable",
@@ -141,9 +170,9 @@ describe("Search timeline — one lane per Story", () => {
   it("states in words what each lane's bars draw, and that they share one axis", async () => {
     render();
 
-    const overlays = await screen.findAllByRole("img");
-    expect(overlays[0]).toHaveAccessibleName(/All matching reporting per week across 3 periods/);
-    expect(overlays[1]).toHaveAccessibleName(
+    const rows = await screen.findAllByRole("radiogroup");
+    expect(rows[0]).toHaveAccessibleName(/All matching reporting per week across 3 periods/);
+    expect(rows[1]).toHaveAccessibleName(
       "Semiconductor alliance: 2 matching reports per week, on the same axis as every other Story here.",
     );
     const lane = within(screen.getByRole("region", { name: "Tariff schedule" }));
@@ -165,7 +194,7 @@ describe("Search timeline — one lane per Story", () => {
   });
 
   it("hands the whole query back to the ranked reading of it", async () => {
-    render({}, "/search/timeline?q=fabrication&category=technology&dateFrom=2026-01-01");
+    render({}, "/timeline?q=fabrication&category=technology&dateFrom=2026-01-01");
 
     expect(await screen.findByRole("link", { name: "Read as a ranked list" })).toHaveAttribute(
       "href",
@@ -179,5 +208,88 @@ describe("Search timeline — one lane per Story", () => {
     await userEvent.type(await screen.findByLabelText("Published from"), "2026-01-12");
 
     await waitFor(() => expect(String(vi.mocked(fetch).mock.calls.at(-1)![0])).toContain("dateFrom=2026-01-12"));
+  });
+});
+
+// #96. The bars were a picture of the way in; the way in was the list underneath. Each
+// one is now a radio in its row's group, which is what makes a row a single tab stop the
+// arrow keys move inside rather than sixty of them — and picking one narrows every lane
+// to that period without touching the axis they are all drawn against.
+describe("Search timeline — the bars are the way in", () => {
+  // The whole set's row, not a lane's: every row draws the same buckets and any of them
+  // picks the period, so the assertions drive the one that stands for all the reporting.
+  const periods = async () =>
+    within(await screen.findByRole("radiogroup", { name: /All matching reporting/ })).getAllByRole("radio");
+
+  it("names the span and the count every bar stands for", async () => {
+    render();
+
+    const bars = await periods();
+    expect(bars).toHaveLength(3);
+    expect(bars[0]).toHaveAccessibleName(/^Week of .+: 1 report$/);
+    expect(bars[1]).toHaveAccessibleName(/^Week of .+: 2 reports$/);
+    // A lull is a period like any other — selectable, so a reader can ask who was quiet.
+    expect(bars[2]).toHaveAccessibleName(/^Week of .+: 0 reports$/);
+    expect(bars.every((bar) => !(bar as HTMLInputElement).checked)).toBe(true);
+  });
+
+  it("narrows every lane to the period a bar picks, and says what it narrowed to", async () => {
+    render();
+
+    await userEvent.click((await periods())[1]);
+
+    expect(screen.getByRole("status")).toHaveTextContent(/Narrowed to Week of .+: 2 of 3 matching reports/);
+    const alliance = within(screen.getByRole("region", { name: "Semiconductor alliance" }));
+    expect(alliance.getAllByRole("listitem")).toHaveLength(1);
+    expect(alliance.getByRole("link", { name: "Second fab site shortlisted" })).toBeInTheDocument();
+    // The lane still states the whole it is a part of, so a narrowed lane cannot read as
+    // a Story with less coverage than it has.
+    expect(alliance.getByText("1 of 2 matching reports")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Tariff schedule" })).getAllByRole("listitem")).toHaveLength(1);
+  });
+
+  it("says which Stories were quiet in the period rather than dropping their lane", async () => {
+    render();
+
+    await userEvent.click((await periods())[0]);
+
+    const tariff = within(screen.getByRole("region", { name: "Tariff schedule" }));
+    expect(tariff.getByText("No matching reporting in this period.")).toBeInTheDocument();
+    expect(tariff.queryAllByRole("listitem")).toHaveLength(0);
+    // Its bars survive, so the lane is still a way to pick another period.
+    expect(tariff.getByRole("radiogroup")).toBeInTheDocument();
+  });
+
+  it("gives every period back", async () => {
+    render();
+
+    await userEvent.click((await periods())[0]);
+    await userEvent.click(screen.getByRole("button", { name: "Show every period" }));
+
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Tariff schedule" })).getAllByRole("listitem")).toHaveLength(1);
+  });
+
+  // One tab stop per row, arrow keys inside it — the browser's own radio-group
+  // behaviour, which is the whole reason a bar is a radio and not a button.
+  it("moves between periods with the arrow keys", async () => {
+    render();
+
+    await userEvent.click((await periods())[0]);
+    await userEvent.keyboard("{ArrowRight}");
+
+    expect((await periods())[1]).toBeChecked();
+    expect(screen.getByRole("status")).toHaveTextContent("2 of 3 matching reports");
+  });
+
+  // The period rides in the URL, so a narrowed axis is a link. A term or a filter that
+  // draws a different axis leaves that value naming no bucket at all, and a stale
+  // selection must resolve to no selection rather than to whichever bucket is nearby.
+  it("selects nothing for a period the drawn axis does not have", async () => {
+    render({}, "/timeline?q=fabrication&period=2020-06-01T00:00:00.000Z");
+
+    expect((await periods()).every((bar) => !(bar as HTMLInputElement).checked)).toBe(true);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Semiconductor alliance" })).getAllByRole("listitem")).toHaveLength(2);
   });
 });

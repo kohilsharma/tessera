@@ -37,6 +37,26 @@ describe("AppShell", () => {
     expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
   });
 
+  // #96: the timeline reading existed under /search and nobody found it. Its own
+  // destination, and an icon on every entry rather than on one — an icon on one of six
+  // reads as an accident. Each icon is decorative, so the label is still the whole
+  // accessible name a reader hears and every assertion here matches on it alone.
+  it("offers the timeline as a destination of its own, iconed like every other", () => {
+    setToken("a.jwt.token");
+    vi.mocked(fetch).mockReturnValue(new Promise(() => {}));
+
+    renderShell("/stories");
+
+    const nav = screen.getByRole("navigation", { name: "Primary navigation" });
+    expect(within(nav).getByRole("link", { name: "Timeline" })).toHaveAttribute("href", "/timeline");
+    for (const label of ["Stories", "Search", "Timeline", "Graph", "My Briefs", "Flashcards"]) {
+      expect(within(nav).getByRole("link", { name: label }).querySelector("svg")).toHaveAttribute(
+        "aria-hidden",
+        "true",
+      );
+    }
+  });
+
   it("fills in the identity control once /auth/me resolves, and signs out from it", async () => {
     setToken("a.jwt.token");
     vi.mocked(fetch).mockResolvedValue(jsonResponse({ id: "u1", email: "student@tessera.local", role: "student" }));

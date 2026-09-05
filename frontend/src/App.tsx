@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import AppShell from "./components/AppShell";
 import Masthead from "./components/Masthead";
 import HealthStatus from "./pages/HealthStatus";
@@ -26,6 +26,14 @@ import Study from "./pages/Study";
 // (RequireAuth bounces a signed-out visitor to /login). Every route in here is
 // one a reader reaches: the Bureau design prototype that used to sit beside
 // them at /design-prototype went with the system it demonstrated (#73).
+
+// #96 moved the timeline out from under /search. `Navigate` drops the search string on its
+// own, and the search *is* the timeline, so the old address forwards with its query intact.
+export function TimelineMoved() {
+  const { search } = useLocation();
+  return <Navigate to={`/timeline${search}`} replace />;
+}
+
 function App() {
   return (
     <Routes>
@@ -49,9 +57,16 @@ function App() {
         <Route path="/stories/:id" element={<StoryDetail />} />
         <Route path="/articles/:id" element={<ArticleDetail />} />
         <Route path="/search" element={<Search />} />
-        {/* The same query read as a timeline (#65) — its own route, so a reader can
-            link to it, and under /search because it is the same search. */}
-        <Route path="/search/timeline" element={<SearchTimeline />} />
+        {/* The same query read as a timeline (#65). Top-level since #96 promoted it to a
+            destination of its own: nested under /search, a nav entry for it would have
+            marked Search as the current page too, and it is a reading a reader arrives at
+            rather than only a switch off the ranked list. */}
+        <Route path="/timeline" element={<SearchTimeline />} />
+        {/* Where it used to live. Kept because the address shipped — Phase 3.5's own
+            verification record links it — and a moved page that answers 404 loses the
+            reader rather than the URL. Carries the query across, since the whole point of
+            a timeline link is the search it draws. */}
+        <Route path="/search/timeline" element={<TimelineMoved />} />
         {/* The bounded global graph (#68). Its own top-level route, not under /stories:
             ADR-0028's graph reads the retained firehose, which is a different corpus from
             any Story. */}

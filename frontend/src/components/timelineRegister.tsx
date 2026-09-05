@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { useId, type CSSProperties } from "react";
 import { LENS_LABELS, type Timeline, type TimelineEvent } from "../api/client";
 import { ArticleEntry, DateStamp, EntryLedger } from "./indexArchetype";
 import { peakOf } from "./scale";
@@ -23,6 +23,63 @@ export const PERIOD_LABELS: Record<Timeline["granularity"], string> = {
   week: "per week",
 };
 
+// One bucket's own name (#96), so a bar can say which span it stands for and not only how
+// tall it is. Buckets are contiguous and equal (buildTimeline.ts), so the start names the
+// whole span to a reader who has been told the granularity — which every drawing states.
+// An hourly bucket is a span inside one day, so that one alone carries a time.
+const PERIOD_NAMES: Record<Timeline["granularity"], (at: Date) => string> = {
+  hour: (at) => at.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" }),
+  day: (at) => at.toLocaleDateString(),
+  week: (at) => `Week of ${at.toLocaleDateString()}`,
+};
+
+export function periodName(periodStart: string, granularity: Timeline["granularity"]) {
+  return PERIOD_NAMES[granularity](new Date(periodStart));
+}
+
+// What a bucket *holds*, as against what it is named after: from its own start to the next
+// one's, or to the end of the axis for the last. Half-open, so reporting published exactly
+// on a boundary belongs to one period rather than to two. It sits here beside `periodName`
+// because both are the same piece of knowledge — what one bucket on this axis means — and a
+// page that had to work that out for itself would be deriving bucket semantics twice.
+//
+// The bucket is found by lookup rather than by arithmetic, so a `periodStart` from a
+// different axis (a changed term, a changed filter, a hand-written link) matches nothing
+// and yields no span, instead of silently landing on whichever bucket is nearby. Compared
+// as instants, because the same instant arrives with milliseconds from the API and without
+// them from a link someone typed.
+export function periodSpan(
+  buckets: Timeline["volume"],
+  granularity: Timeline["granularity"],
+  wanted: string,
+): { start: string; name: string; from: number; to: number } | null {
+  if (!wanted) return null;
+  const index = buckets.findIndex((bucket) => Date.parse(bucket.periodStart) === Date.parse(wanted));
+  if (index < 0) return null;
+  const { periodStart } = buckets[index];
+  const next = buckets[index + 1]?.periodStart;
+  return {
+    // The axis' own spelling of it, not the caller's: what came in may be the same instant
+    // written differently, and it is this one that has to match a bucket to select it.
+    start: periodStart,
+    name: periodName(periodStart, granularity),
+    from: Date.parse(periodStart),
+    to: next ? Date.parse(next) : Infinity,
+  };
+}
+
+// Makes the bars the way in rather than a picture of it (#96). One radio per bucket, which
+// is the platform's own answer to "pick one of these": the group is a single tab stop the
+// arrow keys move inside, where sixty buttons would be sixty tab stops — and an axis runs
+// to sixty buckets (MAX_BUCKETS). The caller owns the selection because it lives in the
+// URL, so a narrowed axis is a link.
+export type VolumePeriods = {
+  periodStarts: string[];
+  granularity: Timeline["granularity"];
+  selected: string | null;
+  onSelect: (periodStart: string) => void;
+};
+
 // Reporting per period as a row of bars on one baseline. Its own component because the
 // search timeline (#65) draws this once for the whole match set and once per Story lane,
 // all against the same buckets — `peak` is the caller's for exactly that reason: lanes
@@ -30,12 +87,56 @@ export const PERIOD_LABELS: Record<Timeline["granularity"], string> = {
 //
 // `label` is the caller's too: what the bars measure differs per drawing, and a bar row
 // is a picture until something states what it is (DESIGN.md's Redundant Signal Rule).
-export function TimelineVolume({ counts, peak, label }: { counts: number[]; peak: number; label: string }) {
+//
+// Without `periods` it stays exactly that picture: a Story's own register (#64) has one
+// axis and nothing to narrow to, so its bars answer to nothing and claim no affordance.
+export function TimelineVolume({
+  counts,
+  peak,
+  label,
+  periods,
+}: {
+  counts: number[];
+  peak: number;
+  label: string;
+  periods?: VolumePeriods;
+}) {
+  // One name per row, so the arrow keys walk this row's periods and never step into the
+  // next lane's — every lane on the search timeline draws its own row of the same buckets.
+  const group = useId();
+
+  if (!periods) {
+    return (
+      <div className="timeline-volume" role="img" aria-label={label}>
+        {counts.map((count, index) => (
+          <i key={index} style={{ "--share": count / peak } as CSSProperties} />
+        ))}
+      </div>
+    );
+  }
+
   return (
-    <div className="timeline-volume" role="img" aria-label={label}>
-      {counts.map((count, index) => (
-        <i key={index} style={{ "--share": count / peak } as CSSProperties} />
-      ))}
+    <div className="timeline-volume" role="radiogroup" aria-label={label}>
+      {counts.map((count, index) => {
+        const start = periods.periodStarts[index];
+        return (
+          // The whole column is the target, not the drawn bar: a one-count bucket on a tall
+          // axis draws a sliver, and a sliver is not something a hand can hit.
+          <label key={start} className="timeline-period" style={{ "--share": count / peak } as CSSProperties}>
+            <input
+              type="radio"
+              name={group}
+              checked={periods.selected === start}
+              onChange={() => periods.onSelect(start)}
+            />
+            {/* A lull is selectable like any other period — "who was quiet that week" is a
+                question about the axis — so the name states the count even when it is 0. */}
+            <span className="a11y-only">
+              {periodName(start, periods.granularity)}: {count} report{count === 1 ? "" : "s"}
+            </span>
+          </label>
+        );
+      })}
     </div>
   );
 }

@@ -907,3 +907,68 @@ an Article can be saved without leaving its record.
 
 Verification: record tests cover search-and-attach, duplicate filtering, and Article-to-Brief
 attachment; frontend typecheck/build pass. Full frontend suite: 274 tests passing.
+
+**#96 — Timeline as its own destination, with bars you can click.** The timeline reading existed and
+worked; nobody could reach it. It moves from `/search/timeline` to `/timeline` and enters the nav.
+The nesting was the reason it could not be a nav entry at all: react-router's `NavLink to="/search"`
+matches `/search/timeline` by default, so an entry at the nested URL would have marked both Search
+and Timeline as the current page. The old address is kept as a redirect that carries its query
+across — Phase 3.5's own verification record links it, and a moved page answering 404 loses the
+reader rather than the URL. Every nav entry now carries a Phosphor icon rather than Flashcards alone, which read
+as an oversight rather than as emphasis; each is `aria-hidden`, so a label is still the whole
+accessible name.
+
+The bars became the way in. Each is a native `<input type="radio">` inside its row's group, clipped
+but focusable, named "Week of 12 January: 2 reports". Radios rather than buttons because an axis
+runs to sixty buckets (`MAX_BUCKETS`) and sixty buttons is sixty tab stops: a radio group is one tab
+stop the arrow keys move inside, supplied by the browser. Recharts was weighed against DESIGN.md §9's
+"nothing hand-rolled that a library does properly" and rejected: its `accessibilityLayer` gives
+keyboard *inspection*, not keyboard *activation*, and swapping the renderer would have restyled
+StoryDetail's timeline too. What is being built is a filter control, and native radios are the
+platform's own answer to "pick one of N".
+
+Picking a period narrows every lane's list and touches nothing else: the bars and the axis keep
+drawing the whole set, because an axis that shrank to its own selection would leave nothing to
+compare against and no way back. A lane with nothing in that period keeps its bars and says "No
+matching reporting in this period." — dropping it would answer "who else was covering this" by
+hiding the Stories that were quiet, which is the one reading the lanes exist for. Each lane states
+"1 of 2 matching reports" so a narrowed lane cannot read as a Story with less coverage than it has.
+
+The selection rides in the URL as `?period=<ISO>` and is resolved by lookup against the drawn
+buckets, compared as instants rather than as strings (the API serialises milliseconds; a
+hand-written link may not). A term or filter that draws a different axis leaves the old value naming
+no bucket, and it resolves to no selection rather than to whichever bucket is nearby — so a stale
+link heals itself. Known cost: a dead `period` param can linger in the URL after a filter change,
+which was preferred to teaching the shared `updateFilter` about one page's parameter.
+
+Landing state, since a reader now arrives with nothing typed: what the page draws, where the term
+goes, and a way to `/stories` to find one. Lanes keep the `EntryList` frame, so #77's bounded 30rem
+scroll and its "Showing 1 of 35" summary carry over unchanged.
+
+Two defects were found only by looking at it in a browser and are fixed: a picked bucket with zero
+reporting rendered as a full-height paper-filled column — the loudest mark on the axis, meaning
+"nothing happened here" — so the selection is now the nav's three-pixel ink rule under the column
+and no fill; and an empty bucket gave no hover feedback at all, since the hover treatment darkened a
+bar of height zero, so the column itself now answers the pointer. Nav CSS moved to `inline-flex`
+centring for the icon/word pair, wraps at ≤1050px on an `auto` grid row with a 44px hit target, and
+drops the icons alone at ≤390px, where six labels and six icons will not both fit — the word is the
+destination, the icon only helps find it.
+
+Verification: 281 frontend tests passing across 18 files, typecheck and build clean. Verified in
+Chrome at 1280px and 390px: the arrow keys move and select across the row, the focus ring is visible
+on the column, the URL carries the period, and lane folios, list summaries and article dates all
+follow the selection. The dev box's embedding provider was returning 500s for `/search` and
+`/search/timeline` alike — an environment fault, not this change — so the browser pass ran against a
+shaped stub of the endpoint on the same port, which also let the layout be checked at twenty buckets
+and four lanes rather than the unit fixture's three.
+
+Review raised two things this ticket declined. Every nav entry got an icon rather than Timeline
+alone, which reads as scope beyond "a top-level nav destination with an icon" — but Flashcards
+already had one, and two icons among six is an accident where six is a system; spec §1.6 asks for
+Phosphor "throughout". And the new CSS landed in the global `styles.css` rather than a
+`timelineRegister.module.css`, against ADR-0030's CSS Modules decision: the `.timeline-*` family is
+one interlocking block there, and `.timeline-lane-head`/`-folio` are declared in a shared selector
+list with `.dash-register-head`/`-folio` precisely so a lane and a dashboard register wear one
+treatment. Splitting the new rules out would either divide one component across two files or drag
+that sharing apart, which is a migration of the legacy sheet and not this ticket. No ticket tracks
+that migration yet; it wants one.

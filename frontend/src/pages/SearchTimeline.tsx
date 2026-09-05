@@ -5,7 +5,13 @@ import { searchTimeline, type SearchTimelineLane, type TimelinePoint } from "../
 import { ArticleEntry, FilterRegister, IndexPage } from "../components/indexArchetype";
 import { CategoryFilter, DateRangeFilter, SearchTermFilter, useListQueryParams } from "../components/listControls";
 import { peakOf } from "../components/scale";
-import { PERIOD_LABELS, TimelineAxis, TimelineVolume } from "../components/timelineRegister";
+import {
+  PERIOD_LABELS,
+  periodSpan,
+  TimelineAxis,
+  TimelineVolume,
+  type VolumePeriods,
+} from "../components/timelineRegister";
 import { EmptyState, EntryList, PendingState, RetryableError } from "../components/uiStates";
 
 // #65: search anything, read it as a timeline. The fourth Index-archetype surface — same
@@ -17,22 +23,39 @@ import { EmptyState, EntryList, PendingState, RetryableError } from "../componen
 // Every lane is drawn against the *shared* axis' buckets, so a bar in the same column in
 // two lanes means the same week in both. Lanes are ordered by when each Story's coverage
 // began, which is the order the events themselves started in.
+//
+// #96 made it a destination of its own rather than a link off /search, which is why it has
+// a landing state at all: an arrival with nothing typed has to say what the page draws.
+// And the bars became the way in — pick one and every lane narrows to that period, so the
+// question "who was covering this that week" is answered by pointing at the week. The
+// selection narrows the *lists* only: the bars and the axis keep drawing the whole set,
+// because an axis that shrank to its own selection would leave nothing to compare against
+// and no way back.
 
 // One lane: the Story it belongs to, its reporting against the shared axis, and its own
 // rows. The heading is a link, because a lane is a way into the Story — where its analysis
 // and its own timeline live (#64).
+//
+// `whole` beside `points` because a narrowed lane must still state the coverage it has:
+// "1 of 2" is a Story with two reports being read one period at a time, where a bare "1"
+// is a Story with one report.
 function Lane({
   lane,
   points,
+  whole,
   peak,
-  periodLabel,
+  periods,
+  narrowed,
 }: {
   lane: SearchTimelineLane;
   points: TimelinePoint[];
+  whole: number;
   peak: number;
-  periodLabel: string;
+  periods: VolumePeriods;
+  narrowed: boolean;
 }) {
   const headingId = useId();
+  const periodLabel = PERIOD_LABELS[periods.granularity];
   return (
     <section className="timeline-lane" aria-labelledby={headingId}>
       <div className="timeline-lane-head">
@@ -43,19 +66,29 @@ function Lane({
             (DESIGN.md's Redundant Signal Rule). A measurement, like every other register
             head's folio — the Story's own facts are stated on the Story. */}
         <p className="timeline-lane-folio">
-          {points.length} matching report{points.length === 1 ? "" : "s"}
+          {narrowed ? `${points.length} of ${whole}` : whole} matching report{whole === 1 ? "" : "s"}
         </p>
       </div>
+      {/* Drawn from the lane's own volume, which never narrows: these bars are how a reader
+          picks a different period, so a narrowed lane keeps every one of them. */}
       <TimelineVolume
         counts={lane.volume}
         peak={peak}
-        label={`${lane.story.title}: ${points.length} matching reports ${periodLabel}, on the same axis as every other Story here.`}
+        label={`${lane.story.title}: ${whole} matching report${whole === 1 ? "" : "s"} ${periodLabel}, on the same axis as every other Story here.`}
+        periods={periods}
       />
-      <EntryList total={points.length}>
-        {points.map((point) => (
-          <ArticleEntry key={point.id} article={point} />
-        ))}
-      </EntryList>
+      {/* A lane with nothing in the selected period says so and stays. Dropping it would
+          answer "who else was covering this" by hiding the Stories that were quiet, which
+          is the one reading the lanes exist to make possible. */}
+      {points.length === 0 ? (
+        <p className="timeline-lane-quiet">No matching reporting in this period.</p>
+      ) : (
+        <EntryList total={whole}>
+          {points.map((point) => (
+            <ArticleEntry key={point.id} article={point} />
+          ))}
+        </EntryList>
+      )}
     </section>
   );
 }
@@ -84,11 +117,31 @@ export default function SearchTimeline() {
   // The lanes share the whole set's peak, so a tall bar means the same count in every
   // lane on the page.
   const peak = peakOf(timeline?.volume.map((bucket) => bucket.count) ?? []);
-  const periodLabel = PERIOD_LABELS[timeline?.granularity ?? "day"];
+  const granularity = timeline?.granularity ?? "day";
+  const periodLabel = PERIOD_LABELS[granularity];
+  const buckets = timeline?.volume ?? [];
+
+  // The selected period rides in the URL, so a narrowed axis is a link like every other
+  // state on this page. What that value means against the drawn buckets is the register's
+  // knowledge, not the page's (timelineRegister.tsx): a value naming no bucket on this axis
+  // — a changed term, a changed filter, a stale link — yields no span, so the page heals
+  // itself rather than narrowing to whichever bucket happens to be nearby.
+  const span = periodSpan(buckets, granularity, list.get("period"));
+  const selectPeriod = (periodStart: string) => list.updateFilter("period", periodStart);
+  const periods: VolumePeriods = {
+    periodStarts: buckets.map((bucket) => bucket.periodStart),
+    granularity,
+    selected: span?.start ?? null,
+    onSelect: selectPeriod,
+  };
+
+  const inSpan = (point: TimelinePoint) =>
+    !span || (Date.parse(point.publishedAt) >= span.from && Date.parse(point.publishedAt) < span.to);
+  const shown = timeline?.points.filter(inSpan) ?? [];
 
   return (
     <IndexPage
-      title="Search timeline"
+      title="Timeline"
       // The way back to the ranked reading of the same query, carrying the query with it:
       // switching how you read a search should never mean typing it again.
       action={
@@ -112,9 +165,23 @@ export default function SearchTimeline() {
 
       {/* The same three empty states /search distinguishes — nothing asked for, a term
           that matched nothing, filters that excluded everything — plus a failed request,
-          which says something different again. */}
+          which says something different again.
+          Since #96 the first of those is a landing state rather than a prompt: a reader
+          arriving from the nav has typed nothing and may never have seen this drawing, so
+          it says what the page makes, where the term goes, and where to go find one. */}
       {!q.trim() && (
-        <EmptyState>Enter a search term to lay the matching reporting on a timeline.</EmptyState>
+        <EmptyState>
+          <p>
+            A timeline draws the reporting that matches a term on one shared axis, one lane per
+            Story, so coverage that ran at the same time reads as parallel rather than as one flat
+            list. Pick a period from any lane&rsquo;s bars to read that week on its own.
+          </p>
+          <p>
+            Type a term in <strong>Search</strong> above. The date range narrows the axis itself,
+            not only the reporting listed under it.
+          </p>
+          <Link to="/stories">Browse the Stories</Link>
+        </EmptyState>
       )}
       {query.isPending && q.trim() && <PendingState>Laying the matches on a timeline…</PendingState>}
       {query.isError && (
@@ -150,17 +217,35 @@ export default function SearchTimeline() {
             counts={timeline.volume.map((bucket) => bucket.count)}
             peak={peak}
             label={`All matching reporting ${periodLabel} across ${timeline.volume.length} periods, at most ${peak} in one.`}
+            periods={periods}
           />
           <TimelineAxis from={timeline.from} to={timeline.to} granularity={timeline.granularity} />
-          {timeline.lanes.map((lane) => (
-            <Lane
-              key={lane.story.id}
-              lane={lane}
-              points={timeline.points.filter((point) => point.storyId === lane.story.id)}
-              peak={peak}
-              periodLabel={periodLabel}
-            />
-          ))}
+          {/* Says what the bars did, because picking one changes the lists and not the
+              drawing a sighted reader just clicked — and carries the way out, since a radio
+              cannot be un-picked by picking it again. */}
+          {span && (
+            <p className="timeline-period-note" role="status">
+              Narrowed to {span.name}: {shown.length} of {timeline.points.length} matching report
+              {timeline.points.length === 1 ? "" : "s"}.{" "}
+              <button type="button" onClick={() => selectPeriod("")}>
+                Show every period
+              </button>
+            </p>
+          )}
+          {timeline.lanes.map((lane) => {
+            const lanePoints = timeline.points.filter((point) => point.storyId === lane.story.id);
+            return (
+              <Lane
+                key={lane.story.id}
+                lane={lane}
+                points={span ? lanePoints.filter(inSpan) : lanePoints}
+                whole={lanePoints.length}
+                peak={peak}
+                periods={periods}
+                narrowed={Boolean(span)}
+              />
+            );
+          })}
         </>
       )}
     </IndexPage>

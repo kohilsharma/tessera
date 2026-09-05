@@ -92,6 +92,12 @@ html.theme-transition .site-wordmark * { transition: none !important; }
 button:focus-visible, a:focus-visible, summary:focus-visible,
 input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
 
+/* Read but not drawn: the name of a control whose whole meaning is a shape — a volume
+   bar (#96), which says "week of the 12th, two reports" to a screen reader and says it
+   by being tall to everyone else. Clipped rather than display:none or visibility:hidden,
+   either of which would take the name out of the accessibility tree with the pixels. */
+.a11y-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
 /* Global, and it stays global: DESIGN.md §7 collapses every duration in the app
    to an instant state change here, the sign-in transition included. Must sit
    after html's scroll-behavior above — same specificity, so order decides. */
@@ -124,8 +130,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .site-mark i:first-child { inset: 0 0 auto auto; }
 .site-mark i:last-child { inset: auto auto 0 0; }
 
+/* #96 put an icon on every entry, which makes each one a row of two things rather than a
+   word sitting on a baseline: centred in the bar instead of pushed down from its top, so
+   the mark and its word share a centre line. */
 .site-nav { display: flex; align-self: stretch; }
-.site-nav a { color: var(--quiet-ink); text-decoration: none; padding: 21px 20px 0; font-size: .82rem; font-weight: 650; transition: color 140ms ease; }
+.site-nav a { display: inline-flex; align-items: center; gap: 7px; color: var(--quiet-ink); text-decoration: none; padding: 0 18px; font-size: .82rem; font-weight: 650; transition: color 140ms ease; }
+.site-nav a svg { flex: none; }
 .site-nav a:hover { color: var(--bureau-ink); }
 .site-nav a[aria-current="page"] { color: var(--bureau-ink); box-shadow: inset 0 -3px var(--bureau-ink); }
 
@@ -142,16 +152,23 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .identity-error button { border: 1px solid var(--registration-rule); background: transparent; padding: 4px 7px; cursor: pointer; font-size: .78rem; }
 
 @media (max-width: 1050px) {
-  .site-header:not(.site-header--masthead) { grid-template-columns: 1fr auto; grid-template-rows: 62px 40px; padding: 0 3.5vw; }
+  /* The nav row is `auto` rather than 40px because six entries wrap on a narrow screen
+     (#96) — a fixed row would have them spill out of the header instead of onto a second
+     line. 44px per entry is the hit target, which the old 40px row was under. */
+  .site-header:not(.site-header--masthead) { grid-template-columns: 1fr auto; grid-template-rows: 62px auto; padding: 0 3.5vw; }
   .site-wordmark { grid-row: 1; grid-column: 1; }
-  .site-nav { grid-row: 2; grid-column: 1 / -1; border-top: 1px solid var(--registration-rule); }
-  .site-nav a { flex: 1; padding: 12px 18px 0; text-align: center; }
+  .site-nav { grid-row: 2; grid-column: 1 / -1; flex-wrap: wrap; border-top: 1px solid var(--registration-rule); }
+  .site-nav a { flex: 1; min-height: 44px; justify-content: center; }
   .identity-menu, .identity-placeholder, .identity-error { grid-row: 1; grid-column: 2; justify-self: end; }
 }
 
 @media (max-width: 390px) {
   .site-header { padding: 0 12px; }
-  .site-nav a { padding: 8px 4px 0; font-size: .74rem; }
+  /* The word is the destination; the icon only helps a reader find it faster. Where six
+     of both will not fit, the aid goes and the navigation stays — DESIGN.md never lets a
+     narrow screen hide a destination. */
+  .site-nav a { padding: 0 4px; font-size: .74rem; white-space: nowrap; }
+  .site-nav a svg { display: none; }
   .identity-menu .role-tag { display: none; }
 }
 
@@ -190,7 +207,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    One look whether the caller passes bare text or paragraphs. */
 .state-error { border: 1px solid var(--proof-magenta); border-top: 5px solid var(--proof-magenta); background: var(--proof-magenta-stock); padding: 22px 24px; color: var(--bureau-ink); line-height: 1.55; }
 
-.state-empty p, .state-error p { margin: 0 0 13px; }
+.state-empty p, .state-error p { max-width: 68ch; margin: 0 0 13px; }
 .state-empty p:last-child, .state-error p:last-child { margin-bottom: 0; }
 .state-empty a, .state-error a { color: var(--bureau-ink); font-weight: 700; text-underline-offset: 3px; }
 .state-empty code, .state-error code { font-size: .84em; background: var(--stock-paper); border: 1px solid var(--registration-rule); padding: 1px 4px; }
@@ -240,9 +257,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    that is not the page's one command (.index-action / .record-command): ruled
    paper field, ink fill on hover, neutral stock and no implied interactivity when
    disabled. Listed in one :is() so a new consumer is one word, not four rules. */
-:is(.state-empty, .state-error, .pagination, .record-actions, .entry-action, .record-attach) button { border: 1px solid var(--quiet-ink); background: var(--stock-paper); color: var(--bureau-ink); padding: 9px 15px; font-size: .78rem; font-weight: 650; cursor: pointer; transition: color 140ms ease, background-color 140ms ease; }
-:is(.state-empty, .state-error, .pagination, .record-actions, .entry-action, .record-attach) button:hover:not(:disabled) { background: var(--bureau-ink); color: var(--stock-paper); }
-:is(.state-empty, .state-error, .pagination, .record-actions, .entry-action, .record-attach) button:disabled { border-color: var(--registration-rule); background: var(--bench-stock); color: var(--quiet-ink); cursor: default; }
+:is(.state-empty, .state-error, .pagination, .record-actions, .entry-action, .record-attach, .timeline-period-note) button { border: 1px solid var(--quiet-ink); background: var(--stock-paper); color: var(--bureau-ink); padding: 9px 15px; font-size: .78rem; font-weight: 650; cursor: pointer; transition: color 140ms ease, background-color 140ms ease; }
+:is(.state-empty, .state-error, .pagination, .record-actions, .entry-action, .record-attach, .timeline-period-note) button:hover:not(:disabled) { background: var(--bureau-ink); color: var(--stock-paper); }
+:is(.state-empty, .state-error, .pagination, .record-actions, .entry-action, .record-attach, .timeline-period-note) button:disabled { border-color: var(--registration-rule); background: var(--bench-stock); color: var(--quiet-ink); cursor: default; }
 
 @media (max-width: 560px) {
   .page-ground { padding: 26px 18px 60px; }
@@ -450,7 +467,29 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
    period with no reporting draws no bar, because nothing is what happened there;
    the baseline rule is what keeps that period on the axis rather than out of it. */
 .timeline-volume { display: flex; align-items: end; gap: 2px; height: 62px; margin: 22px 0 0; border-bottom: 1px solid var(--registration-rule); }
-.timeline-volume > i { flex: 1 1 0; min-width: 2px; height: calc(var(--share) * 100%); background: var(--proof-blue); }
+.timeline-volume > * { flex: 1 1 0; min-width: 2px; }
+.timeline-volume > i { height: calc(var(--share) * 100%); background: var(--proof-blue); }
+
+/* #96: on the search timeline a bar is how a reader picks a period, so the *column* is
+   the target and not the drawn bar — a one-count bucket on a tall axis draws a sliver,
+   and a sliver is not something a hand can hit. The measurement moves into ::after so
+   the hit area and the quantity are two different rectangles.
+   The radio itself is clipped, not hidden: it is what makes the row one tab stop the
+   arrow keys move inside, so it has to stay focusable. Its ring is therefore drawn on
+   the column, which is the thing a reader can see. */
+.timeline-period { position: relative; align-self: stretch; display: block; cursor: pointer; transition: background-color 140ms ease; }
+.timeline-period input { position: absolute; inset: 0 auto auto 0; width: 1px; height: 1px; margin: 0; opacity: 0; }
+.timeline-period::after { content: ""; position: absolute; inset: auto 0 0 0; height: calc(var(--share) * 100%); background: var(--proof-blue); transition: background-color 140ms ease; }
+.timeline-period:hover::after, .timeline-period:has(:checked)::after { background: var(--bureau-ink); }
+.timeline-period:has(:focus-visible) { outline: 3px solid var(--focus); outline-offset: 3px; }
+/* The column answers the pointer, not just the bar: a period with no reporting draws no
+   bar at all (above), and a target that stays blank under the cursor reads as dead. */
+.timeline-period:hover { background: var(--bench-stock); }
+/* The picked period wears the current-state mark the nav wears — a three-pixel ink rule
+   under the column — so the selection survives greyscale and does not rest on the bar's
+   colour alone. It is a *rule* and not a filled column on purpose: filled, a lull reads as
+   the loudest mark on the axis, which is the opposite of what it means. */
+.timeline-period:has(:checked) { box-shadow: inset 0 -3px var(--bureau-ink); }
 /* The axis' two ends, in the measurement face: a row of bars states a shape, and a
    shape with no span stated under it is a picture of nothing. */
 .timeline-axis { display: flex; justify-content: space-between; gap: 12px; margin: 9px 0 0; color: var(--quiet-ink); font: 500 .66rem var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
@@ -464,6 +503,14 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .timeline-lane h2 a { color: var(--bureau-ink); text-decoration: none; text-underline-offset: 3px; }
 .timeline-lane h2 a:hover, .timeline-lane h2 a:focus-visible { text-decoration: underline; }
 .timeline-lane .timeline-volume + .entry-list-frame .entry-list { border-top: 0; }
+/* #96: what a picked period did, and the way back out of it. A stated note on ruled
+   stock rather than a coloured band — narrowing is a state the reader asked for, not a
+   warning — and it holds its own escape, since a radio cannot be un-picked by picking it
+   again. */
+.timeline-period-note { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 14px; margin: 15px 0 0; border: 1px solid var(--registration-rule); background: var(--bench-stock); padding: 11px 14px; font-size: .86rem; }
+/* A lane that has nothing in the picked period keeps its bars and says so in words: a
+   quiet Story is an answer, and dropping the lane would hide it. */
+.timeline-lane-quiet { margin: 22px 0; color: var(--quiet-ink); font-size: .88rem; }
 
 /* The rights note is a register of stated facts, not a small-print line: ruled
    rows, term in the measurement face, value in the reading face. Also the fact

@@ -88,7 +88,7 @@ describe("Search view — UI states", () => {
 
     expect(await screen.findByRole("link", { name: "Read as a timeline" })).toHaveAttribute(
       "href",
-      "/search/timeline?q=packaging&category=technology",
+      "/timeline?q=packaging&category=technology",
     );
   });
 });
