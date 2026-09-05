@@ -823,8 +823,8 @@ export type PendingAssignment = ArticleSummary & {
 export type AssignmentDecision = "accept" | "reject";
 export type DecidedAssignment = { articleId: string; storyId: string; decision: AssignmentDecision };
 
-export function getPendingAssignments(): Promise<ListEnvelope<PendingAssignment>> {
-  return getJson("/api/v1/clustering/pending", "Could not load the review queue");
+export function getPendingAssignments(params: { page?: number } = {}): Promise<ListEnvelope<PendingAssignment>> {
+  return getJson(`/api/v1/clustering/pending${toQueryString(params)}`, "Could not load the review queue");
 }
 
 export function decidePendingAssignment(
@@ -894,8 +894,10 @@ export type DecidedMergeProposal = {
 // The corpus rides with the queue, as it rides with both reader surfaces: this list reads
 // the firehose through the graph's seam, and AGENTS.md exempts that seam on the condition
 // that a surface drawing it says so.
-export function getMergeProposals(): Promise<ListEnvelope<MergeProposal> & { retainedDays: number }> {
-  return getJson("/api/v1/graph/merge-proposals", "Could not load the merge review queue");
+export function getMergeProposals(
+  params: { page?: number } = {},
+): Promise<ListEnvelope<MergeProposal> & { retainedDays: number }> {
+  return getJson(`/api/v1/graph/merge-proposals${toQueryString(params)}`, "Could not load the merge review queue");
 }
 
 export function decideMergeProposal(

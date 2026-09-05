@@ -784,6 +784,110 @@ describe("Admin dashboard", () => {
     expect(screen.getByRole("region", { name: "Publishers" })).toBeInTheDocument();
   });
 
+  // #100: the queue paginates rather than silently truncating — the header's total
+  // and the rows rendered have to agree, and a queue longer than one page has to
+  // offer the page turn that reaches the rest.
+  it("turns the page when the review queue is longer than one page, refetching it", async () => {
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      const method = (init as RequestInit | undefined)?.method;
+      if (method && method !== "GET") return Promise.resolve(jsonResponse({ status: "accepted" }, 202));
+      if (String(input).startsWith("/api/v1/clustering/pending?page=2")) {
+        return Promise.resolve(jsonResponse(listEnvelope([pendingAssignment({ id: "a11" })], { page: 2, total: 11, totalPages: 2 })));
+      }
+      if (String(input).startsWith("/api/v1/clustering/pending")) {
+        return Promise.resolve(
+          jsonResponse(
+            listEnvelope(
+              Array.from({ length: 10 }, (_, i) => pendingAssignment({ id: `a${i + 1}`, title: `Held report ${i + 1}` })),
+              { total: 11, totalPages: 2 },
+            ),
+          ),
+        );
+      }
+      if (String(input).startsWith("/api/v1/graph/merge-proposals")) {
+        return Promise.resolve(jsonResponse({ ...listEnvelope([]), retainedDays: 7 }));
+      }
+      if (String(input).startsWith("/api/v1/stories")) return Promise.resolve(jsonResponse(listEnvelope([])));
+      return Promise.resolve(jsonResponse(adminPayload()));
+    });
+
+    renderWithProviders(<AdminDashboard />);
+
+    const review = await screen.findByRole("region", { name: "Clustering review" });
+    // The header's total and the pagination's count state the same number, which is
+    // the agreement the ticket exists to restore.
+    expect(await within(review).findByText("11 awaiting a decision")).toBeInTheDocument();
+    expect(await within(review).findByText("Entries 1–10 of 11 · Page 1 of 2")).toBeInTheDocument();
+
+    await userEvent.click(within(review).getByRole("button", { name: "Next" }));
+
+    expect(await within(review).findByText("Entries 11–11 of 11 · Page 2 of 2")).toBeInTheDocument();
+    // Page 2 answered with the proposal above, so a row the first page did not hold
+    // is now rendered — the truncation is gone.
+    expect(within(review).getByText("Grid operator revises connection timetable")).toBeInTheDocument();
+    expect(callTo("/api/v1/clustering/pending?page=2")).toBeDefined();
+  });
+
+  // #100: a decision made on page 2 refetches that page, and — when it was the last
+  // row on the last page — the register steps back to the page that still holds rows
+  // rather than sitting on an empty one. `decided` flips the whole mock's answers, so
+  // every read after the PATCH answers a queue one row shorter than every read before.
+  it("decides a proposal from page 2 and steps back when the page it was on empties", async () => {
+    let decided = false;
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      const method = (init as RequestInit | undefined)?.method;
+      if (method === "PATCH") {
+        decided = true;
+        return Promise.resolve(
+          jsonResponse({ articleId: "a11", storyId: "s1", decision: "accept" } as Record<string, unknown>),
+        );
+      }
+      if (method && method !== "GET") return Promise.resolve(jsonResponse({ status: "accepted" }, 202));
+      if (String(input).startsWith("/api/v1/clustering/pending?page=2")) {
+        return Promise.resolve(
+          jsonResponse(
+            listEnvelope(decided ? [] : [pendingAssignment({ id: "a11" })], {
+              page: 2,
+              total: decided ? 10 : 11,
+              totalPages: decided ? 1 : 2,
+            }),
+          ),
+        );
+      }
+      if (String(input).startsWith("/api/v1/clustering/pending")) {
+        return Promise.resolve(
+          jsonResponse(
+            listEnvelope(
+              Array.from({ length: 10 }, (_, i) => pendingAssignment({ id: `a${i + 1}`, title: `Held report ${i + 1}` })),
+              { total: decided ? 10 : 11, totalPages: decided ? 1 : 2 },
+            ),
+          ),
+        );
+      }
+      if (String(input).startsWith("/api/v1/graph/merge-proposals")) {
+        return Promise.resolve(jsonResponse({ ...listEnvelope([]), retainedDays: 7 }));
+      }
+      if (String(input).startsWith("/api/v1/stories")) return Promise.resolve(jsonResponse(listEnvelope([])));
+      return Promise.resolve(jsonResponse(adminPayload()));
+    });
+
+    renderWithProviders(<AdminDashboard />);
+
+    const review = await screen.findByRole("region", { name: "Clustering review" });
+    expect(await within(review).findByText("Entries 1–10 of 11 · Page 1 of 2")).toBeInTheDocument();
+    await userEvent.click(within(review).getByRole("button", { name: "Next" }));
+    expect(await within(review).findByText("Entries 11–11 of 11 · Page 2 of 2")).toBeInTheDocument();
+
+    await userEvent.click(within(review).getByRole("button", { name: "Accept" }));
+
+    expect(callTo("/api/v1/clustering/pending/a11")?.[1]).toMatchObject({
+      method: "PATCH",
+      body: JSON.stringify({ decision: "accept" }),
+    });
+    // The queue refetched at one page shorter, and the register landed on the page that
+    // still holds rows — page 1 of 1, not an empty page 2.
+    expect(await within(review).findByText("Entries 1–10 of 10 · Page 1 of 1")).toBeInTheDocument();
+  });
   // #67: the second review queue, and the same four states for the same reason — an
   // operator has to be able to tell "no candidate is waiting" from "the queue would not
   // load", and it fetches separately from the console around it.
@@ -897,6 +1001,45 @@ describe("Admin dashboard", () => {
 
     expect(await within(review).findByRole("alert")).toHaveTextContent("Merge proposal not found");
     expect(screen.getByRole("region", { name: "Publishers" })).toBeInTheDocument();
+  });
+
+  // #100: the merge queue paginates for the same reason as clustering's — the
+  // header's "11 awaiting a decision" against ten rows with no way to reach the
+  // eleventh reads as lost data.
+  it("turns the page when the merge queue is longer than one page, refetching it", async () => {
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      const method = (init as RequestInit | undefined)?.method;
+      if (method && method !== "GET") return Promise.resolve(jsonResponse({ status: "accepted" }, 202));
+      if (String(input).startsWith("/api/v1/graph/merge-proposals?page=2")) {
+        return Promise.resolve(
+          jsonResponse({ ...listEnvelope([mergeProposal({ id: "mp11" })], { page: 2, total: 11, totalPages: 2 }), retainedDays: 7 }),
+        );
+      }
+      if (String(input).startsWith("/api/v1/graph/merge-proposals")) {
+        return Promise.resolve(
+          jsonResponse({
+            ...listEnvelope(Array.from({ length: 10 }, (_, i) => mergeProposal({ id: `mp${i + 1}` })), { total: 11, totalPages: 2 }),
+            retainedDays: 7,
+          }),
+        );
+      }
+      if (String(input).startsWith("/api/v1/clustering/pending")) {
+        return Promise.resolve(jsonResponse(listEnvelope([])));
+      }
+      if (String(input).startsWith("/api/v1/stories")) return Promise.resolve(jsonResponse(listEnvelope([])));
+      return Promise.resolve(jsonResponse(adminPayload()));
+    });
+
+    renderWithProviders(<AdminDashboard />);
+
+    const review = await screen.findByRole("region", { name: "Entity merge review" });
+    expect(await within(review).findByText("11 awaiting a decision")).toBeInTheDocument();
+    expect(await within(review).findByText("Entries 1–10 of 11 · Page 1 of 2")).toBeInTheDocument();
+
+    await userEvent.click(within(review).getByRole("button", { name: "Next" }));
+
+    expect(await within(review).findByText("Entries 11–11 of 11 · Page 2 of 2")).toBeInTheDocument();
+    expect(callTo("/api/v1/graph/merge-proposals?page=2")).toBeDefined();
   });
 
   // #52: the merge, the one command here that is not an enqueue — so unlike the run

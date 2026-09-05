@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
@@ -27,6 +27,7 @@ import { GraphLedger } from "../components/graphRegister";
 import { DateStamp } from "../components/indexArchetype";
 import { DashboardRegister, RegisterRow } from "../components/dashboardArchetype";
 import { EmptyState, EntryList, ErrorState, PendingState, RetryableError } from "../components/uiStates";
+import { Pagination } from "../components/listControls";
 
 // The operator registers Phase 3 added, each one its own component beside the console
 // that lays them out (#49, #50, #52, #57, #66, #67). They are here rather than in
@@ -191,10 +192,20 @@ export function EntityResolutionRunsRegister({ runs }: { runs: EntityResolutionR
 // every row is a decision only a person can make, and until they make it the Article is
 // invisible to every reader. Its own request, so it states its own loading, refusal,
 // empty and populated treatments inside the register.
+//
+// #100: the queue paginates, because the header's "31 awaiting a decision" against ten
+// rows with no way to reach the rest reads as lost data. Local page state rather than a
+// URL param: this register lives inside the Admin console, not at a route of its own,
+// so there is no address to share and no back/forward to honour — a filter change is
+// the thing a URL param is for, and a page turn is not a filter change.
 export function ClusteringReviewRegister() {
   const refresh = useConsoleRefresh();
   const queryClient = useQueryClient();
-  const review = useQuery({ queryKey: ["clustering", "pending"], queryFn: getPendingAssignments });
+  const [page, setPage] = useState(1);
+  const review = useQuery({
+    queryKey: ["clustering", "pending", page],
+    queryFn: () => getPendingAssignments({ page }),
+  });
   // A decision changes the queue *and* the console: accepting adds a member to a Story,
   // which moves the publisher and Story counts the other registers state.
   const decide = useMutation({
@@ -205,6 +216,13 @@ export function ClusteringReviewRegister() {
       void refresh();
     },
   });
+  // #100: a decision removes its row, so the last page can shrink to nothing under the
+  // page the register is on — clamped here rather than inside Pagination, because it is
+  // the queue that changed, not the reader's position in it. An effect rather than a
+  // render-time setPage, which would flip state mid-render.
+  useEffect(() => {
+    if (review.data && page > review.data.totalPages) setPage(review.data.totalPages);
+  }, [review.data, page]);
 
   return (
     <DashboardRegister
@@ -229,50 +247,53 @@ export function ClusteringReviewRegister() {
             </p>
           </EmptyState>
         ) : (
-          <EntryList total={review.data.total}>
-            {review.data.items.map((proposal) => {
-              const deciding = decide.isPending && decide.variables?.articleId === proposal.id;
-              return (
-                <RegisterRow
-                  key={proposal.id}
-                  // Not a link, unlike a Story row: a pending Article has no record
-                  // page — the API refuses it for the same reason this queue exists.
-                  // Its publisher and date are the row's own address instead.
-                  name={proposal.title}
-                  note={`${proposal.publisher.name} · ${new Date(proposal.publishedAt).toLocaleString()}`}
-                  meta={[
-                    { term: "Score", value: proposal.score?.toFixed(2) ?? "unscored" },
-                    {
-                      term: "Proposed Story",
-                      // The Story *is* readable — it has accepted members — so a
-                      // reviewer can open what the proposal claims this reporting
-                      // belongs to before deciding.
-                      value: <Link to={`/stories/${proposal.proposedStory.id}`}>{proposal.proposedStory.title}</Link>,
-                    },
-                    { term: "Category", value: proposal.proposedStory.category },
-                  ]}
-                  action={
-                    <>
-                      <button
-                        type="button"
-                        disabled={deciding}
-                        onClick={() => decide.mutate({ articleId: proposal.id, decision: "accept" })}
-                      >
-                        Accept
-                      </button>
-                      <button
-                        type="button"
-                        disabled={deciding}
-                        onClick={() => decide.mutate({ articleId: proposal.id, decision: "reject" })}
-                      >
-                        Reject
-                      </button>
-                    </>
-                  }
-                />
-              );
-            })}
-          </EntryList>
+          <>
+            <EntryList total={review.data.total}>
+              {review.data.items.map((proposal) => {
+                const deciding = decide.isPending && decide.variables?.articleId === proposal.id;
+                return (
+                  <RegisterRow
+                    key={proposal.id}
+                    // Not a link, unlike a Story row: a pending Article has no record
+                    // page — the API refuses it for the same reason this queue exists.
+                    // Its publisher and date are the row's own address instead.
+                    name={proposal.title}
+                    note={`${proposal.publisher.name} · ${new Date(proposal.publishedAt).toLocaleString()}`}
+                    meta={[
+                      { term: "Score", value: proposal.score?.toFixed(2) ?? "unscored" },
+                      {
+                        term: "Proposed Story",
+                        // The Story *is* readable — it has accepted members — so a
+                        // reviewer can open what the proposal claims this reporting
+                        // belongs to before deciding.
+                        value: <Link to={`/stories/${proposal.proposedStory.id}`}>{proposal.proposedStory.title}</Link>,
+                      },
+                      { term: "Category", value: proposal.proposedStory.category },
+                    ]}
+                    action={
+                      <>
+                        <button
+                          type="button"
+                          disabled={deciding}
+                          onClick={() => decide.mutate({ articleId: proposal.id, decision: "accept" })}
+                        >
+                          Accept
+                        </button>
+                        <button
+                          type="button"
+                          disabled={deciding}
+                          onClick={() => decide.mutate({ articleId: proposal.id, decision: "reject" })}
+                        >
+                          Reject
+                        </button>
+                      </>
+                    }
+                  />
+                );
+              })}
+            </EntryList>
+            <Pagination envelope={review.data} onGoToPage={setPage} />
+          </>
         ))}
     </DashboardRegister>
   );
@@ -331,7 +352,13 @@ function ProposalSide({ role, side }: { role: string; side: MergeProposalSide })
 // reported side, so the row states the fold rather than offering an orientation.
 export function EntityMergeReviewRegister() {
   const queryClient = useQueryClient();
-  const review = useQuery({ queryKey: ["graph", "merge-proposals"], queryFn: getMergeProposals });
+  // Same local page state as clustering's review queue above, for the same reason: a
+  // register inside the console, not a route, so there is no address to share.
+  const [page, setPage] = useState(1);
+  const review = useQuery({
+    queryKey: ["graph", "merge-proposals", page],
+    queryFn: () => getMergeProposals({ page }),
+  });
   // Only its own queue is refetched, unlike clustering's review: a decision here changes
   // the graph, and nothing on this console states the graph — the run rows above are
   // history, and history does not change because a name was folded after the fact.
@@ -340,6 +367,10 @@ export function EntityMergeReviewRegister() {
       decideMergeProposal(proposalId, decision),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["graph", "merge-proposals"] }),
   });
+  // The same clamp as clustering's queue, for the same reason: a decided pair is gone.
+  useEffect(() => {
+    if (review.data && page > review.data.totalPages) setPage(review.data.totalPages);
+  }, [review.data, page]);
 
   return (
     <DashboardRegister
@@ -371,16 +402,17 @@ export function EntityMergeReviewRegister() {
             </p>
           </EmptyState>
         ) : (
-          <EntryList total={review.data.total}>
-            {review.data.items.map((proposal) => {
-              const deciding = decide.isPending && decide.variables?.proposalId === proposal.id;
-              return (
-                <RegisterRow
-                  key={proposal.id}
-                  // The decision, not the pair: an Entity has no record page of its own
-                  // yet, and the two names are stated again below with the reporting
-                  // that is the whole of what this rests on.
-                  name={`Fold “${proposal.merged.canonicalName}” into “${proposal.survivor.canonicalName}”`}
+          <>
+            <EntryList total={review.data.total}>
+              {review.data.items.map((proposal) => {
+                const deciding = decide.isPending && decide.variables?.proposalId === proposal.id;
+                return (
+                  <RegisterRow
+                    key={proposal.id}
+                    // The decision, not the pair: an Entity has no record page of its own
+                    // yet, and the two names are stated again below with the reporting
+                    // that is the whole of what this rests on.
+                    name={`Fold “${proposal.merged.canonicalName}” into “${proposal.survivor.canonicalName}”`}
                   body={
                     <ul className="claim-sides">
                       <ProposalSide role="Kept" side={proposal.survivor} />
@@ -415,7 +447,9 @@ export function EntityMergeReviewRegister() {
                 />
               );
             })}
-          </EntryList>
+            </EntryList>
+            <Pagination envelope={review.data} onGoToPage={setPage} />
+          </>
         ))}
     </DashboardRegister>
   );

@@ -1058,3 +1058,33 @@ the prefilled edit and its PATCH, the confirmation stating what it keeps before 
 backing out sending nothing. Backend and frontend typecheck and the frontend build are clean. Checked
 in the running app against the seeded corpus: the form, the notice, and the confirmation were driven
 end to end, a connector created and deleted, and the dev database left as it was found.
+
+**#100 — the review queues no longer truncate at ten.** Both review queues — the
+clustering-review register and the entity-merge register — printed the API's true total in
+their header ("31 awaiting a decision") and then rendered the default page of 10 with no
+pagination control, which to an operator reads as lost data. Both now paginate.
+
+The queues' fetchers (`getPendingAssignments`, `getMergeProposals`) take a `page` and
+serialise it through the same `toQueryString` every list endpoint uses; the backend already
+spoke the shared `parseListQuery`/`paginate` contract, so no backend change was needed. Page
+state is local `useState` in each register rather than a URL param, and the comment above
+`ClusteringReviewRegister` says why: these registers live inside the Admin console, not at
+routes of their own, so there is no address to share and no back/forward to honour — a
+filter change is what a URL param is for, and a page turn is not a filter change. The
+`Pagination` control the Index archetype already owns does the position statement, so the
+header's total, `EntryList`'s summary and the pagination line now all state the same count.
+
+Two behaviours the ticket's "the count always agrees with the rows rendered" asked for that
+the page state alone did not give: a decision refetches the queue by invalidating the
+query-key *prefix* (the key now ends in the page, and prefix invalidation still reaches
+every page), and a decision that empties the page it was on clamps the register back to
+`totalPages` through a `useEffect` in each register — without it, deciding the last row on
+the last page left the operator on an empty page with a pagination line reading "Entries
+11–10 of 10".
+
+Verification: full frontend suite 291 passing (290 before, one added per queue plus the
+clamp test), typecheck and build clean. The three new tests cover a queue longer than one
+page for both queues — page turn, refetch URL, a row page 1 did not hold — and a decision
+made from page 2 whose refetch answers one row shorter, asserting the register lands on
+page 1 of 1 rather than an empty page 2. No backend change, so the backend suite was not
+rerun.
