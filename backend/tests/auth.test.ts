@@ -1,8 +1,10 @@
 import "reflect-metadata";
+import bcrypt from "bcryptjs";
 import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app";
 import { AppDataSource } from "../src/data-source";
+import { User } from "../src/entities/User";
 import { signToken } from "../src/auth/jwt";
 import { setupTestDb } from "./setupTestDb";
 
@@ -274,5 +276,85 @@ describe("PATCH /api/v1/auth/me", () => {
     expect(res.status).toBe(422);
     const me = await request(app()).get("/api/v1/auth/me").set("Authorization", `Bearer ${token}`);
     expect(me.body).toMatchObject({ role: "student", colorMode: "system" });
+  });
+});
+
+describe("Admin user management", () => {
+  async function createUser(email: string, role: "student" | "investor" | "admin" = "student") {
+    return AppDataSource.getRepository(User).save({
+      email,
+      passwordHash: await bcrypt.hash("correct-horse", 4),
+      role,
+    });
+  }
+
+  async function adminToken() {
+    const admin = await createUser(`admin-${Date.now()}-${Math.random()}@example.com`, "admin");
+    return signToken({ sub: admin.id, role: admin.role });
+  }
+
+  it("requires an Admin for list, detail and update", async () => {
+    const student = await createUser("manage-student@example.com");
+    const studentToken = signToken({ sub: student.id, role: student.role });
+    const target = await createUser("manage-target@example.com");
+    expect((await request(app()).get("/api/v1/admin/users")).status).toBe(401);
+    expect((await request(app()).get("/api/v1/admin/users").set("Authorization", `Bearer ${studentToken}`)).status).toBe(403);
+    expect((await request(app()).get(`/api/v1/admin/users/${target.id}`).set("Authorization", `Bearer ${studentToken}`)).status).toBe(403);
+    expect((await request(app()).patch(`/api/v1/admin/users/${target.id}`).set("Authorization", `Bearer ${studentToken}`).send({ active: false })).status).toBe(403);
+    expect((await request(app()).get("/api/v1/admin/users/not-a-uuid").set("Authorization", `Bearer ${await adminToken()}`)).status).toBe(404);
+  });
+
+  it("lists bounded, filtered users and opens one", async () => {
+    const admin = await adminToken();
+    const target = await createUser("filter-target@example.com", "investor");
+    await createUser("filter-other@example.com", "student");
+    await AppDataSource.getRepository(User).update({ id: target.id }, { active: false });
+
+    const listed = await request(app())
+      .get("/api/v1/admin/users?role=investor&active=false&q=target&pageSize=1")
+      .set("Authorization", `Bearer ${admin}`);
+    expect(listed.status).toBe(200);
+    expect(listed.body).toMatchObject({ page: 1, pageSize: 1, total: 1, totalPages: 1 });
+    expect(listed.body.items[0]).toMatchObject({ id: target.id, email: target.email, role: "investor", active: false });
+    expect(listed.body.items[0].passwordHash).toBeUndefined();
+
+    const detail = await request(app()).get(`/api/v1/admin/users/${target.id}`).set("Authorization", `Bearer ${admin}`);
+    expect(detail.status).toBe(200);
+    expect(detail.body).toMatchObject({ id: target.id, active: false, createdAt: expect.any(String) });
+  });
+
+  it("changes roles and reversibly deactivates accounts", async () => {
+    const admin = await adminToken();
+    const target = await createUser("role-target@example.com");
+    const changed = await request(app())
+      .patch(`/api/v1/admin/users/${target.id}`)
+      .set("Authorization", `Bearer ${admin}`)
+      .send({ role: "investor", active: false });
+    expect(changed.status).toBe(200);
+    expect(changed.body).toMatchObject({ role: "investor", active: false });
+
+    const blocked = await request(app()).post("/api/v1/auth/login").send({ email: target.email, password: "correct-horse" });
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.error).toBe("This account is deactivated");
+    const existingToken = signToken({ sub: target.id, role: target.role });
+    const tokenRefusal = await request(app()).get("/api/v1/auth/me").set("Authorization", `Bearer ${existingToken}`);
+    expect(tokenRefusal.status).toBe(401);
+    expect(tokenRefusal.body.error).toBe("This account is deactivated");
+
+    const restored = await request(app())
+      .patch(`/api/v1/admin/users/${target.id}`)
+      .set("Authorization", `Bearer ${admin}`)
+      .send({ active: true });
+    expect(restored.status).toBe(200);
+    expect(restored.body.active).toBe(true);
+    expect((await request(app()).post("/api/v1/auth/login").send({ email: target.email, password: "correct-horse" })).status).toBe(200);
+  });
+
+  it("refuses malformed updates and has no hard-delete path", async () => {
+    const admin = await adminToken();
+    const target = await createUser("invalid-target@example.com");
+    expect((await request(app()).patch(`/api/v1/admin/users/${target.id}`).set("Authorization", `Bearer ${admin}`).send({ role: "nope" })).status).toBe(422);
+    expect((await request(app()).patch(`/api/v1/admin/users/${target.id}`).set("Authorization", `Bearer ${admin}`).send({ active: "no" })).status).toBe(422);
+    expect((await request(app()).delete(`/api/v1/admin/users/${target.id}`).set("Authorization", `Bearer ${admin}`)).status).toBe(404);
   });
 });

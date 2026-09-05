@@ -15,6 +15,7 @@ import {
   RegisterRow,
 } from "../components/dashboardArchetype";
 import { EmptyState, EntryList, ErrorState, PendingState } from "../components/uiStates";
+import { Link } from "react-router-dom";
 import { Leaning, LeaningAttribution } from "../components/primitives";
 import {
   ClusteringReviewRegister,
@@ -83,7 +84,7 @@ export default function AdminDashboard() {
             title="Operator console"
             dek="Accounts, ingestion connectors and their run history, and the publishers behind the corpus."
           >
-            <DashboardRegister heading="Accounts" folio={`${USER_ROLES.length} roles`}>
+            <DashboardRegister heading="Accounts" folio={`${USER_ROLES.length} roles`} command={<Link className="index-action" to="/admin/users">Manage users</Link>}>
               {/* Plates come from the role list, so a fourth role needs no edit here. */}
               <CountPlates
                 counts={USER_ROLES.map((role) => ({ term: role, value: data.userCounts[role] }))}

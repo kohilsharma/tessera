@@ -985,3 +985,17 @@ the `role="img"` canvas.
 Verification: focused graph tests (19 passing across the renderer and page), full frontend suite
 (284 passing), frontend build clean. Full backend suite reached 583 passing and 11 skipped with the
 known unrelated #106 clustering medoid-tie flake failing once; no backend files changed.
+
+**#98 — Admin user management.** Added an Admin-only, bounded user register at
+`GET /api/v1/admin/users` with email search, role/status filters and 20-item pages (capped at 50),
+plus detail and partial-update endpoints. Admins can change a role or reversibly deactivate an
+account; there is deliberately no delete path because deletion would cascade owned Briefs and
+flashcards. Deactivated accounts are refused at login and existing bearer tokens are rejected by
+the shared auth middleware. The frontend adds `/admin/users` and `/admin/users/:id`, linked from the
+Accounts register, with list/detail loading, empty, failed and refused states and explicit
+deactivation copy.
+
+Verification: 27 focused auth tests cover authorization, filters, pagination, updates, deactivation,
+token refusal, malformed input and the absent DELETE path. Full frontend suite: 284 passing;
+frontend build and backend typecheck clean. Full backend suite: 587 passing, 11 skipped, with the
+known unrelated #106 clustering medoid tie flake failing once.

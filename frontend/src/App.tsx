@@ -19,6 +19,7 @@ import Briefs from "./pages/Briefs";
 import BriefForm from "./pages/BriefForm";
 import BriefDetail from "./pages/BriefDetail";
 import Study from "./pages/Study";
+import AdminUsers from "./pages/AdminUsers";
 
 // The route table, and nothing else. Chrome comes from AppShell (authenticated
 // routes) and Masthead (sign-in/register/status), applied once here per
@@ -53,6 +54,8 @@ function App() {
         <Route path="/account" element={<Account />} />
         <Route path="/dashboard" element={<DashboardRedirect />} />
         <Route path="/dashboard/:role" element={<RoleDashboard />} />
+        <Route path="/admin/users" element={<AdminUsers />} />
+        <Route path="/admin/users/:id" element={<AdminUsers />} />
         <Route path="/stories" element={<Stories />} />
         <Route path="/stories/:id" element={<StoryDetail />} />
         <Route path="/articles/:id" element={<ArticleDetail />} />

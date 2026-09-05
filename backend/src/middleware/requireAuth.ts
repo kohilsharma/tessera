@@ -34,6 +34,11 @@ export const requireAuth = asyncHandler(async (req, res, next) => {
     return;
   }
 
+  if (!user.active) {
+    res.status(401).json({ error: "This account is deactivated" });
+    return;
+  }
+
   req.user = user;
   next();
 });

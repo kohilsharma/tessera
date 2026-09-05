@@ -35,6 +35,9 @@ export class User {
   @Column({ type: "varchar", default: "system" })
   colorMode!: ColorMode;
 
+  @Column({ type: "boolean", default: true })
+  active!: boolean;
+
   @CreateDateColumn({ type: "timestamptz" })
   createdAt!: Date;
 }

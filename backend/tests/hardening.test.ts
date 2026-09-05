@@ -59,6 +59,7 @@ describe("request observability", () => {
     expect(response.status).toBe(200);
     expect(response.headers["x-request-id"]).toBe("request-test-1");
     const event = info.mock.calls.map(([fields]) => fields as Record<string, unknown>).find((entry) => entry.event === "request.completed");
+    if (!event) throw new Error("request.completed event was not logged");
     expect(event).toMatchObject({ requestId: "request-test-1", method: "GET", resultStatus: 200 });
     expect(event.durationMs).toEqual(expect.any(Number));
   });

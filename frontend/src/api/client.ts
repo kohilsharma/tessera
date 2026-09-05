@@ -17,6 +17,13 @@ async function parseErrorMessage(res: Response, whenUnreadable: string): Promise
   }
 }
 
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 export async function getHealth(): Promise<HealthResponse> {
   const res = await fetch("/api/v1/health");
   if (!res.ok) throw new Error(await parseErrorMessage(res, `Health check failed: ${res.status}`));
@@ -34,8 +41,10 @@ export type UserRole = (typeof USER_ROLES)[number];
 // The half of DESIGN.md §3 a reader controls: the role fixes the theme, the
 // account carries which of its two modes to wear (#75). The vocabulary itself
 // lives in ../theme, beside the code that acts on it.
-export type User = { id: string; email: string; role: UserRole; colorMode: ColorMode };
+export type User = { id: string; email: string; role: UserRole; colorMode: ColorMode; active: boolean };
 export type AuthResponse = { token: string; user: User };
+
+export type AdminUser = User & { createdAt: string };
 
 async function postForToken(path: string, body: unknown, errorMessage: string, animate = false): Promise<AuthResponse> {
   const res = await fetch(path, {
@@ -319,7 +328,7 @@ function toQueryString(params: Record<string, unknown>): string {
 
 async function getJson<T>(path: string, errorMessage: string): Promise<T> {
   const res = await authFetch(path);
-  if (!res.ok) throw new Error(await parseErrorMessage(res, errorMessage));
+  if (!res.ok) throw new ApiError(await parseErrorMessage(res, errorMessage), res.status);
   return res.json();
 }
 
@@ -330,7 +339,7 @@ async function getJson<T>(path: string, errorMessage: string): Promise<T> {
 async function getJsonOrNull<T>(path: string, errorMessage: string): Promise<T | null> {
   const res = await authFetch(path);
   if (res.status === 404) return null;
-  if (!res.ok) throw new Error(await parseErrorMessage(res, errorMessage));
+  if (!res.ok) throw new ApiError(await parseErrorMessage(res, errorMessage), res.status);
   return res.json();
 }
 
@@ -352,6 +361,20 @@ export function removeFromWatchlist(id: string): Promise<void> {
 
 export function getAdminDashboard(): Promise<AdminDashboardData> {
   return getJson("/api/v1/dashboard/admin", "Could not load this dashboard");
+}
+
+export type AdminUserListParams = { page?: number; pageSize?: number; role?: UserRole; active?: boolean; q?: string };
+
+export function getAdminUsers(params: AdminUserListParams = {}): Promise<ListEnvelope<AdminUser>> {
+  return getJson(`/api/v1/admin/users${toQueryString(params)}`, "Could not load users");
+}
+
+export function getAdminUser(id: string): Promise<AdminUser | null> {
+  return getJsonOrNull(`/api/v1/admin/users/${id}`, "Could not load this user");
+}
+
+export function updateAdminUser(id: string, input: Partial<Pick<AdminUser, "role" | "active">>): Promise<AdminUser> {
+  return sendJson("PATCH", `/api/v1/admin/users/${id}`, input, "Could not update this user");
 }
 
 // Keyed exactly as the three dashboard pages key their own query, so what login
@@ -662,7 +685,7 @@ async function sendJson<T>(
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(await parseErrorMessage(res, errorMessage));
+  if (!res.ok) throw new ApiError(await parseErrorMessage(res, errorMessage), res.status);
   if (res.status === 204) return undefined as T;
   return res.json();
 }

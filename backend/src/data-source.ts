@@ -61,6 +61,7 @@ import { StoryMergeRecord } from "./entities/StoryMergeRecord";
 import { WatchlistItem } from "./entities/WatchlistItem";
 import { AddStoryRolePanels1755771000000 } from "./migrations/1755771000000-AddStoryRolePanels";
 import { CreateWatchlistItems1755772000000 } from "./migrations/1755772000000-CreateWatchlistItems";
+import { AddUserActive1755773000000 } from "./migrations/1755773000000-AddUserActive";
 
 const url = process.env.DATABASE_URL;
 
@@ -141,6 +142,7 @@ export const AppDataSource = new DataSource({
     AddEntityTicker1755770000000,
     AddStoryRolePanels1755771000000,
     CreateWatchlistItems1755772000000,
+    AddUserActive1755773000000,
   ],
   synchronize: false,
   logging: false,
